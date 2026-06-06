@@ -1,0 +1,36 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["packages/mechagent-core/src", "packages/mechagent/src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4", "ARG"]
+ignore = ["B008", "UP007", "UP037", "UP045"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_unused_configs = true
+ignore_missing_imports = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = [
+  "packages/mechagent-core/src",
+  "packages/mechagent/src"
+]
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "real_solver: requires a configured CalculiX executable and runs real solves",
+]

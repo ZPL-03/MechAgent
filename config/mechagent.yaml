@@ -1,0 +1,35 @@
+llm:
+  provider: openai_compatible
+  base_url: ${URL}
+  api_key: ${API_KEY}
+  model: ${MODEL_NAME}
+  temperature: 0.1
+
+solver:
+  default: calculix
+  calculix:
+    path: ${CALCULIX_CCX:-ccx}
+    num_cpus: 1
+    timeout: 3600
+
+mesher:
+  default: calculix-inp
+  min_quality: 0.3
+
+knowledge:
+  raw_dir: knowledge/sources
+  external_dir: knowledge/external
+  index_path: knowledge/index.jsonl
+  top_k: 5
+  chunk_size: 1200
+  chunk_overlap: 120
+  bm25_weight: 0.55
+  tfidf_weight: 0.45
+
+orchestrator:
+  mode: dag
+  use_llm_agents: false
+
+output:
+  default_format: markdown
+  output_dir: mechagent_output

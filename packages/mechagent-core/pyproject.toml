@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mechagent-core"
+version = "0.1.0"
+description = "开源 CAE/FEA 工具抽象层，提供求解器、网格器、后处理与验证算例核心接口。"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "MechAgent Contributors" }]
+keywords = ["cae", "fea", "solver-adapter", "calculix", "gmsh", "pydantic"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Topic :: Scientific/Engineering",
+  "Typing :: Typed",
+]
+dependencies = [
+  "pydantic>=2,<3",
+  "gmsh>=4.13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8", "mypy>=1.13"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mechagent.core" = ["py.typed"]
+
+[project.urls]
+Homepage = "https://github.com/ZPL-03/MechAgent"
+Repository = "https://github.com/ZPL-03/MechAgent"
+Documentation = "https://github.com/ZPL-03/MechAgent/tree/main/docs"
+Issues = "https://github.com/ZPL-03/MechAgent/issues"

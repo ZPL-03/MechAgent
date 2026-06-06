@@ -1,0 +1,16 @@
+site_name: MechAgent
+site_description: 自然语言驱动开源 CAE/FEA 工作流的多智能体编排框架
+repo_url: https://github.com/ZPL-03/MechAgent
+repo_name: ZPL-03/MechAgent
+theme:
+  name: material
+  language: zh
+nav:
+  - 首页: index.md
+  - 本地开发配置: local_setup.md
+  - 技术报告: technical_report.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
