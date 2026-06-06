@@ -1,9 +1,23 @@
 # 贡献指南
 
-MechAgent 采用 monorepo 结构，所有 Python 命令统一使用：
+MechAgent 采用 monorepo 结构。贡献者先创建并激活独立 Python 环境，再安装项目依赖：
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe
+py -3.9 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e packages/mechagent-core
+python -m pip install -e "packages/mechagent[dev,docs]"
+```
+
+Conda 环境可使用：
+
+```powershell
+conda create -n mechagent python=3.9 -y
+conda activate mechagent
+python -m pip install --upgrade pip
+python -m pip install -e packages/mechagent-core
+python -m pip install -e "packages/mechagent[dev,docs]"
 ```
 
 本机 `.env` 提供 `URL`、`API_KEY`、`MODEL_NAME` 和 `CALCULIX_CCX`。
@@ -16,23 +30,23 @@ D:/anaconda3/envs/GPT/python.exe
 维护者发布前运行本地完整门禁：
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe scripts/check_env.py
-D:/anaconda3/envs/GPT/python.exe -m ruff format packages tests scripts
-D:/anaconda3/envs/GPT/python.exe -m ruff check packages tests scripts
-D:/anaconda3/envs/GPT/python.exe -m mypy packages scripts tests
-D:/anaconda3/envs/GPT/python.exe -m pytest
-D:/anaconda3/envs/GPT/python.exe scripts/run_benchmarks.py
-D:/anaconda3/envs/GPT/python.exe scripts/run_natural_language_cases.py
-D:/anaconda3/envs/GPT/python.exe scripts/run_llm_smoke.py
-D:/anaconda3/envs/GPT/python.exe scripts/build_knowledge.py
-D:/anaconda3/envs/GPT/python.exe scripts/index_knowledge.py
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli config validate
-D:/anaconda3/envs/GPT/python.exe -m pip check
-D:/anaconda3/envs/GPT/python.exe -m build packages/mechagent-core --no-isolation
-D:/anaconda3/envs/GPT/python.exe -m build packages/mechagent --no-isolation
-D:/anaconda3/envs/GPT/python.exe scripts/check_wheel_install.py
-D:/anaconda3/envs/GPT/python.exe -m mkdocs build --strict
-D:/anaconda3/envs/GPT/python.exe scripts/clean_artifacts.py
+python scripts/check_env.py
+python -m ruff format packages tests scripts
+python -m ruff check packages tests scripts
+python -m mypy packages scripts tests
+python -m pytest
+python scripts/run_benchmarks.py
+python scripts/run_natural_language_cases.py
+python scripts/run_llm_smoke.py
+python scripts/build_knowledge.py
+python scripts/index_knowledge.py
+python -m mechagent.cli config validate
+python -m pip check
+python -m build packages/mechagent-core --no-isolation
+python -m build packages/mechagent --no-isolation
+python scripts/check_wheel_install.py
+python -m mkdocs build --strict
+python scripts/clean_artifacts.py
 ```
 
 真实 CalculiX 求解验证和远端 LLM Agent smoke 验证由本地完整门禁执行。

@@ -2,17 +2,31 @@
 
 ## Python
 
-主流程统一使用：
+MechAgent 支持 Python 3.9 及以上版本。开发和运行建议使用独立虚拟环境。
+
+Windows `venv`：
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe
+py -3.9 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 ```
+
+Conda：
+
+```powershell
+conda create -n mechagent python=3.9 -y
+conda activate mechagent
+python -m pip install --upgrade pip
+```
+
+命令示例默认在已激活的虚拟环境中执行。
 
 ## 项目包
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe -m pip install -e packages/mechagent-core
-D:/anaconda3/envs/GPT/python.exe -m pip install -e "packages/mechagent[dev,docs]"
+python -m pip install -e packages/mechagent-core
+python -m pip install -e "packages/mechagent[dev,docs]"
 ```
 
 ## 外部程序
@@ -41,13 +55,13 @@ CALCULIX_CCX=CalculiX ccx 可执行文件路径
 本地 LLM 远端连接检查：
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli config validate --llm
+python -m mechagent.cli config validate --llm
 ```
 
 该命令依赖 `.env` 中的私密凭证和远端授权状态。开源质量门禁使用本地配置校验：
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli config validate
+python -m mechagent.cli config validate
 ```
 
 `config/mechagent.yaml` 默认 `orchestrator.use_llm_agents: false`。远端 LLM 结构化抽取与
@@ -66,41 +80,41 @@ SDK 单次调用可使用
 `--config` 可指定运行配置文件；`--require-llm` 要求 `.env` 或环境变量中
 `URL`、`API_KEY`、`MODEL_NAME` 均已配置。环境摘要同时报告 `CALCULIX_CCX`
 工具路径键是否存在。
-`--profile portable` 用于公开 CI 和跨机器环境，校验 Python 版本与 Python 依赖，不要求本机
-`.env` 和 CalculiX 可执行文件存在。
+`--profile portable` 用于公开 CI 和跨机器环境，校验 Python 版本与 Python 依赖，并跳过本机
+`.env` 与 CalculiX 可执行文件存在性检查。
 
 ## 自然语言仿真
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
-D:/anaconda3/envs/GPT/python.exe scripts/run_llm_smoke.py
+python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
+python -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
+python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
+python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
+python scripts/run_llm_smoke.py
 ```
 
 ## 验证命令
 
 ```powershell
-D:/anaconda3/envs/GPT/python.exe scripts/check_env.py
-D:/anaconda3/envs/GPT/python.exe scripts/check_env.py --help
-D:/anaconda3/envs/GPT/python.exe -m ruff format packages tests scripts
-D:/anaconda3/envs/GPT/python.exe -m ruff check packages tests scripts
-D:/anaconda3/envs/GPT/python.exe -m mypy packages scripts tests
-D:/anaconda3/envs/GPT/python.exe -m pytest
-D:/anaconda3/envs/GPT/python.exe scripts/run_benchmarks.py
-D:/anaconda3/envs/GPT/python.exe scripts/run_natural_language_cases.py
-D:/anaconda3/envs/GPT/python.exe scripts/run_llm_smoke.py
-D:/anaconda3/envs/GPT/python.exe scripts/build_knowledge.py
-D:/anaconda3/envs/GPT/python.exe scripts/index_knowledge.py
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli config validate
-D:/anaconda3/envs/GPT/python.exe -m mechagent.cli benchmark --json
-D:/anaconda3/envs/GPT/python.exe -m pip check
-D:/anaconda3/envs/GPT/python.exe -m build packages/mechagent-core --no-isolation
-D:/anaconda3/envs/GPT/python.exe -m build packages/mechagent --no-isolation
-D:/anaconda3/envs/GPT/python.exe scripts/check_wheel_install.py
-D:/anaconda3/envs/GPT/python.exe -m mkdocs build --strict
-D:/anaconda3/envs/GPT/python.exe scripts/clean_artifacts.py
+python scripts/check_env.py
+python scripts/check_env.py --help
+python -m ruff format packages tests scripts
+python -m ruff check packages tests scripts
+python -m mypy packages scripts tests
+python -m pytest
+python scripts/run_benchmarks.py
+python scripts/run_natural_language_cases.py
+python scripts/run_llm_smoke.py
+python scripts/build_knowledge.py
+python scripts/index_knowledge.py
+python -m mechagent.cli config validate
+python -m mechagent.cli benchmark --json
+python -m pip check
+python -m build packages/mechagent-core --no-isolation
+python -m build packages/mechagent --no-isolation
+python scripts/check_wheel_install.py
+python -m mkdocs build --strict
+python scripts/clean_artifacts.py
 ```
 
 配置默认工具和能力默认工具均使用工厂注册名称校验；能力默认工具在注册时规范化为工厂注册名。
