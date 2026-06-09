@@ -115,6 +115,7 @@ def _check_executables(config_path: Path = CONFIG_PATH) -> dict[str, Any]:
 
 def _check_packages() -> dict[str, Any]:
     required = [
+        "fastapi",
         "gmsh",
         "httpx",
         "langgraph",
@@ -124,6 +125,7 @@ def _check_packages() -> dict[str, Any]:
         "ruff",
         "mypy",
         "typer",
+        "uvicorn",
         "yaml",
     ]
     optional: list[str] = []

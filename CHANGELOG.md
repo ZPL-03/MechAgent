@@ -6,6 +6,8 @@
 - `mechagent-core`：Pydantic v2 数据模型、`AbstractSolver`、`AbstractMesher`、
   `PostProcessor`、CalculiX 适配器、Gmsh 网格器和标准验证算例。
 - `mechagent`：SDK、Typer CLI、配置模型、LLM 后端、知识库索引和 Agent 编排层。
+- MechAgent Studio：FastAPI 本地服务、React/TypeScript/Vite 前端工作台、Agent DAG、
+  结果 SVG 视口、指标、阶段产物、摘要 JSON 和 Markdown 报告。
 - 多 Agent 编排：顺序工作流与 LangGraph DAG，节点为 Planner、Designer、
   MeshAgent、SolverAgent、PostProcAgent、AnalystAgent、ReporterAgent。
 - 能力注册表：Planner 生成标准化 `SimulationIntent`，`TaskItem` 携带结构化意图，
@@ -20,6 +22,7 @@
 - 本机配置：公开配置使用 `${CALCULIX_CCX:-ccx}`，本机 `.env` 将 `CALCULIX_CCX`
   指向 `D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe`，无需系统 PATH。
 - LLM：`httpx` 直连 OpenAI 兼容 Chat Completions 接口，`.env` 注入 URL、API_KEY、MODEL_NAME。
+- Studio 前端构建：`apps/mechagent-studio` 使用 Node.js 构建，静态资源随 `mechagent` 包发布。
 - 环境检查：`check_env.py` 校验 Python 执行器、配置解析后的 CalculiX 路径、依赖包和
   `.env` 三个 LLM 键。
 - 工程质量：`ruff check`、`mypy --strict`、`pytest`、真实标准验证、自然语言案例、

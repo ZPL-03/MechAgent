@@ -135,12 +135,25 @@ if "Requires-Dist: mechagent-core==0.1.0" not in app_metadata:
     raise AssertionError("mechagent wheel 缺少 mechagent-core 精确依赖。")
 if "Requires-Dist: langgraph>=0.2" not in app_metadata:
     raise AssertionError("mechagent wheel 缺少 langgraph 依赖。")
+if "Requires-Dist: fastapi" not in app_metadata:
+    raise AssertionError("mechagent wheel 缺少 fastapi 依赖。")
+if "Requires-Dist: uvicorn" not in app_metadata:
+    raise AssertionError("mechagent wheel 缺少 uvicorn 依赖。")
 if "mechagent = mechagent.cli:app" not in app_entry_points:
     raise AssertionError("mechagent wheel 缺少 CLI entry point。")
 if "Name: mechagent-core" not in core_metadata:
     raise AssertionError("mechagent-core wheel 缺少包名元数据。")
 if "Requires-Dist: gmsh>=4.13" not in core_metadata:
     raise AssertionError("mechagent-core wheel 缺少 gmsh 依赖。")
+
+studio_index = target / "mechagent" / "ui" / "static" / "index.html"
+studio_assets = target / "mechagent" / "ui" / "static" / "assets"
+if not studio_index.exists():
+    raise AssertionError(f"缺少 Studio HTML: {studio_index}")
+if not any(studio_assets.glob("*.js")):
+    raise AssertionError(f"缺少 Studio JS 资源: {studio_assets}")
+if not any(studio_assets.glob("*.css")):
+    raise AssertionError(f"缺少 Studio CSS 资源: {studio_assets}")
 
 params = tc01_model_params()
 print(json.dumps({
@@ -160,6 +173,8 @@ print(json.dumps({
     "app_dist_info": str(app_dist),
     "core_dist_info": str(core_dist),
     "app_entry_points": str(app_dist / "entry_points.txt"),
+    "studio_index": str(studio_index),
+    "studio_asset_count": len(list(studio_assets.iterdir())),
 }, ensure_ascii=False))
 """
 

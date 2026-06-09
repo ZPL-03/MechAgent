@@ -43,6 +43,7 @@ def main() -> int:
     ]
     fixed_paths = [
         REPO_ROOT / "mechagent_output",
+        REPO_ROOT / "apps/mechagent-studio/node_modules",
         REPO_ROOT / "knowledge/external",
         REPO_ROOT / "knowledge/index.jsonl",
         REPO_ROOT / "site",

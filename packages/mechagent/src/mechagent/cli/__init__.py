@@ -14,6 +14,7 @@ from mechagent.config import config_to_public_dict
 from mechagent.core.validation import run_core_benchmarks
 from mechagent.knowledge import build_index, query_index, standardize_documents
 from mechagent.llm import LLMConfig, check_connection
+from mechagent.ui import run_studio
 
 app = typer.Typer(help="MechAgent 命令行工具。")
 config_app = typer.Typer(help="配置管理。")
@@ -21,6 +22,18 @@ knowledge_app = typer.Typer(help="知识库管理。")
 app.add_typer(config_app, name="config")
 app.add_typer(knowledge_app, name="knowledge")
 console = Console()
+
+
+@app.command()
+def studio(
+    config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
+    host: str = typer.Option("127.0.0.1", help="Studio 服务监听地址。"),
+    port: int = typer.Option(8765, min=1, max=65535, help="Studio 服务监听端口。"),
+    open_browser: bool = typer.Option(False, "--open-browser", help="启动后打开浏览器。"),
+) -> None:
+    """启动 MechAgent Studio 工程工作台。"""
+
+    run_studio(host=host, port=port, config=config, open_browser=open_browser)
 
 
 @app.command()

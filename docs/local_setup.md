@@ -29,6 +29,18 @@ python -m pip install -e packages/mechagent-core
 python -m pip install -e "packages/mechagent[dev,docs]"
 ```
 
+## Studio 前端
+
+MechAgent Studio 的后端入口由 Python 包提供。Node.js 只用于构建 `apps/mechagent-studio`
+下的 React/TypeScript 前端源码。
+
+```powershell
+npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+npm --prefix apps/mechagent-studio run build
+```
+
+构建产物写入 `packages/mechagent/src/mechagent/ui/static`，随 `mechagent` 包一起发布。
+
 ## 外部程序
 
 | 程序 | 路径或来源 | 状态 |
@@ -86,6 +98,7 @@ SDK 单次调用可使用
 ## 自然语言仿真
 
 ```powershell
+python -m mechagent.cli studio --open-browser
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
@@ -98,6 +111,8 @@ python scripts/run_llm_smoke.py
 ```powershell
 python scripts/check_env.py
 python scripts/check_env.py --help
+npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+npm --prefix apps/mechagent-studio run build
 python -m ruff format packages tests scripts
 python -m ruff check packages tests scripts
 python -m mypy packages scripts tests

@@ -25,12 +25,22 @@ python -m pip install -e "packages/mechagent[dev,docs]"
 或通过环境变量指定 CalculiX 可执行文件。
 `.env.example` 保留公开模板值。
 
-公开 PR 便携门禁由 GitHub Actions 执行，使用 Python 3.9、`scripts/check_env.py --profile portable`
-和 `pytest -m "not real_solver"`，不依赖本机 D 盘路径、CalculiX 可执行文件或远端 LLM 凭证。
+Studio 前端源码使用 Node.js 构建。构建产物写入 Python 包的静态资源目录：
+
+```powershell
+npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+npm --prefix apps/mechagent-studio run build
+```
+
+公开 PR 便携门禁由 GitHub Actions 执行，使用 Python 3.9、Node.js 22、
+`scripts/check_env.py --profile portable`、Studio 前端构建和
+`pytest -m "not real_solver"`，不依赖本机 D 盘路径、CalculiX 可执行文件或远端 LLM 凭证。
 维护者发布前运行本地完整门禁：
 
 ```powershell
 python scripts/check_env.py
+npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+npm --prefix apps/mechagent-studio run build
 python -m ruff format packages tests scripts
 python -m ruff check packages tests scripts
 python -m mypy packages scripts tests

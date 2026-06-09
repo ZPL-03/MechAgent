@@ -1,11 +1,12 @@
 # mechagent
 
 `mechagent` 是 MechAgent 的多智能体主框架包，提供 SDK、CLI、LLM 后端、知识库和
-Agent 编排层。
+Agent 编排层，并提供 MechAgent Studio 本地工程工作台。
 
 ## 命令
 
 ```powershell
+python -m mechagent.cli studio --open-browser
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --json
@@ -49,3 +50,11 @@ Designer 在 schema 校验前归一化中文几何类型、载荷类型、边界
 Agent trace 会记录远端响应或脱敏后的调用错误。
 SDK/CLI JSON 摘要只输出 trace 元数据、错误状态和 prompt/response 字符数，不输出原始
 prompt 或 response。
+
+## Studio
+
+Studio 后端使用 FastAPI 与 Uvicorn，由 `python -m mechagent.cli studio` 启动。
+前端使用 React、TypeScript、Vite、React Flow 和 Markdown 渲染组件，构建后的静态资源位于
+`mechagent/ui/static` 并随包发布。界面展示自然语言请求、LLM Agent 开关、Agent DAG、求解指标、
+阶段产物、结果 SVG、摘要 JSON 和 Markdown 报告。结果 SVG 由 Python 后处理层根据求解摘要、
+`.inp` 网格和 `.frd` 位移场生成。

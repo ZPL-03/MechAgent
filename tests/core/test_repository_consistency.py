@@ -170,9 +170,9 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     technical_report = Path("docs/technical_report.md").read_text(encoding="utf-8")
 
     assert len(STATIC_LANGUAGE_CASES) == 20
-    assert "测试集包含 337 个测试" in readme
+    assert "测试集包含 344 个测试" in readme
     assert "完整测试范围、质量结果和清理策略见" in readme
-    assert "`pytest`：337 passed" in technical_report
+    assert "`pytest`：344 passed" in technical_report
     for coverage_label in [
         "插件主结果字段推断",
         "插件数值字符串解析",
@@ -324,6 +324,10 @@ def test_ci_workflow_matches_portable_quality_gate() -> None:
     required_commands = [
         "actions/setup-python@v6",
         'python-version: "3.9"',
+        "actions/setup-node@v6",
+        'node-version: "22"',
+        "npm --prefix apps/mechagent-studio ci --no-audit --no-fund",
+        "npm --prefix apps/mechagent-studio run build",
         "python scripts/check_env.py --profile portable",
         "python -m ruff format --check packages tests scripts",
         "python -m ruff check packages tests scripts",
@@ -417,8 +421,33 @@ def test_packages_publish_pep561_type_markers() -> None:
 
     assert Path("packages/mechagent/src/mechagent/py.typed").exists()
     assert Path("packages/mechagent-core/src/mechagent/core/py.typed").exists()
-    assert 'mechagent = ["py.typed"]' in app_pyproject
+    assert 'mechagent = ["py.typed", "ui/static/*", "ui/static/assets/*"]' in app_pyproject
     assert '"mechagent.core" = ["py.typed"]' in core_pyproject
+
+
+def test_public_docs_describe_studio_surface() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    package_readme = Path("packages/mechagent/README.md").read_text(encoding="utf-8")
+    technical_report = Path("docs/technical_report.md").read_text(encoding="utf-8")
+    local_setup = Path("docs/local_setup.md").read_text(encoding="utf-8")
+    docs_index = Path("docs/index.md").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/pr.yml").read_text(encoding="utf-8")
+
+    for text in (readme, package_readme, local_setup, docs_index):
+        assert "python -m mechagent.cli studio --open-browser" in text
+
+    assert "FastAPI + React + TypeScript + Vite 工作台" in readme
+    assert "Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`" in technical_report
+    assert "GET /api/health" in technical_report
+    assert "POST /api/run" in technical_report
+    assert "`packages/mechagent/src/mechagent/ui/static`" in technical_report
+    assert "React Flow" in technical_report
+    assert "结果 SVG 由 Python 后处理层" in package_readme
+    assert "apps/mechagent-studio/node_modules/" in Path(".gitignore").read_text(encoding="utf-8")
+    assert "apps/mechagent-studio/node_modules" in Path("scripts/clean_artifacts.py").read_text(
+        encoding="utf-8"
+    )
+    assert "actions/setup-node@v6" in workflow
 
 
 def test_package_metadata_declares_open_source_release_fields() -> None:
@@ -477,6 +506,7 @@ def _iter_text_files(root: Path) -> list[Path]:
     skipped_parts = {
         ".git",
         ".mypy_cache",
+        "node_modules",
         ".pytest_cache",
         ".ruff_cache",
         "__pycache__",

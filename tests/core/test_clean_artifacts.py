@@ -22,6 +22,11 @@ def test_clean_artifacts_uses_repository_root(
     (repo / "case.frd").write_text("x", encoding="utf-8")
     (repo / "mechagent_output").mkdir()
     (repo / "mechagent_output" / "report.md").write_text("x", encoding="utf-8")
+    (repo / "apps" / "mechagent-studio" / "node_modules").mkdir(parents=True)
+    (repo / "apps" / "mechagent-studio" / "node_modules" / "cache.txt").write_text(
+        "x",
+        encoding="utf-8",
+    )
     (repo / "knowledge" / "sources").mkdir(parents=True)
     (repo / "knowledge" / "sources" / "seed.md").write_text("x", encoding="utf-8")
     (repo / "knowledge" / "external").mkdir()
@@ -38,6 +43,7 @@ def test_clean_artifacts_uses_repository_root(
     assert not (repo / "build").exists()
     assert not (repo / "case.frd").exists()
     assert not (repo / "mechagent_output").exists()
+    assert not (repo / "apps" / "mechagent-studio" / "node_modules").exists()
     assert not (repo / "knowledge" / "external").exists()
     assert not (repo / "knowledge" / "index.jsonl").exists()
     assert (repo / "knowledge" / "sources" / "seed.md").exists()
