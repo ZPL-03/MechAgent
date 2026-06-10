@@ -1,42 +1,40 @@
 # MechAgent 文档
 
-MechAgent 提供自然语言到开源 CAE/FEA 工作流的多智能体编排闭环。文档覆盖本机配置、
-Studio 工作台、运行方式、Agent 通信、标准验证和工程质量门禁。
+MechAgent 提供自然语言到开源 CAE/FEA 工作流的多智能体编排闭环。文档覆盖 Studio 工作台、CLI、SDK、Agent 通信、能力注册、工具接入、验证算例、LLM 链路、本地环境和发布质量门禁。
 
 ## 文档页面
 
-- [本地开发配置](local_setup.md)
-- [技术报告](technical_report.md)
+- [本地开发配置](local_setup.md)：Python 环境、项目包、Studio 前端、CalculiX、Gmsh、LLM 和验证命令。
+- [产品蓝图](product_blueprint.md)：产品定位、系统分层、Agent 协作、3D 可视化目标、进度状态面板、质量门槛和路线图。
+- [技术报告](technical_report.md)：实现架构、核心契约、验证证据、质量结果和清理策略。
 
-## 技术细节索引
-
-完整技术细节集中在技术报告中：
-
-- 项目定位、包结构和分层架构见“项目定位”“包结构”“分层架构”。
-- LangGraph 与顺序工作流、Agent 间通信和错误记录见“LangGraph 编排”“Agent 通信机制”。
-- Studio UI、FastAPI 服务、React/Vite 前端和结果可视化见“MechAgent Studio”。
-- 自然语言解析、能力注册、LLM 结构化抽取和插件扩展契约见“自然语言任务解析”。
-- `ModelParams`、求解摘要状态、后处理摘要和失败优先规则见“核心 Schema”。
-- CalculiX、Gmsh、网格质量、`.frd` 后处理和解析参考公式见“CalculiX 适配器”“解析参考公式”。
-- TC-01 至 TC-05、二十个自然语言案例、质量门禁和清理范围见“标准验证”“独立自然语言测试案例”“质量结果”“清理策略”。
-
-## 自然语言工作流
+## 快速入口
 
 ```powershell
 python -m mechagent.cli studio --open-browser
+python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
+python scripts/run_llm_smoke.py
 ```
 
-## Agent DAG
+## 技术细节索引
+
+- 产品目标、用户入口、Studio 体验、能力路线和 3D 可视化目标见“产品蓝图”。
+- 包结构、分层架构、运行前预检、FastAPI Studio 服务、React/Vite 前端和可视化数据生成见“技术报告”的“项目定位”“包结构”“MechAgent Studio”。
+- LangGraph DAG、顺序工作流、结构化通信和错误记录见“技术报告”的“LangGraph 编排”“Agent 通信机制”。
+- 自然语言解析、能力注册、LLM 结构化抽取和插件扩展契约见“技术报告”的“自然语言任务解析”“LLM 与知识库”。
+- `ModelParams`、求解摘要状态、后处理摘要和失败优先规则见“技术报告”的“核心 Schema”。
+- CalculiX、Gmsh、网格质量、`.frd` 后处理、带孔薄板网格和解析参考公式见“技术报告”的“CalculiX 适配器”“解析参考公式”。
+- TC-01 至 TC-05、二十六个独立自然语言案例、质量门禁和清理范围见“技术报告”的“标准验证”“独立自然语言测试案例”“质量结果”“清理策略”。
+
+## 工作流编排图
 
 ```text
 Planner -> Designer -> MeshAgent -> SolverAgent -> PostProcAgent -> AnalystAgent -> ReporterAgent
 ```
 
-`config/mechagent.yaml` 的 `orchestrator.mode: dag` 使 SDK 与 CLI 默认使用
-`packages/mechagent/src/mechagent/orchestrator/graph.py` 中的 LangGraph `StateGraph`。
-顺序工作流使用同一组 Agent、同一套 Pydantic schema 和同一求解配置。
+`config/mechagent.yaml` 的 `orchestrator.mode: dag` 使 SDK 与 CLI 默认使用 `packages/mechagent/src/mechagent/orchestrator/graph.py` 中的 LangGraph `StateGraph`。顺序工作流使用同一组编排节点、同一套 Pydantic schema 和同一求解配置。
 
 ## 标准验证
 
@@ -68,6 +66,7 @@ python scripts/run_natural_language_cases.py
 python scripts/run_llm_smoke.py
 python scripts/build_knowledge.py
 python scripts/index_knowledge.py
+python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析" --json
 python -m mechagent.cli config validate
 python -m pip check
 python -m build packages/mechagent-core --no-isolation

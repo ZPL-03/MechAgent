@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from typing import Any, Optional
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mechagent.redaction import redact_sensitive_text
+
+_MAX_HTTP_ATTEMPTS = 3
+_HTTP_RETRY_BASE_DELAY = 0.8
+_HTTP_TIMEOUT_SECONDS = 60.0
+_MIN_HTTP_TIMEOUT_SECONDS = 0.1
 
 
 class LLMConfig(BaseModel):
@@ -38,12 +44,22 @@ class LLMConfig(BaseModel):
     api_key: str = ""
     model: str = ""
     temperature: float = Field(default=0.1, ge=0, le=2)
+    timeout_seconds: float = Field(default=_HTTP_TIMEOUT_SECONDS, ge=_MIN_HTTP_TIMEOUT_SECONDS)
+    max_attempts: int = Field(default=_MAX_HTTP_ATTEMPTS, ge=1)
 
     @field_validator("temperature")
     @classmethod
     def _temperature_must_be_finite(cls, value: float) -> float:
         if not math.isfinite(value):
             msg = "llm.temperature 必须是有限数值。"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _timeout_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            msg = "llm.timeout_seconds 必须是有限数值。"
             raise ValueError(msg)
         return value
 
@@ -193,19 +209,7 @@ def _post_chat_completion(prompt: str, config: LLMConfig, *, use_json_mode: bool
     if use_json_mode:
         payload["response_format"] = {"type": "json_object"}
 
-    try:
-        response = httpx.post(
-            _chat_completions_url(config.base_url),
-            headers={
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=60.0,
-        )
-    except httpx.RequestError as exc:
-        msg = f"LLM 网络请求失败: {exc}"
-        raise RuntimeError(msg) from exc
+    response = _post_with_retries(config, payload)
 
     if response.status_code >= 400:
         body = _redact_secret(response.text, config)
@@ -220,6 +224,49 @@ def _post_chat_completion(prompt: str, config: LLMConfig, *, use_json_mode: bool
         msg = "LLM 响应 JSON 必须是对象。"
         raise RuntimeError(msg)
     return data
+
+
+def _post_with_retries(config: LLMConfig, payload: dict[str, Any]) -> httpx.Response:
+    last_request_error: httpx.RequestError | None = None
+    last_retryable_response: httpx.Response | None = None
+    url = _chat_completions_url(config.base_url)
+    headers = {
+        "Authorization": f"Bearer {config.api_key}",
+        "Content-Type": "application/json",
+    }
+    for attempt in range(1, config.max_attempts + 1):
+        try:
+            response = httpx.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=config.timeout_seconds,
+            )
+        except httpx.RequestError as exc:
+            last_request_error = exc
+            if attempt >= config.max_attempts:
+                break
+            _sleep_before_retry(attempt)
+            continue
+        if not _is_retryable_status(response.status_code) or attempt >= config.max_attempts:
+            return response
+        last_retryable_response = response
+        _sleep_before_retry(attempt)
+    if last_request_error is not None:
+        msg = f"LLM 网络请求失败: {last_request_error}"
+        raise RuntimeError(msg) from last_request_error
+    if last_retryable_response is not None:
+        return last_retryable_response
+    msg = "LLM 网络请求未返回响应。"
+    raise RuntimeError(msg)
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
+
+
+def _sleep_before_retry(attempt: int) -> None:
+    time.sleep(_HTTP_RETRY_BASE_DELAY * attempt)
 
 
 def _chat_completions_url(base_url: str) -> str:

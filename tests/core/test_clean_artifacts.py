@@ -20,6 +20,10 @@ def test_clean_artifacts_uses_repository_root(
     (repo / "build").mkdir()
     (repo / "build" / "artifact.txt").write_text("x", encoding="utf-8")
     (repo / "case.frd").write_text("x", encoding="utf-8")
+    (repo / ".playwright-mcp").mkdir()
+    (repo / ".playwright-mcp" / "snapshot.yml").write_text("x", encoding="utf-8")
+    (repo / "output" / "playwright").mkdir(parents=True)
+    (repo / "output" / "playwright" / "screenshot.png").write_text("x", encoding="utf-8")
     (repo / "mechagent_output").mkdir()
     (repo / "mechagent_output" / "report.md").write_text("x", encoding="utf-8")
     (repo / "apps" / "mechagent-studio" / "node_modules").mkdir(parents=True)
@@ -42,6 +46,8 @@ def test_clean_artifacts_uses_repository_root(
     assert result == 0
     assert not (repo / "build").exists()
     assert not (repo / "case.frd").exists()
+    assert not (repo / ".playwright-mcp").exists()
+    assert not (repo / "output").exists()
     assert not (repo / "mechagent_output").exists()
     assert not (repo / "apps" / "mechagent-studio" / "node_modules").exists()
     assert not (repo / "knowledge" / "external").exists()
@@ -58,3 +64,22 @@ def test_clean_artifacts_rejects_paths_outside_repository(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="不在仓库目录内"):
         clean_artifacts._ensure_inside_repo(outside)
+
+
+def test_clean_artifacts_scan_tolerates_vanished_paths(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cache = repo / ".pytest_cache"
+    cache.mkdir()
+
+    class VanishingRoot:
+        def rglob(self, _pattern: str):
+            yield cache
+            raise FileNotFoundError("vanished")
+
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", VanishingRoot())
+
+    assert list(clean_artifacts._iter_repo_paths(".pytest_cache")) == [cache]

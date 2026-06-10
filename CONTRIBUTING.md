@@ -60,3 +60,9 @@ python scripts/clean_artifacts.py
 ```
 
 真实 CalculiX 求解验证和远端 LLM Agent smoke 验证由本地完整门禁执行。
+
+自然语言验证示例：
+
+```powershell
+python -m mechagent.cli run "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+```

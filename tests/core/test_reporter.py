@@ -88,7 +88,7 @@ def test_reporter_escapes_agent_trace_table_text() -> None:
 
     report = ReporterAgent().render([record])
 
-    assert "| TASK\\|1 | Planner\\|Agent | True | provider \\| error second line |" in report
+    assert "| TASK\\|1 | Planner\\|Agent | 启用 | provider \\| error second line |" in report
 
 
 def test_reporter_redacts_sensitive_tokens_from_trace_and_error_messages(
@@ -153,4 +153,66 @@ def test_reporter_render_with_trace_returns_reporter_audit_record() -> None:
     assert report.startswith("# MechAgent 仿真报告")
     assert trace.agent == "ReporterAgent"
     assert trace.used is False
-    assert "| REPORT | ReporterAgent | False | ok |" in report
+    assert "| REPORT | 报告输出 | 未启用 | ok |" in report
+
+
+def test_reporter_adds_llm_engineering_interpretation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_completion(prompt: str, _config: object) -> str:
+        assert "solver_result" in prompt
+        assert "post_summary" in prompt
+        assert "planner_llm_trace" not in prompt
+        assert "solver_llm_trace" not in prompt
+        assert "Agent trace" in prompt
+        return (
+            '{"executive_summary":["最大位移处于当前线弹性静力模型的可接受范围。"],'
+            '"result_interpretation":["位移云图用于判断薄板整体弯曲趋势。"],'
+            '"mesh_and_solver_assessment":["网格包含真实单元拓扑，求解器输出可用于后处理。"],'
+            '"boundary_load_interpretation":["四边简支和向下压力决定主弯曲形态。"],'
+            '"limitations":["当前结论限于线弹性小变形静力假设。"],'
+            '"recommended_next_steps":["复核孔边应力集中并进行网格收敛检查。"]}'
+        )
+
+    monkeypatch.setattr("mechagent.orchestrator.llm_advisor.completion", fake_completion)
+    config = MechAgentConfig(
+        orchestrator=OrchestratorSettings(use_llm_agents=True),
+        llm=LLMSettings(base_url="https://example.com/v1", api_key="key", model="demo"),
+    )
+    record = TaskRunRecord(
+        task=TaskItem(
+            task_id="TASK_1",
+            case_id="STATIC-PERFORATED-PLATE",
+            title="多孔薄板",
+            planner_llm_trace=AgentLLMTrace(
+                agent="Planner",
+                used=True,
+                prompt="planner prompt",
+                response="planner response",
+            ),
+        ),
+        solver_result=SolverRunSummary(
+            success=True,
+            passed=False,
+            model_case_id="STATIC-PERFORATED-PLATE",
+            quantity="max_displacement",
+            unit="mm",
+            predicted=0.031,
+            solver="calculix",
+            verification_status="unverified",
+            solver_llm_trace=AgentLLMTrace(
+                agent="SolverAgent",
+                used=True,
+                prompt="solver prompt",
+                response="solver response",
+            ),
+        ),
+    )
+
+    report, trace = ReporterAgent(config).render_with_trace([record])
+
+    assert trace.used is True
+    assert trace.error is None
+    assert "## LLM 工程解释" in report
+    assert "最大位移处于当前线弹性静力模型的可接受范围" in report
+    assert "复核孔边应力集中并进行网格收敛检查" in report

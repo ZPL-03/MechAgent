@@ -261,8 +261,15 @@ def _normalize_structural_static_model_params(
             else "cantilever_tip_force"
         )
     elif geometry_type is GeometryType.PLATE:
-        case_id = "STATIC-PLATE"
-        load_case = "simply_supported_pressure"
+        if (
+            "hole_radius" in params.geometry.dimensions
+            or params.geometry.dimensions.get("hole_count", 0.0) >= 1.0
+        ):
+            case_id = "STATIC-PERFORATED-PLATE"
+            load_case = "perforated_plate_pressure"
+        else:
+            case_id = "STATIC-PLATE"
+            load_case = "simply_supported_pressure"
     elif geometry_type is GeometryType.SOLID:
         case_id = "STATIC-SOLID"
         load_case = (
@@ -298,7 +305,7 @@ register_capability(
         mesher_name="calculix-inp",
         request_splitter=split_static_simulation_requests,
         planner_description=(
-            "结构线弹性静力分析，覆盖梁、矩形板和矩形实体块的几何建模、网格、求解、后处理和报告。"
+            "结构线弹性静力分析，覆盖梁、矩形板、单孔与多孔薄板和矩形实体块的几何建模、网格、求解、后处理和报告。"
         ),
         planner_keywords=(
             "static",
@@ -306,19 +313,28 @@ register_capability(
             "beam",
             "plate",
             "solid",
+            "hole",
+            "perforated",
             "静力",
             "结构",
             "梁",
             "板",
+            "开孔",
+            "圆孔",
+            "多孔",
             "实体",
             "挠度",
             "位移",
             "应力",
         ),
         example_requests=(
-            "钢制悬臂梁，长度2m，截面100mmx200mm，左端固定，右端向下10kN集中力。",
-            "矩形板四边简支，承受均布压力，求中心挠度。",
-            "长方体实体左端固定，右端端面轴向拉伸。",
+            "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应",
+            "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力的静力响应",
+            "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应",
+            "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应",
+            "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应",
+            "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应",
+            "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析",
         ),
         missing_field_detector=detect_static_missing_fields,
         execution_validator=ensure_static_execution_contract,
@@ -327,10 +343,18 @@ register_capability(
             "梁使用 dimensions.length/width/height、B31 单元、root 固支，"
             "载荷为 tip 集中力或 span 线载荷；"
             "板使用 dimensions.length/width/thickness、S4 单元、all_edges 简支和 top_surface 压力；"
+            "带圆孔薄板在 plate 尺寸中提供 hole_radius、hole_center_x 和 hole_center_y；"
+            "多孔薄板提供 hole_count 以及 hole_1_radius、hole_1_center_x、"
+            "hole_1_center_y 等编号字段；"
             "实体使用 dimensions.length/width/height、C3D8R 单元、root 固定，"
             "载荷为 end_face 轴向压力或端面合力。"
         ),
-        model_case_ids=("STATIC-BEAM", "STATIC-PLATE", "STATIC-SOLID"),
+        model_case_ids=(
+            "STATIC-BEAM",
+            "STATIC-PLATE",
+            "STATIC-PERFORATED-PLATE",
+            "STATIC-SOLID",
+        ),
         model_normalizer=_normalize_structural_static_model_params,
     )
 )

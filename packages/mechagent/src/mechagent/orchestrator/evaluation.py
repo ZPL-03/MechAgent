@@ -115,6 +115,17 @@ def _evaluate_static_plate_case(context: ResultEvaluationContext) -> dict[str, A
     model_params = context.model_params
     solver_result = context.solver_result
     dimensions = model_params.geometry.dimensions
+    if model_params.load_case == "perforated_plate_pressure":
+        predicted = float(
+            solver_result.get("max_displacement_mm", solver_result["center_deflection_mm"])
+        )
+        return _unreferenced_result(
+            context,
+            predicted=predicted,
+            quantity="max_displacement",
+            unit="mm",
+        )
+
     predicted = float(solver_result["center_deflection_mm"])
     if model_params.load_case != "simply_supported_pressure":
         return _unreferenced_result(

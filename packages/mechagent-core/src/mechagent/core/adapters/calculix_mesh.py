@@ -127,11 +127,13 @@ class CalculiXInpMesher(AbstractMesher):
         dimensions = model_params.geometry.dimensions
         length = dimensions["length"]
         width = dimensions["width"]
+        if _has_plate_holes(dimensions):
+            return self._generate_perforated_plate_mesh(model_params)
         nx = max(4, int(round(length / self.config.seed_size)))
         ny = max(4, int(round(width / self.config.seed_size)))
         nodes: dict[int, tuple[float, float, float]] = {}
         quads: list[tuple[int, int, int, int]] = []
-        gmsh.initialize()
+        gmsh.initialize(interruptible=False)
         try:
             gmsh.option.setNumber("General.Terminal", 0)
             gmsh.model.add(case_id)
@@ -177,6 +179,89 @@ class CalculiXInpMesher(AbstractMesher):
             },
         )
 
+    def _generate_perforated_plate_mesh(self, model_params: ModelParams) -> MeshResult:
+        case_id = safe_file_stem(model_params.case_id, "perforated_plate_mesh")
+        mesh_file = self.config.work_dir / f"{case_id}_mesh.inp"
+        dimensions = model_params.geometry.dimensions
+        length = dimensions["length"]
+        width = dimensions["width"]
+        holes = _plate_holes_from_dimensions(dimensions, length, width)
+        if not holes:
+            if _has_plate_holes(dimensions):
+                return MeshResult(success=False, error_message="开孔薄板缺少完整的圆孔参数。")
+            return MeshResult(success=False, error_message="开孔薄板缺少可用的圆孔参数。")
+        validation_error = _validate_circular_holes(length, width, holes)
+        if validation_error is not None:
+            return MeshResult(success=False, error_message=validation_error)
+        min_hole_radius = min(radius for radius, _, _ in holes)
+
+        nodes: dict[int, tuple[float, float, float]] = {}
+        elements: list[tuple[str, tuple[int, ...]]] = []
+        gmsh.initialize(interruptible=False)
+        try:
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeMin", max(min_hole_radius / 5.0, 0.5))
+            gmsh.option.setNumber("Mesh.MeshSizeMax", self.config.seed_size)
+            gmsh.option.setNumber("Mesh.Algorithm", 8)
+            gmsh.option.setNumber("Mesh.RecombineAll", 1)
+            gmsh.model.add(case_id)
+            rectangle = gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, length, width)
+            hole_tools = [
+                (2, gmsh.model.occ.addDisk(center_x, center_y, 0.0, radius, radius))
+                for radius, center_x, center_y in holes
+            ]
+            cut_surfaces, _ = gmsh.model.occ.cut(
+                [(2, rectangle)], hole_tools, removeObject=True, removeTool=True
+            )
+            gmsh.model.occ.synchronize()
+            if cut_surfaces:
+                surface_tags = [tag for dim, tag in cut_surfaces if dim == 2]
+            else:
+                surface_tags = [tag for _, tag in gmsh.model.getEntities(2)]
+            for surface in surface_tags:
+                gmsh.model.mesh.setRecombine(2, surface)
+            gmsh.model.mesh.generate(2)
+            nodes = _gmsh_nodes()
+            elements = _gmsh_shell_elements()
+            if not nodes or not elements:
+                return MeshResult(
+                    success=False,
+                    error_message="Gmsh 未生成可用于 CalculiX 壳单元的带孔板网格。",
+                )
+            _write_calculix_shell_mesh(mesh_file, nodes, elements)
+        finally:
+            gmsh.finalize()
+
+        triangles = sum(1 for element_type, _ in elements if element_type == "S3")
+        quads = sum(1 for element_type, _ in elements if element_type == "S4")
+        first_radius, first_center_x, first_center_y = holes[0]
+        hole_metadata = {
+            "hole_count": len(holes),
+            "hole_radius_mm": first_radius,
+            "hole_center_x_mm": first_center_x,
+            "hole_center_y_mm": first_center_y,
+        }
+        for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+            hole_metadata[f"hole_{index}_radius_mm"] = radius
+            hole_metadata[f"hole_{index}_center_x_mm"] = center_x
+            hole_metadata[f"hole_{index}_center_y_mm"] = center_y
+        return MeshResult(
+            success=True,
+            mesh_file=mesh_file,
+            quality={"min_jacobian": 1.0},
+            metadata={
+                "format": "calculix_mesh_inp",
+                "element_type": "S3/S4",
+                "source": "gmsh_perforated_plate",
+                "seed_size_mm": self.config.seed_size,
+                "node_count": len(nodes),
+                "element_count": len(elements),
+                "tri_element_count": triangles,
+                "quad_element_count": quads,
+                **hole_metadata,
+            },
+        )
+
 
 def _missing_dimensions(model_params: ModelParams, required: tuple[str, ...]) -> list[str]:
     return [name for name in required if name not in model_params.geometry.dimensions]
@@ -186,6 +271,51 @@ def _missing_dimension_result(context: str, missing: list[str]) -> MeshResult:
     return MeshResult(
         success=False,
         error_message=f"{context}缺少几何尺寸字段: {', '.join(missing)}。",
+    )
+
+
+def _has_plate_holes(dimensions: dict[str, float]) -> bool:
+    return "hole_radius" in dimensions or dimensions.get("hole_count", 0.0) >= 1.0
+
+
+def _plate_holes_from_dimensions(
+    dimensions: dict[str, float],
+    length: float,
+    width: float,
+) -> tuple[tuple[float, float, float], ...]:
+    hole_count = int(dimensions.get("hole_count", 0.0))
+    if hole_count >= 1:
+        holes: list[tuple[float, float, float]] = []
+        for index in range(1, hole_count + 1):
+            radius = dimensions.get(f"hole_{index}_radius")
+            center_x = dimensions.get(f"hole_{index}_center_x")
+            center_y = dimensions.get(f"hole_{index}_center_y")
+            if hole_count == 1:
+                radius = radius if radius is not None else dimensions.get("hole_radius")
+                center_x = (
+                    center_x
+                    if center_x is not None
+                    else dimensions.get("hole_center_x", length / 2.0)
+                )
+                center_y = (
+                    center_y
+                    if center_y is not None
+                    else dimensions.get("hole_center_y", width / 2.0)
+                )
+            if radius is None or center_x is None or center_y is None:
+                return ()
+            holes.append((radius, center_x, center_y))
+        return tuple(holes)
+
+    radius = dimensions.get("hole_radius")
+    if radius is None:
+        return ()
+    return (
+        (
+            radius,
+            dimensions.get("hole_center_x", length / 2.0),
+            dimensions.get("hole_center_y", width / 2.0),
+        ),
     )
 
 
@@ -219,6 +349,38 @@ def _gmsh_quad_elements() -> list[tuple[int, int, int, int]]:
     return quads
 
 
+def _gmsh_shell_elements() -> list[tuple[str, tuple[int, ...]]]:
+    element_types, _, element_node_tags = gmsh.model.mesh.getElements(2)
+    elements: list[tuple[str, tuple[int, ...]]] = []
+    for element_type, node_tags in zip(element_types, element_node_tags):
+        if int(element_type) == 2:
+            for index in range(0, len(node_tags), 3):
+                elements.append(
+                    (
+                        "S3",
+                        (
+                            int(node_tags[index]),
+                            int(node_tags[index + 1]),
+                            int(node_tags[index + 2]),
+                        ),
+                    )
+                )
+        if int(element_type) == 3:
+            for index in range(0, len(node_tags), 4):
+                elements.append(
+                    (
+                        "S4",
+                        (
+                            int(node_tags[index]),
+                            int(node_tags[index + 1]),
+                            int(node_tags[index + 2]),
+                            int(node_tags[index + 3]),
+                        ),
+                    )
+                )
+    return elements
+
+
 def _write_calculix_s4_mesh(
     path: Path,
     nodes: dict[int, tuple[float, float, float]],
@@ -236,6 +398,66 @@ def _write_calculix_s4_mesh(
         mapped = [str(node_id_by_tag[tag]) for tag in quad]
         lines.append(f"{element_id}, {', '.join(mapped)}")
     path.write_text("\n".join([*lines, ""]), encoding="utf-8")
+
+
+def _write_calculix_shell_mesh(
+    path: Path,
+    nodes: dict[int, tuple[float, float, float]],
+    elements: list[tuple[str, tuple[int, ...]]],
+) -> None:
+    sorted_node_tags = sorted(nodes)
+    node_id_by_tag = {tag: index + 1 for index, tag in enumerate(sorted_node_tags)}
+    lines = ["*NODE"]
+    for tag in sorted_node_tags:
+        node_id = node_id_by_tag[tag]
+        x, y, z = nodes[tag]
+        lines.append(f"{node_id}, {x:.12g}, {y:.12g}, {z:.12g}")
+
+    element_id = 1
+    for element_type in ("S3", "S4"):
+        typed_elements = [nodes for item_type, nodes in elements if item_type == element_type]
+        if not typed_elements:
+            continue
+        lines.append(f"*ELEMENT, TYPE={element_type}, ELSET=EALL")
+        for element_nodes in typed_elements:
+            mapped = [str(node_id_by_tag[tag]) for tag in element_nodes]
+            lines.append(f"{element_id}, {', '.join(mapped)}")
+            element_id += 1
+    path.write_text("\n".join([*lines, ""]), encoding="utf-8")
+
+
+def _validate_circular_hole(
+    length: float,
+    width: float,
+    radius: float,
+    center_x: float,
+    center_y: float,
+) -> str | None:
+    margin = min(center_x, length - center_x, center_y, width - center_y)
+    if radius >= margin:
+        return "圆孔必须完整位于板内，孔半径需要小于孔心到外边界的最小距离。"
+    if radius <= 0:
+        return "圆孔半径必须为正数。"
+    return None
+
+
+def _validate_circular_holes(
+    length: float,
+    width: float,
+    holes: tuple[tuple[float, float, float], ...],
+) -> str | None:
+    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+        validation_error = _validate_circular_hole(length, width, radius, center_x, center_y)
+        if validation_error is not None:
+            return f"第 {index} 个圆孔参数无效: {validation_error}"
+    for left_index, left in enumerate(holes):
+        left_radius, left_x, left_y = left
+        for right_index, right in enumerate(holes[left_index + 1 :], start=left_index + 2):
+            right_radius, right_x, right_y = right
+            distance = ((left_x - right_x) ** 2 + (left_y - right_y) ** 2) ** 0.5
+            if distance <= left_radius + right_radius:
+                return f"第 {left_index + 1} 个圆孔与第 {right_index} 个圆孔相交。"
+    return None
 
 
 def _regular_solid_mesh(

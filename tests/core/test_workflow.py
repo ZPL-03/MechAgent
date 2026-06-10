@@ -52,12 +52,17 @@ from mechagent.orchestrator.graph import (
 )
 from mechagent.orchestrator.intent import SimulationIntent
 from mechagent.orchestrator.models import SolverRunSummary, TaskItem
+from mechagent.orchestrator.progress import ProgressEvent, progress_sink
 from mechagent.orchestrator.state import MechAgentState
 
 _STATIC_BEAM_REQUEST = (
     "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 )
 _STATIC_SOLID_REQUEST = "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
+_PERFORATED_PLATE_REQUEST = (
+    "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，"
+    "四边简支，承受0.004MPa向下均布压力的静力响应"
+)
 _COMPOUND_STATIC_REQUEST = (
     "求解梁长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，"
     "沿梁竖向向下1kN/m均布线载荷的静力响应；"
@@ -82,10 +87,21 @@ def test_sequential_workflow_runs_natural_language_static_beam(tmp_path: Path) -
         output=OutputSettings(output_dir=tmp_path),
     )
     workflow = SequentialWorkflow(config)
+    events: list[ProgressEvent] = []
 
-    result = workflow.run(_STATIC_BEAM_REQUEST)
+    with progress_sink(events.append):
+        result = workflow.run(_STATIC_BEAM_REQUEST)
 
     assert result.success is True
+    event_pairs = [(event["stage"], event["status"]) for event in events]
+    assert ("planner", "running") in event_pairs
+    assert ("planner", "complete") in event_pairs
+    assert ("designer", "running") in event_pairs
+    assert ("mesh", "running") in event_pairs
+    assert ("solver", "running") in event_pairs
+    assert ("postproc", "running") in event_pairs
+    assert ("analyst", "running") in event_pairs
+    assert ("reporter", "complete") in event_pairs
     assert len(result.tasks) == 1
     assert "MechAgent 仿真报告" in result.report
     record = result.tasks[0]
@@ -109,7 +125,7 @@ def test_sequential_workflow_runs_natural_language_static_beam(tmp_path: Path) -
     assert record.solver_result.mesh_file == record.mesh_result.mesh_file
     assert record.solver_result.predicted == record.solver_result["tip_deflection_mm"]
     assert "阶段产物" in result.report
-    assert "Agent 通信摘要" in result.report
+    assert "执行链路摘要" in result.report
 
 
 @pytest.mark.real_solver
@@ -204,6 +220,35 @@ def test_sequential_workflow_runs_compound_static_request_as_independent_tasks(
     assert all(record.solver_result.passed for record in result.tasks)
     assert "STATIC-BEAM" in result.report
     assert "STATIC-PLATE" in result.report
+
+
+@pytest.mark.real_solver
+def test_sequential_workflow_runs_natural_language_perforated_plate(
+    tmp_path: Path,
+) -> None:
+    config = MechAgentConfig(
+        orchestrator=OrchestratorSettings(mode="sequential"),
+        solver=_configured_solver_settings(),
+        output=OutputSettings(output_dir=tmp_path),
+    )
+    workflow = SequentialWorkflow(config)
+
+    result = workflow.run(_PERFORATED_PLATE_REQUEST)
+
+    assert result.success is True
+    record = result.tasks[0]
+    assert record.model_params is not None
+    assert record.model_params.case_id == "STATIC-PERFORATED-PLATE"
+    assert record.model_params.geometry.dimensions["hole_radius"] == pytest.approx(30.0)
+    assert record.mesh_result is not None
+    assert record.mesh_result.metadata["source"] == "gmsh_perforated_plate"
+    assert record.solver_result.success is True
+    assert record.solver_result.model_case_id == "STATIC-PERFORATED-PLATE"
+    assert record.solver_result.quantity == "max_displacement"
+    assert record.solver_result.predicted is not None
+    assert record.solver_result.predicted > 0.0
+    assert record.solver_result.verification_status == "unverified"
+    assert "STATIC-PERFORATED-PLATE" in result.report
 
 
 @pytest.mark.real_solver
@@ -475,7 +520,8 @@ def test_sdk_run_uses_langgraph_by_default(tmp_path: Path) -> None:
     assert result.summary["reporter_llm_trace"]["agent"] == "ReporterAgent"
     assert result.output_dir == Path(result.summary["work_dir"])
     assert "STATIC-BEAM" in result.report
-    assert "Planner" in result.report
+    assert "执行链路摘要" in result.report
+    assert "| TASK_1 | 任务识别 | 未启用 | ok |" in result.report
 
 
 @pytest.mark.real_solver
@@ -503,7 +549,7 @@ def test_langgraph_workflow_runs_natural_language_static_beam(tmp_path: Path) ->
     assert state["post_summaries"][0].analyst_llm_trace is not None
     assert state["post_summaries"][0].analyst_llm_trace.agent == "AnalystAgent"
     assert state["reporter_trace"].agent == "ReporterAgent"
-    assert "Agent 通信摘要" in state["report"]
+    assert "执行链路摘要" in state["report"]
 
 
 @pytest.mark.real_solver

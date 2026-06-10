@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
+from typing import Any
+
 from mechagent.config import MechAgentConfig
 from mechagent.orchestrator.llm_advisor import AgentLLMAdvisor, AgentLLMTrace
 from mechagent.orchestrator.llm_payload import advisory_payload
@@ -62,10 +66,17 @@ class ReporterAgent:
             无。
         """
 
-        reporter_trace = self.advisor.advise(
+        reporter_trace = self.advisor.complete(
             "ReporterAgent",
-            "检查报告结构、阶段产物和结果摘要完整性",
-            advisory_payload({"tasks": [record.task for record in records]}),
+            "基于有限元求解结果生成工程解释性报告",
+            advisory_payload(_report_context(records)),
+            (
+                "只输出 JSON 对象，字段包括 executive_summary、result_interpretation、"
+                "mesh_and_solver_assessment、boundary_load_interpretation、limitations、"
+                "recommended_next_steps。字段值使用中文字符串或中文字符串数组。"
+                "内容只解释有限元模型、网格、求解结果、边界载荷、工程局限和复核建议，"
+                "不得讨论 LLM 调用、Agent trace、网络请求、开发过程或执行链路审计。"
+            ),
         )
         lines = [
             "# MechAgent 仿真报告",
@@ -100,6 +111,8 @@ class ReporterAgent:
             else:
                 lines.append(f"- {record.task.task_id} 未生成工程解读。")
 
+        _append_llm_engineering_report(lines, reporter_trace)
+
         failed_records = [record for record in records if record.error is not None]
         if failed_records:
             lines.extend(["", "## 错误诊断", ""])
@@ -123,14 +136,14 @@ class ReporterAgent:
                 f"| {_escape_table_text(record.task.task_id)} | "
                 f"{_escape_table_text(str(mesh_file) if mesh_file else '')} | {output_count} |"
             )
-        lines.extend(["", "## Agent 通信摘要", ""])
-        lines.append("| 任务 | Agent | LLM | 状态 |")
+        lines.extend(["", "## 执行链路摘要", ""])
+        lines.append("| 任务 | 阶段 | 智能辅助 | 状态 |")
         lines.append("| --- | --- | --- | --- |")
         for record in records:
             for trace in _record_traces(record):
                 lines.append(
                     f"| {_escape_table_text(record.task.task_id)} | "
-                    f"{_escape_table_text(trace['agent'])} | "
+                    f"{_escape_table_text(trace['stage'])} | "
                     f"{_escape_table_text(trace['used'])} | "
                     f"{_escape_table_text(trace['status'])} |"
                 )
@@ -138,10 +151,110 @@ class ReporterAgent:
             "ok" if reporter_trace.error is None else redact_sensitive_text(reporter_trace.error)
         )
         lines.append(
-            f"| REPORT | {_escape_table_text(reporter_trace.agent)} | "
-            f"{reporter_trace.used} | {_escape_table_text(reporter_status)} |"
+            f"| REPORT | {_escape_table_text(_stage_label(reporter_trace.agent))} | "
+            f"{_trace_used_label(reporter_trace.used)} | {_escape_table_text(reporter_status)} |"
         )
         return "\n".join(lines) + "\n", reporter_trace
+
+
+def _report_context(records: list[TaskRunRecord]) -> dict[str, object]:
+    return {
+        "report_goal": "面向工程用户解释有限元求解结果、可信度、边界载荷含义、局限和复核建议。",
+        "report_scope": (
+            "仅基于几何、材料、载荷、边界条件、网格、求解摘要和后处理标量进行工程解释。"
+            "执行链路审计信息由报告固定表格呈现，不进入 LLM 工程解释。"
+        ),
+        "tasks": [_record_report_context(record) for record in records],
+    }
+
+
+def _record_report_context(record: TaskRunRecord) -> dict[str, object]:
+    model_params = record.model_params
+    return {
+        "task": record.task.model_dump(mode="json", exclude={"planner_llm_trace"}),
+        "geometry": _model_dump(model_params.geometry) if model_params is not None else None,
+        "material": _model_dump(model_params.material) if model_params is not None else None,
+        "loads": [_model_dump(load) for load in model_params.loads]
+        if model_params is not None
+        else [],
+        "boundary_conditions": [_model_dump(bc) for bc in model_params.bcs]
+        if model_params is not None
+        else [],
+        "analysis": _model_dump(model_params.analysis) if model_params is not None else None,
+        "mesh_spec": _model_dump(model_params.mesh) if model_params is not None else None,
+        "mesh_result": _model_dump(record.mesh_result),
+        "solver_result": _model_dump(
+            record.solver_result,
+            exclude={"solver_llm_trace", "output_files", "mesh_file"},
+        ),
+        "post_summary": _model_dump(
+            record.post_summary,
+            exclude={"postproc_llm_trace", "analyst_llm_trace"},
+        ),
+        "deterministic_analysis_text": record.analysis_text,
+        "error": _model_dump(record.error),
+    }
+
+
+def _model_dump(value: Any, *, exclude: set[str] | None = None) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", exclude=exclude or set())
+    return value
+
+
+def _append_llm_engineering_report(lines: list[str], trace: AgentLLMTrace) -> None:
+    if not trace.used or trace.error or not trace.response.strip():
+        return
+    payload = _parse_llm_report_json(trace.response)
+    if not payload:
+        return
+
+    lines.extend(["", "## LLM 工程解释", ""])
+    sections = [
+        ("综合结论", "executive_summary"),
+        ("结果解释", "result_interpretation"),
+        ("网格与求解可信度", "mesh_and_solver_assessment"),
+        ("边界与载荷解释", "boundary_load_interpretation"),
+        ("局限", "limitations"),
+        ("复核建议", "recommended_next_steps"),
+    ]
+    for title, key in sections:
+        items = _normalized_report_items(payload.get(key))
+        if not items:
+            continue
+        lines.extend([f"### {title}", ""])
+        for item in items:
+            lines.append(f"- {redact_sensitive_text(item)}")
+        lines.append("")
+
+
+def _parse_llm_report_json(response: str) -> dict[str, Any]:
+    text = response.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match is None:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _normalized_report_items(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
 
 
 def _record_case_label(record: TaskRunRecord) -> str:
@@ -210,11 +323,33 @@ def _record_traces(record: TaskRunRecord) -> list[dict[str, str]]:
 
 
 def _trace_summary(trace: AgentLLMTrace) -> dict[str, str]:
-    agent = trace.agent
-    used = str(trace.used)
+    stage = _stage_label(trace.agent)
+    used = _trace_used_label(trace.used)
     error = trace.error
     status = redact_sensitive_text(str(error)) if error else "ok"
-    return {"agent": agent, "used": used, "status": status}
+    return {"stage": stage, "used": used, "status": status}
+
+
+def _trace_used_label(value: bool) -> str:
+    return "启用" if value else "未启用"
+
+
+def _stage_label(agent: str) -> str:
+    labels = {
+        "PlannerAgent": "任务识别",
+        "Planner": "任务识别",
+        "DesignerAgent": "参数建模",
+        "Designer": "参数建模",
+        "MeshAgent": "网格生成",
+        "SolverAgent": "求解执行",
+        "PostProcAgent": "结果提取",
+        "PostProc": "结果提取",
+        "AnalystAgent": "工程校核",
+        "Analyst": "工程校核",
+        "ReporterAgent": "报告输出",
+        "Reporter": "报告输出",
+    }
+    return labels.get(agent, agent)
 
 
 def _escape_table_text(value: str) -> str:

@@ -251,11 +251,32 @@ def _coerce_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
             "width": _quantity_value(geometry, _width_names("solid"), "length"),
             "height": _quantity_value(geometry, _height_names("solid"), "length"),
         }
+    if geometry_type == "plate":
+        dimensions = _merge_plate_feature_dimensions(geometry, dimensions)
     dimensions = _normalized_dimensions(dimensions, geometry_type)
     return {
         "type": geometry_type,
         "dimensions": {key: value for key, value in dimensions.items() if value is not None},
     }
+
+
+def _merge_plate_feature_dimensions(
+    geometry: dict[str, Any],
+    dimensions: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(dimensions)
+    for key in (
+        "holes",
+        "hole_specs",
+        "openings",
+        "circular_holes",
+        "hole",
+        "opening",
+        "circular_hole",
+    ):
+        if key in geometry and key not in merged:
+            merged[key] = geometry[key]
+    return merged
 
 
 def _coerce_material(material: dict[str, Any]) -> dict[str, Any]:
@@ -572,11 +593,13 @@ def _normalized_dimensions(dimensions: dict[str, Any], geometry_type: str) -> di
             "height": _quantity_value(dimensions, _height_names("beam"), "length"),
         }
     if geometry_type == "plate":
-        return {
+        normalized = {
             "length": _quantity_value(dimensions, _length_names("plate"), "length"),
             "width": _quantity_value(dimensions, _width_names("plate"), "length"),
             "thickness": _quantity_value(dimensions, _thickness_names(), "length"),
         }
+        normalized.update(_normalized_plate_hole_dimensions(dimensions))
+        return normalized
     if geometry_type == "solid":
         return {
             "length": _quantity_value(dimensions, _length_names("solid"), "length"),
@@ -584,6 +607,155 @@ def _normalized_dimensions(dimensions: dict[str, Any], geometry_type: str) -> di
             "height": _quantity_value(dimensions, _height_names("solid"), "length"),
         }
     return dimensions
+
+
+def _normalized_plate_hole_dimensions(dimensions: dict[str, Any]) -> dict[str, Any]:
+    holes = _plate_hole_specs(dimensions)
+    if not holes:
+        return {}
+
+    normalized: dict[str, Any] = {"hole_count": float(len(holes))}
+    first_radius, first_center_x, first_center_y = holes[0]
+    normalized.update(
+        {
+            "hole_radius": first_radius,
+            "hole_center_x": first_center_x,
+            "hole_center_y": first_center_y,
+        }
+    )
+    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+        normalized[f"hole_{index}_radius"] = radius
+        normalized[f"hole_{index}_center_x"] = center_x
+        normalized[f"hole_{index}_center_y"] = center_y
+    return normalized
+
+
+def _plate_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float]]:
+    holes_raw = _first_present_raw(
+        dimensions,
+        ("holes", "hole_specs", "openings", "circular_holes"),
+    )
+    if isinstance(holes_raw, list):
+        holes: list[tuple[float, float, float]] = []
+        for item in holes_raw:
+            if not isinstance(item, dict):
+                raise ValueError("LLM 多孔薄板 holes 数组元素必须是对象。")
+            hole = _coerce_hole_spec(item)
+            if hole is None:
+                raise ValueError("LLM 多孔薄板 holes 数组元素缺少半径或孔心坐标。")
+            holes.append(hole)
+        return holes
+
+    single_hole = _first_present_raw(dimensions, ("hole", "opening", "circular_hole"))
+    if isinstance(single_hole, dict):
+        hole = _coerce_hole_spec(single_hole)
+        if hole is not None:
+            return [hole]
+        raise ValueError("LLM 开孔薄板 hole 对象缺少半径或孔心坐标。")
+
+    indexed_holes = _indexed_hole_specs(dimensions)
+    if indexed_holes:
+        return indexed_holes
+
+    radius = _hole_radius_value(dimensions, "hole")
+    center_x = _hole_center_value(dimensions, "x", ("hole_center_x", "center_x", "孔中心x"))
+    center_y = _hole_center_value(dimensions, "y", ("hole_center_y", "center_y", "孔中心y"))
+    if radius is None or center_x is None or center_y is None:
+        return []
+    return [(radius, center_x, center_y)]
+
+
+def _indexed_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float]]:
+    count_value = _numeric_value(dimensions.get("hole_count"))
+    count = int(count_value) if count_value is not None and count_value >= 1 else 0
+    if count == 0:
+        indexes = sorted(
+            {
+                int(match.group(1))
+                for key in dimensions
+                if (
+                    match := re.match(
+                        r"hole_(\d+)_(?:radius|diameter|center_x|center_y)",
+                        str(key),
+                    )
+                )
+            }
+        )
+    else:
+        indexes = list(range(1, count + 1))
+
+    holes: list[tuple[float, float, float]] = []
+    for index in indexes:
+        prefix = f"hole_{index}"
+        radius = _hole_radius_value(dimensions, prefix)
+        center_x = _hole_center_value(
+            dimensions,
+            "x",
+            (f"{prefix}_center_x", f"{prefix}_x", f"{prefix}_cx"),
+        )
+        center_y = _hole_center_value(
+            dimensions,
+            "y",
+            (f"{prefix}_center_y", f"{prefix}_y", f"{prefix}_cy"),
+        )
+        if radius is None or center_x is None or center_y is None:
+            raise ValueError(f"LLM 多孔薄板 {prefix} 缺少半径或孔心坐标。")
+        holes.append((radius, center_x, center_y))
+    return holes
+
+
+def _coerce_hole_spec(hole: dict[str, Any]) -> tuple[float, float, float] | None:
+    radius = _hole_radius_value(hole, "hole")
+    center = _dict_value(hole.get("center") or hole.get("centre"))
+    center_x = _first_present_number(
+        _hole_center_value(hole, "x", ("center_x", "cx", "x", "孔中心x")),
+        _hole_center_value(center, "x", ("x", "center_x", "cx")),
+    )
+    center_y = _first_present_number(
+        _hole_center_value(hole, "y", ("center_y", "cy", "y", "孔中心y")),
+        _hole_center_value(center, "y", ("y", "center_y", "cy")),
+    )
+    if radius is None or center_x is None or center_y is None:
+        return None
+    return (radius, center_x, center_y)
+
+
+def _hole_radius_value(mapping: dict[str, Any], prefix: str) -> float | None:
+    radius = _quantity_value(
+        mapping,
+        (
+            f"{prefix}_radius",
+            "radius",
+            "hole_radius",
+            "孔半径",
+            "圆孔半径",
+        ),
+        "length",
+    )
+    if radius is not None:
+        return radius
+    diameter = _quantity_value(
+        mapping,
+        (
+            f"{prefix}_diameter",
+            "diameter",
+            "hole_diameter",
+            "孔径",
+            "孔直径",
+            "圆孔直径",
+        ),
+        "length",
+    )
+    return diameter / 2.0 if diameter is not None else None
+
+
+def _hole_center_value(
+    mapping: dict[str, Any],
+    axis: str,
+    names: tuple[str, ...],
+) -> float | None:
+    axis_names = names + (f"center_{axis}", f"c{axis}", axis)
+    return _quantity_value(mapping, axis_names, "length")
 
 
 def _length_names(geometry_type: str) -> tuple[str, ...]:
@@ -646,7 +818,11 @@ def _number_value(mapping: dict[str, Any], names: tuple[str, ...]) -> Any:
     return None
 
 
-def _quantity_value(mapping: dict[str, Any], names: tuple[str, ...], quantity: str) -> Any:
+def _quantity_value(
+    mapping: dict[str, Any],
+    names: tuple[str, ...],
+    quantity: str,
+) -> float | None:
     for name in names:
         if name not in mapping:
             continue

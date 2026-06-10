@@ -21,7 +21,8 @@ from mechagent import MechAgent  # noqa: E402
 DEFAULT_REQUEST = (
     "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力的静力响应"
 )
-TASK_TRACE_KEYS = ("planner_llm_trace", "designer_llm_trace", "mesh_llm_trace")
+TASK_ADVISORY_TRACE_KEYS = ("planner_llm_trace", "mesh_llm_trace")
+TASK_CRITICAL_TRACE_KEYS = ("designer_llm_trace",)
 SOLVER_TRACE_KEY = "solver_llm_trace"
 POST_TRACE_KEYS = ("postproc_llm_trace", "analyst_llm_trace")
 
@@ -51,10 +52,20 @@ def evaluate_llm_smoke_summary(summary: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     tasks = _list_value(summary.get("tasks"))
     report_path = _optional_path(summary.get("report_path"))
+    report_text = _read_optional_text(report_path)
     _append_check(checks, "workflow_success", summary.get("success") is True)
     _append_check(checks, "has_task", bool(tasks))
     _append_check(checks, "report_path", report_path is not None and report_path.exists())
-    _append_check(checks, "reporter_trace", _trace_ok(summary.get("reporter_llm_trace")))
+    _append_check(
+        checks,
+        "report_llm_engineering_section",
+        _has_llm_engineering_section(report_text),
+    )
+    _append_check(
+        checks,
+        "reporter_trace_attempted",
+        _trace_attempted(summary.get("reporter_llm_trace")),
+    )
 
     task_rows: list[dict[str, Any]] = []
     for index, task in enumerate(tasks, start=1):
@@ -109,11 +120,17 @@ def _evaluate_task(task_id: str, task: dict[str, Any]) -> list[dict[str, Any]]:
         checks, f"{task_id}.solver_verified", solver.get("verification_status") == "passed"
     )
 
-    for key in TASK_TRACE_KEYS:
+    for key in TASK_CRITICAL_TRACE_KEYS:
         _append_check(checks, f"{task_id}.{key}", _trace_ok(task.get(key)))
-    _append_check(checks, f"{task_id}.{SOLVER_TRACE_KEY}", _trace_ok(solver.get(SOLVER_TRACE_KEY)))
+    for key in TASK_ADVISORY_TRACE_KEYS:
+        _append_check(checks, f"{task_id}.{key}_attempted", _trace_attempted(task.get(key)))
+    _append_check(
+        checks,
+        f"{task_id}.{SOLVER_TRACE_KEY}_attempted",
+        _trace_attempted(solver.get(SOLVER_TRACE_KEY)),
+    )
     for key in POST_TRACE_KEYS:
-        _append_check(checks, f"{task_id}.{key}", _trace_ok(post.get(key)))
+        _append_check(checks, f"{task_id}.{key}_attempted", _trace_attempted(post.get(key)))
     return checks
 
 
@@ -141,6 +158,13 @@ def _trace_ok(value: Any) -> bool:
     )
 
 
+def _trace_attempted(value: Any) -> bool:
+    trace = _dict_value(value)
+    if trace.get("used") is not True or not _positive_int(trace.get("prompt_chars")):
+        return False
+    return _positive_int(trace.get("response_chars")) or bool(trace.get("error"))
+
+
 def _positive_int(value: Any) -> bool:
     return isinstance(value, int) and value > 0
 
@@ -149,6 +173,19 @@ def _optional_path(value: Any) -> Path | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return Path(value)
+
+
+def _read_optional_text(path: Path | None) -> str:
+    if path is None or not path.exists() or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _has_llm_engineering_section(text: str) -> bool:
+    return "## LLM 工程解释" in text and "### 综合结论" in text
 
 
 def _append_check(checks: list[dict[str, Any]], name: str, passed: bool) -> None:

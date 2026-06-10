@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,9 @@ def main() -> int:
         "*.msg",
     ]
     fixed_paths = [
+        REPO_ROOT / ".playwright-mcp",
         REPO_ROOT / "mechagent_output",
+        REPO_ROOT / "output/playwright",
         REPO_ROOT / "apps/mechagent-studio/node_modules",
         REPO_ROOT / "knowledge/external",
         REPO_ROOT / "knowledge/index.jsonl",
@@ -52,13 +55,14 @@ def main() -> int:
         REPO_ROOT / "knowledge/raw",
         REPO_ROOT / "knowledge/external",
         REPO_ROOT / "knowledge",
+        REPO_ROOT / "output",
     ]
     for pattern in directory_patterns:
-        for path in REPO_ROOT.rglob(pattern):
+        for path in _iter_repo_paths(pattern):
             if path.is_dir():
                 _remove_dir(path)
     for pattern in file_patterns:
-        for path in REPO_ROOT.rglob(pattern):
+        for path in _iter_repo_paths(pattern):
             if path.is_file():
                 _remove_file(path)
     for path in fixed_paths:
@@ -71,20 +75,39 @@ def main() -> int:
     return 0
 
 
+def _iter_repo_paths(pattern: str) -> Iterator[Path]:
+    paths = REPO_ROOT.rglob(pattern)
+    while True:
+        try:
+            yield next(paths)
+        except StopIteration:
+            return
+        except FileNotFoundError:
+            return
+
+
 def _remove_dir(path: Path) -> None:
     _ensure_inside_repo(path)
-    shutil.rmtree(path)
+    if not path.exists():
+        return
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return
 
 
 def _remove_file(path: Path) -> None:
     _ensure_inside_repo(path)
-    path.unlink()
+    path.unlink(missing_ok=True)
 
 
 def _remove_dir_if_empty(path: Path) -> None:
-    if path.is_dir() and not any(path.iterdir()):
-        _ensure_inside_repo(path)
-        path.rmdir()
+    try:
+        if path.is_dir() and not any(path.iterdir()):
+            _ensure_inside_repo(path)
+            path.rmdir()
+    except FileNotFoundError:
+        return
 
 
 def _ensure_inside_repo(path: Path) -> None:

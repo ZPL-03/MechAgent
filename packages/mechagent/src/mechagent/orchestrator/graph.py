@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from mechagent.orchestrator.models import (
     TaskItem,
     TaskRunRecord,
 )
+from mechagent.orchestrator.progress import StageName, StageStatus, emit_progress
 from mechagent.orchestrator.state import MechAgentState
 
 
@@ -40,7 +42,7 @@ def build_graph(config: dict[str, Any] | MechAgentConfig) -> Any:
         Any: 编译后的 LangGraph 图对象。
 
     Raises:
-        RuntimeError: 当 langgraph 未安装时抛出。
+        RuntimeError: 当 langgraph 不可用时抛出。
 
     Example:
         >>> build_graph({})
@@ -50,18 +52,18 @@ def build_graph(config: dict[str, Any] | MechAgentConfig) -> Any:
     try:
         from langgraph.graph import StateGraph
     except ImportError as exc:
-        msg = "langgraph 未安装，无法构建编排图。"
+        msg = "langgraph 不可用，无法构建编排图。"
         raise RuntimeError(msg) from exc
 
     active_config = _coerce_config(config)
     graph = StateGraph(MechAgentState)
-    graph.add_node("planner", lambda state: _planner_node(state, active_config))
-    graph.add_node("designer", lambda state: _designer_node(state, active_config))
-    graph.add_node("mesh", lambda state: _mesh_node(state, active_config))
-    graph.add_node("solver", lambda state: _solver_node(state, active_config))
-    graph.add_node("postproc", lambda state: _postproc_node(state, active_config))
-    graph.add_node("analyst", lambda state: _analyst_node(state, active_config))
-    graph.add_node("reporter", lambda state: _reporter_node(state, active_config))
+    _add_progress_node(graph, "planner", _planner_node, active_config)
+    _add_progress_node(graph, "designer", _designer_node, active_config)
+    _add_progress_node(graph, "mesh", _mesh_node, active_config)
+    _add_progress_node(graph, "solver", _solver_node, active_config)
+    _add_progress_node(graph, "postproc", _postproc_node, active_config)
+    _add_progress_node(graph, "analyst", _analyst_node, active_config)
+    _add_progress_node(graph, "reporter", _reporter_node, active_config)
     graph.set_entry_point("planner")
     graph.add_edge("planner", "designer")
     graph.add_edge("designer", "mesh")
@@ -77,6 +79,58 @@ def _coerce_config(config: dict[str, Any] | MechAgentConfig) -> MechAgentConfig:
     if isinstance(config, MechAgentConfig):
         return config
     return MechAgentConfig.model_validate(config)
+
+
+def _add_progress_node(
+    graph: Any,
+    stage: StageName,
+    node: Callable[[MechAgentState, MechAgentConfig], dict[str, Any]],
+    config: MechAgentConfig,
+) -> None:
+    graph.add_node(stage, lambda state: _with_progress(stage, node, state, config))
+
+
+def _with_progress(
+    stage: StageName,
+    node: Callable[[MechAgentState, MechAgentConfig], dict[str, Any]],
+    state: MechAgentState,
+    config: MechAgentConfig,
+) -> dict[str, Any]:
+    emit_progress(stage, "running", _stage_message(stage, "running"))
+    try:
+        result = node(state, config)
+    except Exception:
+        emit_progress(stage, "failed", _stage_message(stage, "failed"))
+        raise
+    status: StageStatus = "failed" if _result_has_stage_error(result, stage) else "complete"
+    emit_progress(stage, status, _stage_message(stage, status))
+    return result
+
+
+def _result_has_stage_error(result: dict[str, Any], stage: StageName) -> bool:
+    for error in result.get("errors", []):
+        error_record = _error_record(error)
+        if error_record.node == stage:
+            return True
+    return False
+
+
+def _stage_message(stage: StageName, status: str) -> str:
+    labels = {
+        "planner": "任务识别",
+        "designer": "参数建模",
+        "mesh": "网格生成",
+        "solver": "求解执行",
+        "postproc": "结果提取",
+        "analyst": "工程校核",
+        "reporter": "报告输出",
+    }
+    status_labels = {
+        "running": "开始",
+        "complete": "完成",
+        "failed": "失败",
+    }
+    return f"{labels[stage]}{status_labels[status]}"
 
 
 def _planner_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, Any]:

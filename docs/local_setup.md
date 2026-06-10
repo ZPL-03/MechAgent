@@ -85,8 +85,11 @@ python -m mechagent.cli config validate
 `ModelParams.case_id` 必须属于声明集合。
 SDK 单次调用可使用
 `use_llm_agents=True`。SDK 单次覆盖使用独立配置副本，不改变 `MechAgent.config` 的持久值。
-远端 LLM Agent 闭环验收使用 `scripts/run_llm_smoke.py`，该脚本校验所有 Agent trace、
-真实 CalculiX 求解、参考误差验收和报告路径。
+远端 LLM Agent 闭环验收使用 `scripts/run_llm_smoke.py`，该脚本校验 Designer 结构化补参 trace、
+非关键审阅 trace 发起记录、真实 CalculiX 求解、参考误差验收、报告路径和报告正文中的
+“LLM 工程解释”章节。
+
+几何建模、网格划分、结果场和进度状态的统一工作台目标见 [产品蓝图](product_blueprint.md)。
 
 `scripts/check_env.py` 默认检查 Python、依赖和配置解析后的 CalculiX 可执行文件。
 `--config` 可指定运行配置文件；`--require-llm` 要求 `.env` 或环境变量中
@@ -99,12 +102,18 @@ SDK 单次调用可使用
 
 ```powershell
 python -m mechagent.cli studio --open-browser
+python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
+python -m mechagent.cli run "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+python -m mechagent.cli run "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应"
+python -m mechagent.cli run "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
 python scripts/run_llm_smoke.py
 ```
+
+Studio 命令输出服务监听地址和浏览器入口。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。
 
 ## 验证命令
 

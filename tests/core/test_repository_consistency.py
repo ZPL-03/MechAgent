@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.natural_language_cases import STATIC_LANGUAGE_CASES
 
 from mechagent.config import KnowledgeSettings
+from mechagent.examples import all_examples
 
 TEXT_SUFFIXES = {".md", ".py", ".toml", ".yaml", ".yml", ".txt"}
 LOCAL_ONLY_FILES = {Path("AGENTS.md"), Path("MechAgent_Project_Plan.docx")}
@@ -37,6 +38,7 @@ PUBLIC_DOCS = [
     Path("CHANGELOG.md"),
     Path("CONTRIBUTING.md"),
     Path("docs/index.md"),
+    Path("docs/product_blueprint.md"),
     Path("docs/local_setup.md"),
     Path("docs/technical_report.md"),
     Path("packages/mechagent/README.md"),
@@ -130,6 +132,7 @@ def test_public_docs_describe_llm_structured_extraction() -> None:
     assert "Planner 可让 LLM" in technical_report
     assert "注册能力自身的缺参诊断" in technical_report
     assert "缺参补齐与门禁" in technical_report
+    assert "非关键工程审阅使用短超时和单次尝试" in technical_report
     assert "Designer 仍尝试 LLM 结构化补齐" in technical_report
     assert "本地参数优先" in technical_report
     assert "模型编号契约" in technical_report
@@ -149,7 +152,7 @@ def test_public_docs_describe_llm_structured_extraction() -> None:
     assert "不直接覆盖 `ModelParams`" not in local_setup
     assert "Designer 不进行本地参数建模或 LLM 参数抽取" not in technical_report
     assert "技术细节索引" in docs_index
-    assert "Agent 间通信和错误记录" in docs_index
+    assert "结构化通信和错误记录" in docs_index
     assert "LLM 结构化抽取和插件扩展契约" in docs_index
     assert "求解摘要状态、后处理摘要和失败优先规则" in docs_index
 
@@ -169,18 +172,23 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     technical_report = Path("docs/technical_report.md").read_text(encoding="utf-8")
 
-    assert len(STATIC_LANGUAGE_CASES) == 20
-    assert "测试集包含 344 个测试" in readme
+    assert len(STATIC_LANGUAGE_CASES) == 26
+    assert len(all_examples()) == len(STATIC_LANGUAGE_CASES)
+    assert [item.case_id for item in all_examples()] == [
+        item.case_id for item in STATIC_LANGUAGE_CASES
+    ]
+    assert "测试集包含 391 个测试" in readme
     assert "完整测试范围、质量结果和清理策略见" in readme
-    assert "`pytest`：344 passed" in technical_report
+    assert "`pytest`：391 passed" in technical_report
     for coverage_label in [
         "插件主结果字段推断",
         "插件数值字符串解析",
         "插件布尔字符串解析",
         "LLM provider 错误脱敏",
         "LLM 端到端 smoke 脚本",
+        "LLM advisory 短超时策略",
         "trace error 脱敏",
-        "报告通信摘要脱敏",
+        "报告执行链路摘要脱敏",
         "错误消息脱敏",
         "扩展字段递归脱敏",
         "映射导出脱敏",
@@ -189,6 +197,9 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
         "MeshAgent 输出契约",
         "LLM 工程别名归一化",
         "LLM 中文结构化字段归一化",
+        "LLM 多孔薄板孔洞归一化",
+        "MeshAgent LLM 网格策略校验",
+        "ReporterAgent LLM 工程解释报告",
         "Planner LLM 字符串意图归一化",
         "LLM 单对象载荷边界归一化",
         "LLM 空数组与单对象优先级归一化",
@@ -207,9 +218,11 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     assert "`ErrorRecord` 前会脱敏" in technical_report
     assert "LLM HTTP 后端" in technical_report
     assert "中文几何类型、载荷类型、边界类型、方向、尺寸字段和材料字段" in technical_report
-    assert "Markdown 报告通信摘要" in technical_report
+    assert "Markdown 报告执行链路摘要" in technical_report
     assert "`Requires-Dist` 依赖元数据、CLI entry point" in technical_report
     assert "`scripts/run_llm_smoke.py` 通过 SDK 启用 `use_llm_agents=True`" in technical_report
+    assert "Designer 结构化补参 trace 成功且无错误" in technical_report
+    assert "审阅 trace 已发起并记录 prompt" in technical_report
     assert "失败状态的 `SolverRunSummary`" in technical_report
     assert "即使主结果与参考值完全一致，也标记为 `failed`" in technical_report
     assert "`success` 为失败时，`passed` 固定为 `false`" in technical_report
@@ -227,8 +240,8 @@ def test_public_docs_describe_capability_tool_contract() -> None:
     package_readme = Path("packages/mechagent/README.md").read_text(encoding="utf-8")
 
     assert "能力默认工具注册契约" in readme
-    assert "能力默认工具按注册表名称校验" in readme
-    assert "能力默认工具在注册时规范化为工厂注册名" in readme
+    assert "按注册表名称校验" in readme
+    assert "规范化为工厂注册名" in readme or "归一化为工厂注册名" in readme
     assert "配置默认工具和能力默认工具均按工厂注册名称校验" in technical_report
     assert "能力默认工具在注册时规范化为工厂注册名" in technical_report
     assert "能力默认工具在注册时规范化为工厂注册名" in local_setup
@@ -259,6 +272,22 @@ def test_public_docs_describe_compound_request_handling() -> None:
     assert "复合请求中的同类模型不会共享文件名" in technical_report
     assert "failed_records" in technical_report
     assert "复合请求拆分" in package_readme
+
+
+def test_public_docs_describe_product_blueprint() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    docs_index = Path("docs/index.md").read_text(encoding="utf-8")
+    blueprint = Path("docs/product_blueprint.md").read_text(encoding="utf-8")
+    technical_report = Path("docs/technical_report.md").read_text(encoding="utf-8")
+    package_readme = Path("packages/mechagent/README.md").read_text(encoding="utf-8")
+
+    assert "docs/product_blueprint.md" in readme
+    assert "产品蓝图" in docs_index
+    assert "3D 可视化目标" in blueprint
+    assert "进度状态面板" in blueprint
+    assert "Three.js" in blueprint
+    assert "产品蓝图见" in technical_report
+    assert "复合请求拆分" in package_readme
     assert "其余任务继续执行" in package_readme
 
 
@@ -269,7 +298,7 @@ def test_public_docs_describe_parser_safety_boundaries() -> None:
 
     assert "梁横向载荷和实体轴向载荷需要显式方向" in readme
     assert "梁纯全局 Y 向横向弯曲" in readme
-    assert "矩形板纯全局 Z 向均布压力弯曲" in readme
+    assert "矩形板和开孔薄板纯全局 Z 向均布压力弯曲" in readme
     assert "矩形实体块纯全局 X 向端面轴向载荷" in readme
     assert "几何必需尺寸" in readme
     assert "不按内置钢/铝别名自动匹配" in readme
@@ -431,23 +460,216 @@ def test_public_docs_describe_studio_surface() -> None:
     technical_report = Path("docs/technical_report.md").read_text(encoding="utf-8")
     local_setup = Path("docs/local_setup.md").read_text(encoding="utf-8")
     docs_index = Path("docs/index.md").read_text(encoding="utf-8")
+    studio_app = Path("apps/mechagent-studio/src/App.tsx").read_text(encoding="utf-8")
+    studio_styles = Path("apps/mechagent-studio/src/styles.css").read_text(encoding="utf-8")
+    three_viewport = Path("apps/mechagent-studio/src/ThreeViewport.tsx").read_text(encoding="utf-8")
     workflow = Path(".github/workflows/pr.yml").read_text(encoding="utf-8")
 
     for text in (readme, package_readme, local_setup, docs_index):
         assert "python -m mechagent.cli studio --open-browser" in text
 
     assert "FastAPI + React + TypeScript + Vite 工作台" in readme
+    assert "![MechAgent Studio 几何可视化态](docs/assets/studio-geometry.png)" in readme
+    assert "![MechAgent Studio 结果与工程解读态](docs/assets/studio-workbench.png)" in readme
+    assert "几何可视化态展示自然语言输入、Planner 预检、偏心圆孔薄板参数化几何" in readme
+    assert "结果与工程解读态展示开孔薄板 S Mises 应力云图" in readme
+    assert "宽屏右侧检查区展示作业状态、验收状态、求解流程" in readme
+    assert "几何模式显示 `ModelParams.loads` 与 `ModelParams.bcs` 对应的前处理符号" in readme
+    assert "结果模式只显示变形、网格边、节点场、颜色图例和当前结果场" in readme
+    assert "壳单元 `.frd` 派生节点场会按网格节点顺序对齐" in readme
+    assert "右侧承载状态" not in readme
+    assert "右侧展示作业状态" not in readme
+    assert Path("docs/assets/studio-geometry.png").exists()
+    assert Path("docs/assets/studio-workbench.png").exists()
+    assert not Path("docs/assets/studio-overview.png").exists()
+    assert not Path("docs/assets/studio-result-viewport.png").exists()
+    assert "studio-result-page.png" not in readme
+    assert "studio-plate-case.png" not in readme
+    assert "studio-beam-result.png" not in readme
+    assert (
+        "`docs/assets/studio-geometry.png` 和 `docs/assets/studio-workbench.png`"
+        in technical_report
+    )
+    assert "符号直接贴合载荷面或约束边界且不带文字标注" in technical_report
+    assert "结果模式只显示变形、网格边、节点场、颜色图例和当前结果场" in technical_report
     assert "Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`" in technical_report
+    assert "宽屏桌面视口展示左侧请求区、中央结果区和右侧检查区三栏布局" in technical_report
+    assert "检查区：作业状态、验收状态、求解流程" in technical_report
+    assert "结果视口、报告面板、验收面板、流程面板和阶段产物面板" in technical_report
     assert "GET /api/health" in technical_report
     assert "POST /api/run" in technical_report
     assert "`packages/mechagent/src/mechagent/ui/static`" in technical_report
-    assert "React Flow" in technical_report
-    assert "结果 SVG 由 Python 后处理层" in package_readme
+    assert "lucide-react 和 react-markdown" in technical_report
+    assert "React Flow" not in technical_report
+    assert "Three.js" in package_readme
+    assert "3D 场景由 Python 后处理层" in package_readme
+    assert "Three.js 画布在初始化、尺寸变化、视图切换和用户交互时按需渲染" in package_readme
+    assert "静止状态不运行连续 `requestAnimationFrame` 循环" in technical_report
+    assert "当前 3D 画布支持 PNG 导出，SVG 用于兼容视图和静态下载" in package_readme
+    for text in (readme, package_readme, technical_report):
+        assert "网格模式使用低透明单元面" in text
+        assert "矩形截面分段棱柱" in text
+        assert "右下角透明嵌入式 XYZ 全局坐标系" in text
+        assert "默认显示 `U` 位移模量" in text
+        assert "场量下拉菜单" in text
+        assert "可切换 `Ux`、`Uy`、`Uz`" in text
+        assert "可切换 `S Mises`" in text
+    assert "Markdown 报告和摘要 JSON 支持复制和下载" in package_readme
+    assert "当前工作台链接复制" in package_readme
+    assert "`request`、`llm` 和 `view` 查询参数" in package_readme
+    assert "CLI 复现命令复制" in package_readme
+    assert "带类型标签和路径复制入口的阶段产物" in package_readme
+    assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in readme
+    assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in readme
+    assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in package_readme
+    assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in package_readme
+    assert "宽度不超过 900px" in package_readme
+    assert "检查区在求解后跳到右侧" not in readme
+    assert "运行前后保持左右外边距一致" in technical_report
+    assert "前者展示几何模式下的偏心圆孔薄板、边界支承符号和均布压力箭头" in technical_report
+    assert "后者展示开孔薄板 S Mises 应力云图" in technical_report
+    assert "工作台链接复制" in technical_report
+    assert "`request`、`llm` 和 `view` 查询参数" in technical_report
+    assert "摘要 JSON 复制和摘要 JSON 下载" in technical_report
+    assert "复制动作通过固定状态提示和 `aria-live` 区域反馈成功或失败" in technical_report
+    assert "Clipboard API 和浏览器原生复制命令回退" in technical_report
+    assert "复制动作带有可见状态反馈" in package_readme
+    assert "复制 CLI 复现命令" in studio_app
+    assert "复制当前工作台链接" in studio_app
+    assert "copyTextToClipboard" in studio_app
+    assert "writeClipboardText" in studio_app
+    assert "legacyCopyText" in studio_app
+    assert 'document.execCommand("copy")' in studio_app
+    assert "toast-region" in studio_app
+    assert 'aria-live="polite"' in studio_app
+    assert 'inputMode="text"' in studio_app
+    assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
+    assert "clamp(280px, 18vw, 360px) minmax(0, 1fr)" in studio_styles
+    assert "clamp(270px, 16vw, 340px)" in studio_styles
+    assert ".right-rail {\n  grid-template-columns: minmax(0, 1fr);" in studio_styles
+    result_right_rail_columns = (
+        ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
+    )
+    assert result_right_rail_columns in studio_styles
+    assert "@media (max-width: 1800px)" in studio_styles
+    assert "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr)" in studio_styles
+    assert ".right-rail,\n  .right-rail.has-result {\n    grid-column: 1 / -1;" in studio_styles
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in studio_styles
+    assert "grid-template-rows: auto auto minmax(150px, 1fr) auto" not in studio_styles
+    assert ".verification-panel.has-result" in studio_styles
+    adaptive_verification_panel = (
+        ".right-rail.has-result .verification-panel.has-result {\n  height: auto;"
+    )
+    assert adaptive_verification_panel in studio_styles
+    assert "height: 310px" not in studio_styles
+    assert "overflow-y: visible" in studio_styles
+    right_rail_style = studio_styles.split(
+        ".right-rail {\n  grid-template-columns",
+        maxsplit=1,
+    )[1].split("}", maxsplit=1)[0]
+    assert "overflow-y: auto" in right_rail_style
+    assert "scrollbar-gutter: stable" in right_rail_style
+    assert "grid-auto-rows: 34px" in studio_styles
+    assert "height: clamp(316px, 30vh, 328px)" in studio_styles
+    assert "min-height: clamp(316px, 30vh, 328px)" in studio_styles
+    result_right_rail_style = studio_styles.split(".right-rail.has-result {", maxsplit=1)[
+        1
+    ].split("}", maxsplit=1)[0]
+    assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
+    assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
+    assert "min-height: 306px" in studio_styles
+    assert "padding: 0;\n  list-style: none;" in studio_styles
+    assert 'controls.addEventListener("change", scheduleRender)' in three_viewport
+    assert 'controls.removeEventListener("change", scheduleRender)' in three_viewport
+    assert "const animate = () =>" not in three_viewport
+    assert "controls.enableDamping = true" not in three_viewport
+    assert "buildReferenceGrid" in three_viewport
+    assert "位移云图" in three_viewport
+    assert "应力云图" in three_viewport
+    assert "真实网格" in three_viewport
+    assert "示意网格" in three_viewport
+    assert "buildSegmentedBeamBody" in three_viewport
+    assert "buildBeamSegmentPrism" in three_viewport
+    assert "buildBeamFixedMarker" in three_viewport
+    assert "buildAxisGizmoRoot" in three_viewport
+    assert "axis-gizmo-stage" in three_viewport
+    assert "axis-gizmo-canvas" in three_viewport
+    assert "AxesHelper" not in three_viewport
+    assert "TubeGeometry" not in three_viewport
+    assert "TorusGeometry" not in three_viewport
+    assert "field-switch" in three_viewport
+    assert "<select" in three_viewport
+    assert "<option" in three_viewport
+    assert "setSelectedFieldKey(event.target.value)" in three_viewport
+    assert ".field-switch select" in studio_styles
+    assert ".field-switch button" not in studio_styles
+    assert ".axis-gizmo-stage" in studio_styles
+    assert ".axis-gizmo-canvas" in studio_styles
+    axis_gizmo_style = studio_styles.split(".axis-gizmo-stage {", maxsplit=1)[1].split(
+        "}",
+        maxsplit=1,
+    )[0]
+    assert "background:" not in axis_gizmo_style
+    assert "border:" not in axis_gizmo_style
+    assert "box-shadow" not in axis_gizmo_style
+    assert "filter: drop-shadow" in axis_gizmo_style
+    assert "strokeText(text, 64, 66)" in three_viewport
+    assert "drawRoundedRect" not in three_viewport
+    assert "view-switch" in three_viewport
+    assert "VIEW_PRESETS" in three_viewport
+    assert 'field.kind === "stress" ? 0.92 : 0.78' in three_viewport
+    assert "depthTest: deformed" in three_viewport
+    assert "buildBoundaryLoadOverlay" in three_viewport
+    assert "buildBoundaryConditionMarker" in three_viewport
+    assert "buildLoadMarker" in three_viewport
+    assert "surfacePressureTargets" in three_viewport
+    assert "dominantAxis" in three_viewport
+    assert "distributedAxisValues" in three_viewport
+    assert "isInsidePlateHole" in three_viewport
+    assert "isEndFaceRegion" in three_viewport
+    assert 'tokens.includes("face") && !tokens.includes("surface")' in three_viewport
+    assert 'region.includes("face")' not in three_viewport
+    assert "target.add(direction.clone().multiplyScalar(-tailDistance))" in three_viewport
+    assert "pointArrowLength" in three_viewport
+    assert "new THREE.ArrowHelper" not in three_viewport
+    assert 'if (mode === "geometry")' in three_viewport
+    assert "buildAnnotationLabel" not in three_viewport
+    assert "简支边界" not in three_viewport
+    assert "位移云图" in studio_app
+    assert "场量提取" in studio_app
+    assert "initialRequestFromUrl" in studio_app
+    assert "initialParameterCompletionFromUrl" in studio_app
+    assert "initialRenderModeIndexFromUrl" in studio_app
+    assert "studioWorkspaceLink" in studio_app
+    assert "history.replaceState" in studio_app
+    assert "request" in studio_app
+    assert "llm" in studio_app
+    assert 'const VIEW_QUERY_KEY = "view"' in studio_app
+    assert "applyWorkspaceQuery(url, requestText, useLlmAgents, renderMode)" in studio_app
+    assert "reproducibleCliCommand" in studio_app
+    assert "python_executable" in studio_app
+    assert "pythonLauncher" in studio_app
+    assert "powerShellQuote" in studio_app
+    assert '"--llm-agents"' in studio_app
+    assert "下载 Markdown 工程报告" in studio_app
+    assert "下载摘要 JSON" in studio_app
+    assert "复制摘要 JSON" in studio_app
+    assert "downloadSummaryJson" in studio_app
+    assert "mechagent-${taskName}-${statusName}.json" in studio_app
+    assert "复制阶段产物路径" in studio_app
+    assert "mechagent-${taskName}-${statusName}.md" in studio_app
     assert "apps/mechagent-studio/node_modules/" in Path(".gitignore").read_text(encoding="utf-8")
     assert "apps/mechagent-studio/node_modules" in Path("scripts/clean_artifacts.py").read_text(
         encoding="utf-8"
     )
     assert "actions/setup-node@v6" in workflow
+    assert "clamp(270px, 16vw, 340px)" in studio_styles
+    assert "clamp(300px, 20vw, 500px)" not in studio_styles
+    assert "height: calc(100vh - 86px)" in studio_styles
+    assert "grid-template-rows: minmax(380px, 1.08fr) minmax(230px, 0.7fr)" in studio_styles
+    assert "height: auto" in studio_styles
+    assert "height: clamp(460px, 62vh, 620px)" in studio_styles
+    assert ".right-rail.has-result {\n    grid-template-columns: 1fr;" in studio_styles
 
 
 def test_package_metadata_declares_open_source_release_fields() -> None:
@@ -487,8 +709,8 @@ def test_llm_http_dependency_is_declared_consistently() -> None:
 def test_changelog_matches_current_natural_language_case_count() -> None:
     changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert len(STATIC_LANGUAGE_CASES) == 20
-    assert "自然语言案例：二十个独立结构静力请求真实执行并通过验收" in changelog
+    assert len(STATIC_LANGUAGE_CASES) == 26
+    assert "自然语言案例：二十六个独立结构静力请求真实执行并通过验收" in changelog
     assert "十三个独立结构静力请求" not in changelog
 
 

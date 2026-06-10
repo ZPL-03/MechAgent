@@ -157,6 +157,81 @@ def test_http_completion_falls_back_when_json_mode_is_not_supported(
     assert "response_format" not in second_payload
 
 
+def test_http_completion_retries_request_errors(monkeypatch: MonkeyPatch) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        requests.append({"url": url, **kwargs})
+        if len(requests) == 1:
+            raise httpx.ConnectError("TLS EOF")
+        return _FakeHTTPResponse(
+            200,
+            {"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(backends, "_sleep_before_retry", lambda _attempt: None)
+
+    content = backends._http_chat_completion(
+        "prompt",
+        LLMConfig(base_url="https://example.com/v1", api_key="key", model="model"),
+    )
+
+    assert content == "ok"
+    assert len(requests) == 2
+
+
+def test_http_completion_honors_per_call_timeout_and_attempts(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        requests.append({"url": url, **kwargs})
+        return _FakeHTTPResponse(503, {"error": "busy"}, "provider busy")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    response = backends._post_with_retries(
+        LLMConfig(
+            base_url="https://example.com/v1",
+            api_key="key",
+            model="model",
+            timeout_seconds=7.5,
+            max_attempts=1,
+        ),
+        {"model": "model"},
+    )
+
+    assert response.status_code == 503
+    assert len(requests) == 1
+    assert requests[0]["timeout"] == 7.5
+
+
+def test_http_completion_retries_retryable_http_status(monkeypatch: MonkeyPatch) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> _FakeHTTPResponse:
+        requests.append({"url": url, **kwargs})
+        if len(requests) == 1:
+            return _FakeHTTPResponse(503, {"error": "busy"}, "provider busy")
+        return _FakeHTTPResponse(
+            200,
+            {"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(backends, "_sleep_before_retry", lambda _attempt: None)
+
+    content = backends._http_chat_completion(
+        "prompt",
+        LLMConfig(base_url="https://example.com/v1", api_key="key", model="model"),
+    )
+
+    assert content == "ok"
+    assert len(requests) == 2
+
+
 def test_http_completion_does_not_mutate_global_warning_filters(
     monkeypatch: MonkeyPatch,
 ) -> None:

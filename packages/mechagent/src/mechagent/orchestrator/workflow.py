@@ -15,6 +15,7 @@ from mechagent.orchestrator.agents import (
 from mechagent.orchestrator.agents.designer import DesignerAgentError
 from mechagent.orchestrator.ids import new_run_id
 from mechagent.orchestrator.models import ErrorRecord, TaskItem, TaskRunRecord, WorkflowResult
+from mechagent.orchestrator.progress import StageName, emit_progress
 
 
 class SequentialWorkflow:
@@ -65,15 +66,19 @@ class SequentialWorkflow:
 
         records: list[TaskRunRecord] = []
         errors: list[ErrorRecord] = []
+        emit_progress("planner", "running", _stage_message("planner", "running"))
         try:
             tasks = planner.plan(request)
         except Exception as exc:
+            emit_progress("planner", "failed", _stage_message("planner", "failed"))
             error = ErrorRecord.from_exception("planner", exc)
             errors.append(error)
             records.append(_request_failure_record(error))
+            emit_progress("reporter", "running", _stage_message("reporter", "running"))
             report, reporter_trace = reporter.render_with_trace(records)
             report_path = work_dir / "report.md"
             report_path.write_text(report, encoding="utf-8")
+            emit_progress("reporter", "complete", _stage_message("reporter", "complete"))
             return WorkflowResult(
                 success=False,
                 request=request,
@@ -84,6 +89,7 @@ class SequentialWorkflow:
                 errors=errors,
                 reporter_llm_trace=reporter_trace,
             )
+        emit_progress("planner", "complete", _stage_message("planner", "complete"))
 
         for task in tasks:
             task_work_dir = work_dir / task.task_id
@@ -94,11 +100,14 @@ class SequentialWorkflow:
             record = TaskRunRecord(task=task)
             current_node = "designer"
             try:
+                emit_progress("designer", "running", _stage_message("designer", "running"))
                 design_output = designer.design_with_trace(task)
                 model_params = design_output.model_params
                 record.model_params = model_params
                 record.designer_llm_trace = design_output.designer_llm_trace
+                emit_progress("designer", "complete", _stage_message("designer", "complete"))
                 current_node = "mesh"
+                emit_progress("mesh", "running", _stage_message("mesh", "running"))
                 mesh_output = mesh_agent.generate_with_trace(model_params, task)
                 mesh_result = mesh_output.mesh_result
                 record.mesh_result = mesh_result
@@ -106,16 +115,28 @@ class SequentialWorkflow:
                 if not mesh_result.success:
                     msg = mesh_result.error_message or "网格生成失败，求解阶段无法继续。"
                     raise ValueError(msg)
+                emit_progress("mesh", "complete", _stage_message("mesh", "complete"))
                 current_node = "solver"
+                emit_progress("solver", "running", _stage_message("solver", "running"))
                 solver_result = solver_agent.solve(task, model_params, mesh_result)
                 record.solver_result = solver_result
+                emit_progress("solver", "complete", _stage_message("solver", "complete"))
                 current_node = "postproc"
+                emit_progress("postproc", "running", _stage_message("postproc", "running"))
                 post_summary = post_agent.summarize(solver_result)
                 record.post_summary = post_summary
+                emit_progress("postproc", "complete", _stage_message("postproc", "complete"))
                 current_node = "analyst"
+                emit_progress("analyst", "running", _stage_message("analyst", "running"))
                 analysis_text = analyst.analyze(task, post_summary)
                 record.analysis_text = analysis_text
+                emit_progress("analyst", "complete", _stage_message("analyst", "complete"))
             except Exception as exc:
+                emit_progress(
+                    _stage_name(current_node),
+                    "failed",
+                    _stage_message(_stage_name(current_node), "failed"),
+                )
                 error = ErrorRecord.from_exception(current_node, exc, task)
                 errors.append(error)
                 if current_node == "designer" and isinstance(exc, DesignerAgentError):
@@ -132,9 +153,11 @@ class SequentialWorkflow:
         success = (
             not errors and bool(records) and all(record.solver_result.success for record in records)
         )
+        emit_progress("reporter", "running", _stage_message("reporter", "running"))
         report, reporter_trace = reporter.render_with_trace(records)
         report_path = work_dir / "report.md"
         report_path.write_text(report, encoding="utf-8")
+        emit_progress("reporter", "complete", _stage_message("reporter", "complete"))
         return WorkflowResult(
             success=success,
             request=request,
@@ -154,3 +177,37 @@ def _request_failure_record(error: ErrorRecord) -> TaskRunRecord:
         title="请求解析",
     )
     return TaskRunRecord(task=task, error=error)
+
+
+def _stage_name(value: str) -> StageName:
+    if value == "planner":
+        return "planner"
+    if value == "designer":
+        return "designer"
+    if value == "mesh":
+        return "mesh"
+    if value == "solver":
+        return "solver"
+    if value == "postproc":
+        return "postproc"
+    if value == "analyst":
+        return "analyst"
+    return "reporter"
+
+
+def _stage_message(stage: StageName, status: str) -> str:
+    labels = {
+        "planner": "任务识别",
+        "designer": "参数建模",
+        "mesh": "网格生成",
+        "solver": "求解执行",
+        "postproc": "结果提取",
+        "analyst": "工程校核",
+        "reporter": "报告输出",
+    }
+    status_labels = {
+        "running": "开始",
+        "complete": "完成",
+        "failed": "失败",
+    }
+    return f"{labels[stage]}{status_labels[status]}"

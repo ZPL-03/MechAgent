@@ -14,11 +14,11 @@ export default defineConfig({
   build: {
     outDir: "../../packages/mechagent/src/mechagent/ui/static",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 650,
     sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {
-          flow: ["@xyflow/react"],
           markdown: ["react-markdown"]
         }
       }

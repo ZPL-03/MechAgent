@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from mechagent.config import LLMSettings, MechAgentConfig, OrchestratorSettings
+from mechagent.llm.backends import LLMConfig
 from mechagent.orchestrator.agents import AnalystAgent, PostProcAgent, ReporterAgent
 from mechagent.orchestrator.llm_advisor import AgentLLMAdvisor, AgentLLMTrace
 from mechagent.orchestrator.llm_payload import advisory_payload
@@ -56,6 +57,47 @@ def test_llm_advisor_records_runtime_error(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert trace.used is True
     assert trace.error == "boom"
+
+
+def test_llm_advisor_uses_short_policy_for_advisory_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, LLMConfig] = {}
+
+    def fake_completion(_prompt: str, config: LLMConfig) -> str:
+        captured["config"] = config
+        return "{}"
+
+    monkeypatch.setattr("mechagent.orchestrator.llm_advisor.completion", fake_completion)
+
+    trace = AgentLLMAdvisor(_llm_enabled_config()).advise("MeshAgent", "task", "payload")
+
+    assert trace.used is True
+    assert captured["config"].timeout_seconds == 8.0
+    assert captured["config"].max_attempts == 1
+
+
+def test_llm_advisor_keeps_default_policy_for_structured_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, LLMConfig] = {}
+
+    def fake_completion(_prompt: str, config: LLMConfig) -> str:
+        captured["config"] = config
+        return "{}"
+
+    monkeypatch.setattr("mechagent.orchestrator.llm_advisor.completion", fake_completion)
+
+    trace = AgentLLMAdvisor(_llm_enabled_config()).complete(
+        "Designer",
+        "task",
+        "payload",
+        "{}",
+    )
+
+    assert trace.used is True
+    assert captured["config"].timeout_seconds == 60.0
+    assert captured["config"].max_attempts == 3
 
 
 def test_llm_advisor_records_provider_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -251,7 +293,8 @@ def test_reporter_advisory_payload_excludes_planner_trace_text(
 
     assert "private Planner prompt" not in captured["prompt"]
     assert "private Planner response" not in captured["prompt"]
-    assert "prompt_chars" in captured["prompt"]
+    assert "prompt_chars" not in captured["prompt"]
+    assert "report_scope" in captured["prompt"]
 
 
 def _private_trace(agent: str) -> AgentLLMTrace:

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pytest import MonkeyPatch
 
+import mechagent.core.adapters.calculix_mesh as calculix_mesh
 from mechagent.core.adapters import CalculiXAdapter, CalculiXInpMesher
 from mechagent.core.adapters.calculix import _parse_frd_data_line
 from mechagent.core.exceptions import SolverError
@@ -187,6 +190,170 @@ def test_calculix_inp_mesher_generates_plate_calculix_mesh(tmp_path: Path) -> No
     assert "*ELEMENT, TYPE=S4, ELSET=EALL" in text
 
 
+def test_static_parser_extracts_perforated_plate_params() -> None:
+    params = parse_static_model_params(
+        "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+    )
+
+    assert params.geometry.type is GeometryType.PLATE
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["hole_radius"] == pytest.approx(30.0)
+    assert params.geometry.dimensions["hole_center_x"] == pytest.approx(200.0)
+    assert params.geometry.dimensions["hole_center_y"] == pytest.approx(120.0)
+    assert params.mesh.seed_size == pytest.approx(6.0)
+
+
+def test_static_parser_extracts_eccentric_perforated_plate_params() -> None:
+    params = parse_static_model_params(
+        "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应"
+    )
+
+    assert params.geometry.type is GeometryType.PLATE
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["hole_radius"] == pytest.approx(25.0)
+    assert params.geometry.dimensions["hole_center_x"] == pytest.approx(180.0)
+    assert params.geometry.dimensions["hole_center_y"] == pytest.approx(105.0)
+    assert params.mesh.seed_size == pytest.approx(6.5)
+
+
+def test_calculix_inp_mesher_generates_perforated_plate_mesh(tmp_path: Path) -> None:
+    params = parse_static_model_params(
+        "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
+
+    result = mesher.generate(params)
+
+    assert result.success is True
+    assert result.mesh_file is not None
+    assert result.metadata["source"] == "gmsh_perforated_plate"
+    assert result.metadata["element_type"] == "S3/S4"
+    assert result.metadata["hole_radius_mm"] == pytest.approx(30.0)
+    assert result.metadata["node_count"] > 0
+    assert result.metadata["element_count"] > 0
+    text = result.mesh_file.read_text(encoding="utf-8")
+    assert "*NODE" in text
+    assert "*ELEMENT, TYPE=S4, ELSET=EALL" in text
+
+
+def test_calculix_inp_mesher_generates_eccentric_perforated_plate_mesh(
+    tmp_path: Path,
+) -> None:
+    params = parse_static_model_params(
+        "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应"
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
+
+    result = mesher.generate(params)
+
+    assert result.success is True
+    assert result.mesh_file is not None
+    assert result.metadata["source"] == "gmsh_perforated_plate"
+    assert result.metadata["element_type"] == "S3/S4"
+    assert result.metadata["hole_radius_mm"] == pytest.approx(25.0)
+    assert result.metadata["hole_center_x_mm"] == pytest.approx(180.0)
+    assert result.metadata["hole_center_y_mm"] == pytest.approx(105.0)
+    assert result.metadata["node_count"] > 0
+    assert result.metadata["element_count"] > 0
+
+
+def test_static_parser_extracts_multi_hole_plate_params() -> None:
+    params = parse_static_model_params(
+        "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
+    )
+
+    assert params.geometry.type is GeometryType.PLATE
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["hole_count"] == pytest.approx(3.0)
+    assert params.geometry.dimensions["hole_1_radius"] == pytest.approx(22.0)
+    assert params.geometry.dimensions["hole_2_radius"] == pytest.approx(27.0)
+    assert params.geometry.dimensions["hole_3_radius"] == pytest.approx(20.0)
+    assert params.geometry.dimensions["hole_radius"] == pytest.approx(22.0)
+    assert params.geometry.dimensions["hole_center_x"] == pytest.approx(130.0)
+    assert params.geometry.dimensions["hole_center_y"] == pytest.approx(110.0)
+    assert params.mesh.seed_size == pytest.approx(20.0 / 3.0)
+
+
+def test_static_parser_rejects_incomplete_indexed_plate_hole() -> None:
+    with pytest.raises(ValueError, match="圆孔直径或半径"):
+        parse_static_model_params(
+            "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
+        )
+
+
+def test_calculix_inp_mesher_generates_multi_hole_plate_mesh(tmp_path: Path) -> None:
+    params = parse_static_model_params(
+        "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
+
+    result = mesher.generate(params)
+
+    assert result.success is True
+    assert result.mesh_file is not None
+    assert result.metadata["source"] == "gmsh_perforated_plate"
+    assert result.metadata["hole_count"] == 3
+    assert result.metadata["hole_1_radius_mm"] == pytest.approx(22.0)
+    assert result.metadata["hole_2_center_x_mm"] == pytest.approx(260.0)
+    assert result.metadata["hole_3_center_y_mm"] == pytest.approx(120.0)
+    assert result.metadata["element_count"] > 0
+    assert "*ELEMENT, TYPE=S4, ELSET=EALL" in result.mesh_file.read_text(encoding="utf-8")
+
+
+def test_calculix_plate_mesher_disables_gmsh_signal_handlers(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gmsh_module = cast(Any, vars(calculix_mesh)["gmsh"])
+    captured: dict[str, object] = {}
+    next_id = {"value": 0}
+
+    def fake_initialize(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    def fake_id(*_args: object, **_kwargs: object) -> int:
+        next_id["value"] += 1
+        return next_id["value"]
+
+    monkeypatch.setattr(gmsh_module, "initialize", fake_initialize)
+    monkeypatch.setattr(gmsh_module, "finalize", lambda: captured.setdefault("finalized", True))
+    monkeypatch.setattr(gmsh_module.option, "setNumber", lambda *_args: None)
+    monkeypatch.setattr(gmsh_module.model, "add", lambda *_args: None)
+    monkeypatch.setattr(gmsh_module.model.geo, "addPoint", fake_id)
+    monkeypatch.setattr(gmsh_module.model.geo, "addLine", fake_id)
+    monkeypatch.setattr(gmsh_module.model.geo, "addCurveLoop", fake_id)
+    monkeypatch.setattr(gmsh_module.model.geo, "addPlaneSurface", fake_id)
+    monkeypatch.setattr(gmsh_module.model.geo.mesh, "setTransfiniteCurve", lambda *_args: None)
+    monkeypatch.setattr(gmsh_module.model.geo.mesh, "setTransfiniteSurface", lambda *_args: None)
+    monkeypatch.setattr(gmsh_module.model.geo.mesh, "setRecombine", lambda *_args: None)
+    monkeypatch.setattr(gmsh_module.model.geo, "synchronize", lambda: None)
+    monkeypatch.setattr(gmsh_module.model.mesh, "generate", lambda *_args: None)
+    monkeypatch.setattr(
+        gmsh_module.model.mesh,
+        "getNodes",
+        lambda: (
+            [1, 2, 3, 4],
+            [0.0, 0.0, 0.0, 300.0, 0.0, 0.0, 300.0, 200.0, 0.0, 0.0, 200.0, 0.0],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        gmsh_module.model.mesh,
+        "getElements",
+        lambda _dim: ([3], [[1]], [[1, 2, 3, 4]]),
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=20.0))
+
+    result = mesher.generate(tc02_model_params())
+
+    assert result.success is True
+    assert captured["interruptible"] is False
+    assert captured["finalized"] is True
+
+
 def test_calculix_inp_mesher_generates_solid_calculix_mesh(tmp_path: Path) -> None:
     mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=10.0))
 
@@ -319,6 +486,29 @@ def test_calculix_plate_pressure_direction_controls_cload_sign(tmp_path: Path) -
     text = input_file.read_text(encoding="utf-8")
 
     assert _sum_cload_values(text, dof=3) == pytest.approx(600.0)
+
+
+def test_calculix_perforated_plate_input_distributes_pressure_over_net_area(
+    tmp_path: Path,
+) -> None:
+    params = parse_static_model_params(
+        "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
+    mesh_result = mesher.generate(params)
+    assert mesh_result.mesh_file is not None
+    adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
+
+    input_file = adapter.generate_input(
+        params.model_copy(update={"mesh_file": mesh_result.mesh_file})
+    )
+    text = input_file.read_text(encoding="utf-8")
+
+    net_area = 400.0 * 240.0 - math.pi * 30.0**2
+    assert _sum_cload_values(text, dof=3) == pytest.approx(-0.004 * net_area, rel=0.02)
+    assert abs(_sum_cload_values(text, dof=3)) < 0.004 * 400.0 * 240.0
+    assert "EDGE, 3, 3, 0." in text
+    assert "MechAgent static plate" in text
 
 
 def test_calculix_solid_input_distributes_end_face_pressure(tmp_path: Path) -> None:

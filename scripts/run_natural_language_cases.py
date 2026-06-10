@@ -78,7 +78,14 @@ def main(argv: list[str] | None = None) -> int:
             and actual_geometry_type == case.geometry_type
             and actual_load_type == case.load_type
         )
-        solver_passed = bool(solver_result.get("passed", False))
+        solver_success = bool(solver_result.get("success", solver_result.get("passed", False)))
+        reference = solver_result.get("reference")
+        verification_status = str(solver_result.get("verification_status", "unverified"))
+        reference_checked = reference is not None or verification_status == "passed"
+        reference_passed = bool(solver_result.get("passed", False)) if reference_checked else None
+        case_passed = parsed_ok and solver_success
+        if reference_checked:
+            case_passed = case_passed and bool(reference_passed)
         rows.append(
             {
                 "case_id": case.case_id,
@@ -91,11 +98,14 @@ def main(argv: list[str] | None = None) -> int:
                 "parsed_ok": parsed_ok,
                 "quantity": solver_result.get("quantity"),
                 "predicted": solver_result.get("predicted"),
-                "reference": solver_result.get("reference"),
+                "reference": reference,
                 "relative_error": solver_result.get("relative_error"),
                 "tolerance": solver_result.get("tolerance"),
-                "solver_passed": solver_passed,
-                "passed": parsed_ok and solver_passed,
+                "solver_success": solver_success,
+                "verification_status": verification_status,
+                "reference_checked": reference_checked,
+                "reference_passed": reference_passed,
+                "passed": case_passed,
                 "report_path": result.summary.get("report_path"),
             }
         )

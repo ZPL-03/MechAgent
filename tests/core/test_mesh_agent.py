@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mechagent.config import MechAgentConfig, MesherSettings
+import pytest
+
+from mechagent.config import LLMSettings, MechAgentConfig, MesherSettings, OrchestratorSettings
 from mechagent.core.factory import register_mesher, unregister_mesher
 from mechagent.core.mesher import AbstractMesher, MeshResult
 from mechagent.core.models import ModelParams
@@ -71,7 +73,10 @@ def test_mesh_agent_validates_mesh_output_contract_and_upper_bound_metrics(
     assert missing_file_result.error_message == "网格结果缺少 mesh_file，求解阶段无法继续。"
 
 
-def test_mesh_agent_passes_model_seed_size_to_mesher(tmp_path: Path) -> None:
+def test_mesh_agent_passes_model_seed_size_to_mesher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     register_mesher("unit-seed-capturing-mesher", SeedCapturingMesher)
     params = tc01_model_params().model_copy(
         update={"mesh": tc01_model_params().mesh.model_copy(update={"seed_size": 12.5})}
@@ -79,11 +84,29 @@ def test_mesh_agent_passes_model_seed_size_to_mesher(tmp_path: Path) -> None:
     try:
         config = MechAgentConfig(mesher=MesherSettings(default="unit-seed-capturing-mesher"))
         result = MeshAgent(config, tmp_path).generate(params)
+
+        def fake_completion(prompt: str, _config: object) -> str:
+            assert "current_mesh" in prompt
+            assert "strategy_rules" in prompt
+            return '{"seed_size": 6.25, "element_type": "B31", "rationale": "梁长方向加密"}'
+
+        monkeypatch.setattr("mechagent.orchestrator.llm_advisor.completion", fake_completion)
+        llm_config = MechAgentConfig(
+            mesher=MesherSettings(default="unit-seed-capturing-mesher"),
+            orchestrator=OrchestratorSettings(use_llm_agents=True),
+            llm=LLMSettings(base_url="https://example.com/v1", api_key="key", model="demo"),
+        )
+        llm_output = MeshAgent(llm_config, tmp_path / "llm").generate_with_trace(params)
     finally:
         unregister_mesher("unit-seed-capturing-mesher")
 
     assert result.success is True
     assert result.metadata["seed_size_mm"] == 12.5
+    assert llm_output.mesh_result.success is True
+    assert llm_output.mesh_result.metadata["seed_size_mm"] == 6.25
+    assert llm_output.mesh_result.metadata["mesh_strategy_source"] == "llm"
+    assert llm_output.mesh_llm_trace.used is True
+    assert llm_output.mesh_llm_trace.error is None
 
 
 def test_mesh_agent_uses_capability_mesher_over_global_default(tmp_path: Path) -> None:

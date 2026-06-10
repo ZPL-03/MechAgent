@@ -11,7 +11,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent.config import MechAgentConfig
-from mechagent.orchestrator import ErrorRecord, SequentialWorkflow, TaskRunRecord, WorkflowResult
+from mechagent.orchestrator import (
+    ErrorRecord,
+    SequentialWorkflow,
+    TaskItem,
+    TaskRunRecord,
+    WorkflowResult,
+)
+from mechagent.orchestrator.agents import PlannerAgent
 from mechagent.orchestrator.graph import build_graph
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 
@@ -67,6 +74,33 @@ class MechAgentResult(BaseModel):
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(self.report, encoding="utf-8")
         return report_path
+
+
+class MechAgentInspection(BaseModel):
+    """自然语言仿真请求预检结果。
+
+    Args:
+        success: Planner 是否完成任务识别。
+        ready: 识别到的任务是否具备执行所需输入。
+        request: 原始自然语言请求。
+        tasks: 任务识别结果。
+        errors: 预检错误记录。
+    Returns:
+        MechAgentInspection: SDK、CLI 和 Studio 共用的预检结果。
+    Raises:
+        pydantic.ValidationError: 当字段不满足 schema 时抛出。
+    Example:
+        >>> MechAgentInspection(success=True, ready=True, request="x").ready
+        True
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool = False
+    ready: bool = False
+    request: str = ""
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MechAgent:
@@ -155,6 +189,93 @@ class MechAgent:
             output_dir=result.work_dir,
             report_path=result.report_path,
         )
+
+    def inspect(
+        self,
+        request: str,
+        use_llm_agents: Optional[bool] = None,
+    ) -> MechAgentInspection:
+        """预检自然语言请求，不执行网格、求解和后处理。
+
+        Args:
+            request: 用户自然语言仿真请求。
+            use_llm_agents: 单次预检是否启用 Planner LLM；为 None 时使用配置值。
+        Returns:
+            MechAgentInspection: 任务识别、缺参和错误信息。
+        Raises:
+            pydantic.ValidationError: 当结果字段不满足 schema 时抛出。
+        Example:
+            >>> agent = MechAgent(MechAgentConfig())
+            >>> agent.inspect("长1000mm钢悬臂梁，一端固支，端部向下1000N").success
+            True
+        """
+
+        active_config = self.config
+        if use_llm_agents is not None:
+            active_config = self.config.model_copy(deep=True)
+            active_config.orchestrator.use_llm_agents = use_llm_agents
+
+        text = request.strip()
+        if not text:
+            error = ErrorRecord(
+                node="planner",
+                code="empty_request",
+                message="request 不能为空。",
+            )
+            return MechAgentInspection(
+                success=False,
+                ready=False,
+                request=request,
+                errors=[error.model_dump(mode="json")],
+            )
+
+        try:
+            tasks = PlannerAgent(active_config).plan(text)
+        except Exception as exc:
+            error = ErrorRecord.from_exception("planner", exc)
+            return MechAgentInspection(
+                success=False,
+                ready=False,
+                request=request,
+                errors=[error.model_dump(mode="json")],
+            )
+
+        task_payloads = [_inspection_task_payload(task) for task in tasks]
+        ready = bool(task_payloads) and all(bool(task.get("complete")) for task in task_payloads)
+        return MechAgentInspection(
+            success=True,
+            ready=ready,
+            request=request,
+            tasks=task_payloads,
+            errors=[],
+        )
+
+
+def _inspection_task_payload(task: TaskItem) -> dict[str, Any]:
+    data = task.model_dump(mode="json", exclude={"planner_llm_trace"})
+    intent = getattr(task, "intent", None)
+    trace = getattr(task, "planner_llm_trace", None)
+    missing_fields = list(getattr(intent, "missing_fields", []) or [])
+    data["intent"] = intent.model_dump(mode="json") if intent is not None else None
+    data["complete"] = not missing_fields
+    data["missing_fields"] = missing_fields
+    data["geometry_type"] = getattr(intent, "geometry_type", None) if intent is not None else None
+    data["confidence"] = getattr(intent, "confidence", None) if intent is not None else None
+    data["source"] = getattr(intent, "source", "") if intent is not None else ""
+    data["planner_llm_trace"] = _public_trace(trace)
+    return data
+
+
+def _public_trace(trace: AgentLLMTrace | None) -> dict[str, Any] | None:
+    if trace is None:
+        return None
+    return {
+        "agent": trace.agent,
+        "used": trace.used,
+        "error": trace.error,
+        "prompt_chars": len(trace.prompt),
+        "response_chars": len(trace.response),
+    }
 
 
 def _config_env(config_path: Path) -> dict[str, str]:

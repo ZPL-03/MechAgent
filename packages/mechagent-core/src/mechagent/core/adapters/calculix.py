@@ -388,7 +388,7 @@ def _regular_plate_mesh(
     length: float,
     width: float,
     seed_size: float,
-) -> tuple[list[str], dict[int, tuple[float, float, float]], list[tuple[int, int, int, int]]]:
+) -> tuple[list[str], dict[int, tuple[float, float, float]], list[tuple[int, ...]]]:
     nx = max(4, int(round(length / seed_size)))
     ny = max(4, int(round(width / seed_size)))
 
@@ -396,7 +396,7 @@ def _regular_plate_mesh(
         return j * (nx + 1) + i + 1
 
     nodes: dict[int, tuple[float, float, float]] = {}
-    elements: list[tuple[int, int, int, int]] = []
+    elements: list[tuple[int, ...]] = []
     lines = ["*NODE"]
     for j in range(ny + 1):
         y = width * j / ny
@@ -641,13 +641,13 @@ def _dof_key(value: str) -> str:
 
 def _read_mesh_sections(
     path: Path,
-) -> tuple[list[str], dict[int, tuple[float, float, float]], list[tuple[int, int, int, int]]]:
+) -> tuple[list[str], dict[int, tuple[float, float, float]], list[tuple[int, ...]]]:
     lines = path.read_text(encoding="utf-8").splitlines()
     nodes = _parse_nodes(lines)
     if not nodes:
         msg = f"网格文件缺少 *NODE 数据: {path}"
         raise SolverError(msg)
-    elements = _parse_quad_elements(lines)
+    elements = _parse_shell_elements(lines)
     has_element_section = any(line.strip().upper().startswith("*ELEMENT") for line in lines)
     if not has_element_section:
         msg = f"网格文件缺少 *ELEMENT 数据: {path}"
@@ -676,23 +676,26 @@ def _parse_nodes(lines: list[str]) -> dict[int, tuple[float, float, float]]:
     return nodes
 
 
-def _parse_quad_elements(lines: list[str]) -> list[tuple[int, int, int, int]]:
-    elements: list[tuple[int, int, int, int]] = []
+def _parse_shell_elements(lines: list[str]) -> list[tuple[int, ...]]:
+    elements: list[tuple[int, ...]] = []
     active = False
+    expected_nodes = 0
     for raw in lines:
         line = raw.strip()
         upper = line.upper()
         if upper.startswith("*ELEMENT"):
-            active = "S4" in upper
+            active = "S3" in upper or "S4" in upper
+            expected_nodes = 3 if "S3" in upper else 4 if "S4" in upper else 0
             continue
         if active and line.startswith("*"):
             active = False
+            expected_nodes = 0
             continue
         if not active or not line:
             continue
         parts = [part.strip() for part in line.split(",")]
-        if len(parts) >= 5:
-            elements.append((int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])))
+        if expected_nodes and len(parts) >= expected_nodes + 1:
+            elements.append(tuple(int(part) for part in parts[1 : expected_nodes + 1]))
     return elements
 
 
@@ -752,17 +755,20 @@ def _nearest_node(
 
 def _plate_nodal_load_lines(
     nodes: dict[int, tuple[float, float, float]],
-    elements: list[tuple[int, int, int, int]],
+    elements: list[tuple[int, ...]],
     load: LoadSpec,
 ) -> list[str]:
     dof, sign = _load_dof_and_sign(load)
     if dof != 3:
         msg = "板面载荷必须沿全局 Z 向。"
         raise SolverError(msg)
+    if not elements:
+        msg = "板面载荷需要至少一个 S3 或 S4 壳单元。"
+        raise SolverError(msg)
     loads = dict.fromkeys(nodes, 0.0)
     for element in elements:
-        area = _quad_area([nodes[node_id] for node_id in element])
-        nodal_force = sign * abs(load.magnitude) * area / 4.0
+        area = _polygon_area([nodes[node_id] for node_id in element])
+        nodal_force = sign * abs(load.magnitude) * area / len(element)
         for node_id in element:
             loads[node_id] += nodal_force
     return [f"{node_id}, 3, {force:.12g}" for node_id, force in sorted(loads.items())]
@@ -854,6 +860,20 @@ def _quad_area(points: list[tuple[float, float, float]]) -> float:
         points[2],
         points[3],
     )
+
+
+def _polygon_area(points: list[tuple[float, float, float]]) -> float:
+    if len(points) == 3:
+        return _triangle_area(points[0], points[1], points[2])
+    if len(points) == 4:
+        return _quad_area(points)
+    if len(points) > 4:
+        return sum(
+            _triangle_area(points[0], points[index], points[index + 1])
+            for index in range(1, len(points) - 1)
+        )
+    msg = "壳单元面积计算需要至少 3 个节点。"
+    raise SolverError(msg)
 
 
 def _triangle_area(

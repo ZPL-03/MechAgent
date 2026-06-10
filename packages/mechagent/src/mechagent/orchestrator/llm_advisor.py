@@ -10,6 +10,9 @@ from mechagent.config import MechAgentConfig
 from mechagent.llm import LLMConfig, completion
 from mechagent.redaction import redact_sensitive_text
 
+_ADVISORY_TIMEOUT_SECONDS = 8.0
+_ADVISORY_MAX_ATTEMPTS = 1
+
 
 class AgentLLMTrace(BaseModel):
     """Agent 调用 LLM 的审计记录。
@@ -85,6 +88,8 @@ class AgentLLMAdvisor:
             task,
             payload,
             "只输出 JSON 对象，字段包括 assessment、missing_fields、risks、recommended_action。",
+            timeout_seconds=_ADVISORY_TIMEOUT_SECONDS,
+            max_attempts=_ADVISORY_MAX_ATTEMPTS,
         )
 
     def complete(
@@ -93,6 +98,9 @@ class AgentLLMAdvisor:
         task: str,
         payload: str,
         output_contract: str,
+        *,
+        timeout_seconds: float | None = None,
+        max_attempts: int | None = None,
     ) -> AgentLLMTrace:
         """调用 LLM 并按指定输出契约记录 trace。
 
@@ -120,15 +128,26 @@ class AgentLLMAdvisor:
             return AgentLLMTrace(agent=agent, used=False)
 
         prompt = _build_prompt(agent, task, payload, output_contract)
+        llm_config = LLMConfig(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            model=settings.model,
+            temperature=settings.temperature,
+        )
+        llm_config = LLMConfig(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            model=settings.model,
+            temperature=settings.temperature,
+            timeout_seconds=timeout_seconds
+            if timeout_seconds is not None
+            else llm_config.timeout_seconds,
+            max_attempts=max_attempts if max_attempts is not None else llm_config.max_attempts,
+        )
         try:
             response = completion(
                 prompt,
-                LLMConfig(
-                    base_url=settings.base_url,
-                    api_key=settings.api_key,
-                    model=settings.model,
-                    temperature=settings.temperature,
-                ),
+                llm_config,
             )
         except Exception as exc:
             return AgentLLMTrace(

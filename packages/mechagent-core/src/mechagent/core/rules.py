@@ -297,6 +297,7 @@ def _check_plate_contract(
     violations: list[RuleViolation],
 ) -> None:
     _check_required_dimensions(model_params, ("length", "width", "thickness"), violations)
+    _check_plate_hole_dimensions(model_params, violations)
     if model_params.mesh.element_type is not ElementType.S4:
         violations.append(
             RuleViolation(
@@ -338,6 +339,91 @@ def _check_plate_contract(
                 message="板静力执行路径支持纯全局 Z 向面载荷。",
             )
         )
+
+
+def _check_plate_hole_dimensions(
+    model_params: ModelParams,
+    violations: list[RuleViolation],
+) -> None:
+    dimensions = model_params.geometry.dimensions
+    expected_count = int(dimensions.get("hole_count", 0.0))
+    holes = _plate_holes_from_dimensions(dimensions)
+    if not holes:
+        if expected_count >= 1 or any(key.startswith("hole_") for key in dimensions):
+            violations.append(
+                RuleViolation(
+                    field="geometry.dimensions.hole",
+                    value=0.0,
+                    message="圆孔参数需要同时包含半径和孔心 x/y 坐标。",
+                )
+            )
+        return
+    if "length" not in dimensions or "width" not in dimensions:
+        return
+    length = dimensions["length"]
+    width = dimensions["width"]
+    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+        margin = min(center_x, length - center_x, center_y, width - center_y)
+        if radius >= margin:
+            field = (
+                f"geometry.dimensions.hole_{index}_radius"
+                if len(holes) > 1
+                else "geometry.dimensions.hole_radius"
+            )
+            violations.append(
+                RuleViolation(
+                    field=field,
+                    value=radius,
+                    message="圆孔半径需要小于孔心到外边界的最小距离。",
+                )
+            )
+    for left_index, left in enumerate(holes):
+        left_radius, left_x, left_y = left
+        for right_index, right in enumerate(holes[left_index + 1 :], start=left_index + 2):
+            right_radius, right_x, right_y = right
+            distance = ((left_x - right_x) ** 2 + (left_y - right_y) ** 2) ** 0.5
+            if distance > left_radius + right_radius:
+                continue
+            violations.append(
+                RuleViolation(
+                    field=f"geometry.dimensions.hole_{right_index}_center",
+                    value=distance,
+                    message=(
+                        f"第 {left_index + 1} 个圆孔与第 {right_index} 个圆孔"
+                        "中心距需要大于两个孔半径之和。"
+                    ),
+                )
+            )
+
+
+def _plate_holes_from_dimensions(
+    dimensions: dict[str, float],
+) -> tuple[tuple[float, float, float], ...]:
+    hole_count = int(dimensions.get("hole_count", 0.0))
+    if hole_count >= 1:
+        holes: list[tuple[float, float, float]] = []
+        for index in range(1, hole_count + 1):
+            radius = dimensions.get(f"hole_{index}_radius")
+            center_x = dimensions.get(f"hole_{index}_center_x")
+            center_y = dimensions.get(f"hole_{index}_center_y")
+            if hole_count == 1:
+                radius = radius if radius is not None else dimensions.get("hole_radius")
+                center_x = center_x if center_x is not None else dimensions.get("hole_center_x")
+                center_y = center_y if center_y is not None else dimensions.get("hole_center_y")
+            if radius is None or center_x is None or center_y is None:
+                return ()
+            holes.append((radius, center_x, center_y))
+        return tuple(holes)
+
+    if all(name in dimensions for name in ("hole_radius", "hole_center_x", "hole_center_y")):
+        return (
+            (
+                dimensions["hole_radius"],
+                dimensions["hole_center_x"],
+                dimensions["hole_center_y"],
+            ),
+        )
+    return ()
 
 
 def _check_solid_contract(

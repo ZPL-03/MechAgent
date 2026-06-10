@@ -3,16 +3,48 @@
 from __future__ import annotations
 
 import mechagent
-from mechagent import MechAgent, MechAgentResult
+from mechagent import MechAgent, MechAgentInspection, MechAgentResult, SimulationExample
 from mechagent import core as mechagent_core
+from mechagent.config import MechAgentConfig
 
 
 def test_public_api_exports_version_and_sdk() -> None:
     assert MechAgent.__name__ == "MechAgent"
+    assert MechAgentInspection.__name__ == "MechAgentInspection"
     assert MechAgentResult.__name__ == "MechAgentResult"
     assert isinstance(mechagent.__version__, str)
     assert mechagent.__version__
-    assert {"MechAgent", "MechAgentResult", "__version__"} <= set(mechagent.__all__)
+    assert {
+        "MechAgent",
+        "MechAgentInspection",
+        "MechAgentResult",
+        "SimulationExample",
+        "all_examples",
+        "example_payloads",
+        "__version__",
+    } <= set(mechagent.__all__)
+    assert isinstance(mechagent.all_examples()[0], SimulationExample)
+
+
+def test_sdk_inspect_returns_planner_preflight_without_solving() -> None:
+    inspection = MechAgent(MechAgentConfig()).inspect(
+        "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
+    )
+
+    assert inspection.success is True
+    assert inspection.ready is True
+    assert inspection.tasks[0]["task_id"] == "TASK_1"
+    assert inspection.tasks[0]["capability_id"] == "structural_static"
+    assert inspection.tasks[0]["geometry_type"] == "beam"
+    assert inspection.tasks[0]["missing_fields"] == []
+
+
+def test_sdk_inspect_reports_missing_inputs() -> None:
+    inspection = MechAgent(MechAgentConfig()).inspect("求解一根悬臂梁的静力响应")
+
+    assert inspection.success is True
+    assert inspection.ready is False
+    assert inspection.tasks[0]["missing_fields"]
 
 
 def test_core_public_api_exports_rule_checks() -> None:

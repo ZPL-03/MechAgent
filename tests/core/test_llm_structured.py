@@ -134,6 +134,112 @@ def test_parse_llm_model_params_accepts_compact_plate_payload() -> None:
     assert params.bcs[0].region == "all_edges"
 
 
+def test_parse_llm_model_params_normalizes_multi_hole_plate_payload() -> None:
+    trace = AgentLLMTrace(
+        agent="Designer",
+        used=True,
+        response=json.dumps(
+            {
+                "geometry": {
+                    "type": "plate",
+                    "dimensions": {
+                        "length": {"value": 520, "unit": "mm"},
+                        "width": {"value": 320, "unit": "mm"},
+                        "thickness": {"value": 8, "unit": "mm"},
+                        "holes": [
+                            {
+                                "center": {
+                                    "x": {"value": 130, "unit": "mm"},
+                                    "y": {"value": 110, "unit": "mm"},
+                                },
+                                "diameter": {"value": 44, "unit": "mm"},
+                            },
+                            {
+                                "center_x": "260mm",
+                                "center_y": "210mm",
+                                "radius": "27mm",
+                            },
+                            {
+                                "x": "410mm",
+                                "y": "120mm",
+                                "hole_diameter": "40mm",
+                            },
+                        ],
+                    },
+                },
+                "material": {"E": "210000MPa", "nu": 0.3, "rho": "7.85e-9 tonne/mm3"},
+                "loads": [{"type": "pressure", "magnitude": "0.0025MPa", "direction": "downward"}],
+                "bcs": [{"type": "simple_support"}],
+                "mesh": {"element_type": "S4", "seed_size": "8mm"},
+                "analysis": {"type": "static", "nlgeom": False},
+                "metadata": {},
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    capability = get_capability("structural_static")
+    params, parsed_trace = parse_llm_model_params(
+        trace,
+        "多孔薄板静力分析",
+        normalizer=capability.model_normalizer,
+    )
+
+    assert parsed_trace.error is None
+    assert params is not None
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["hole_count"] == 3.0
+    assert params.geometry.dimensions["hole_1_radius"] == 22.0
+    assert params.geometry.dimensions["hole_2_center_x"] == 260.0
+    assert params.geometry.dimensions["hole_3_center_y"] == 120.0
+    assert params.loads[0].direction == (0.0, 0.0, -1.0)
+    assert params.material.type.value == "isotropic"
+    assert params.loads[0].magnitude == 0.0025
+    assert params.bcs[0].region == "all_edges"
+
+
+def test_parse_llm_model_params_rejects_incomplete_multi_hole_payload() -> None:
+    trace = AgentLLMTrace(
+        agent="Designer",
+        used=True,
+        response=json.dumps(
+            {
+                "geometry": {
+                    "type": "plate",
+                    "dimensions": {
+                        "length": "520mm",
+                        "width": "320mm",
+                        "thickness": "8mm",
+                        "holes": [
+                            {"center_x": "130mm", "center_y": "110mm", "diameter": "44mm"},
+                            {"center_x": "260mm", "center_y": "210mm"},
+                        ],
+                    },
+                },
+                "material": {"E": "210000MPa", "nu": 0.3, "rho": "7.85e-9 tonne/mm3"},
+                "loads": [{"type": "pressure", "magnitude": "0.0025MPa", "direction": "downward"}],
+                "bcs": [{"type": "simple_support"}],
+                "mesh": {"element_type": "S4", "seed_size": "8mm"},
+                "analysis": {"type": "static", "nlgeom": False},
+                "metadata": {},
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    capability = get_capability("structural_static")
+    params, parsed_trace = parse_llm_model_params(
+        trace,
+        "多孔薄板静力分析",
+        normalizer=capability.model_normalizer,
+    )
+
+    assert params is None
+    assert parsed_trace.error is not None
+    assert "holes 数组元素缺少半径或孔心坐标" in parsed_trace.error
+
+
 def test_parse_llm_model_params_accepts_compact_solid_payload() -> None:
     trace = AgentLLMTrace(
         agent="Designer",

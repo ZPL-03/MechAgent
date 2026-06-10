@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mechagent"
 version = "0.1.0"
-description = "自然语言驱动开源 CAE/FEA 工作流的多智能体编排框架。"
+description = "自然语言驱动开源 CAE/FEA 工作流的多智能体仿真产品与编排框架。"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

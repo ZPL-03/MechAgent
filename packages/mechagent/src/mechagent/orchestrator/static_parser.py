@@ -355,7 +355,12 @@ def parse_static_plate_model_params(request: str) -> ModelParams:
 
     length = dimensions["length"]
     width = dimensions["width"]
-    seed_size = max(min(length, width) / 40.0, 1.0)
+    load_case = (
+        "perforated_plate_pressure"
+        if _is_perforated_plate_dimensions(dimensions)
+        else "simply_supported_pressure"
+    )
+    seed_size = _plate_seed_size(length, width, dimensions)
     return ModelParams(
         geometry=GeometrySpec(type=GeometryType.PLATE, dimensions=dimensions),
         material=material,
@@ -377,8 +382,10 @@ def parse_static_plate_model_params(request: str) -> ModelParams:
         ],
         mesh=MeshSpec(element_type=ElementType.S4, seed_size=seed_size),
         analysis=AnalysisSpec(type=AnalysisType.STATIC, nlgeom=False),
-        case_id="STATIC-PLATE",
-        load_case="simply_supported_pressure",
+        case_id="STATIC-PERFORATED-PLATE"
+        if load_case == "perforated_plate_pressure"
+        else "STATIC-PLATE",
+        load_case=load_case,
         metadata={
             "source": "natural_language",
             "raw_request": request,
@@ -513,8 +520,15 @@ def _missing_beam_fields(request: str) -> list[str]:
 
 def _missing_plate_fields(request: str) -> list[str]:
     missing: list[str] = []
-    if _extract_plate_dimensions(request) is None:
+    dimensions = _extract_plate_dimensions(request)
+    if dimensions is None:
         missing.append("板长、板宽和板厚")
+    if (
+        _has_circular_hole(request)
+        and dimensions is not None
+        and not _is_perforated_plate_dimensions(dimensions)
+    ):
+        missing.append("圆孔直径或半径")
     if _extract_material(request) is None:
         missing.append("材料")
     if not _has_simple_support(request):
@@ -595,11 +609,14 @@ def _extract_plate_dimensions(text: str) -> Optional[dict[str, float]]:
     match = compact_pattern.search(text)
     if match is not None:
         length, width, thickness = _extract_dimension_triplet(match)
-        return {
-            "length": length,
-            "width": width,
-            "thickness": thickness,
-        }
+        return _with_plate_features(
+            text,
+            {
+                "length": length,
+                "width": width,
+                "thickness": thickness,
+            },
+        )
 
     trailing_compact_pattern = re.compile(
         rf"({_NUMBER})\s*({_LENGTH_UNITS})?\s*{_DIMENSION_SEPARATOR}\s*"
@@ -610,18 +627,148 @@ def _extract_plate_dimensions(text: str) -> Optional[dict[str, float]]:
     match = trailing_compact_pattern.search(text)
     if match is not None:
         length, width, thickness = _extract_dimension_triplet(match)
-        return {
-            "length": length,
-            "width": width,
-            "thickness": thickness,
-        }
+        return _with_plate_features(
+            text,
+            {
+                "length": length,
+                "width": width,
+                "thickness": thickness,
+            },
+        )
 
     named_length = _extract_named_length(text, ("板长", "长度", "长", "length", "l"))
     named_width = _extract_named_length(text, ("板宽", "宽度", "宽", "width", "b"))
     named_thickness = _extract_named_length(text, ("板厚", "厚度", "厚", "thickness", "t"))
     if named_length is None or named_width is None or named_thickness is None:
         return None
-    return {"length": named_length, "width": named_width, "thickness": named_thickness}
+    return _with_plate_features(
+        text,
+        {"length": named_length, "width": named_width, "thickness": named_thickness},
+    )
+
+
+def _with_plate_features(text: str, dimensions: dict[str, float]) -> dict[str, float]:
+    holes = _extract_plate_holes(text, dimensions["length"], dimensions["width"])
+    if not holes:
+        return dimensions
+    enriched = dict(dimensions)
+    first_radius, first_center_x, first_center_y = holes[0]
+    enriched.update(
+        {
+            "hole_count": float(len(holes)),
+            "hole_radius": first_radius,
+            "hole_center_x": first_center_x,
+            "hole_center_y": first_center_y,
+        }
+    )
+    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+        enriched[f"hole_{index}_radius"] = radius
+        enriched[f"hole_{index}_center_x"] = center_x
+        enriched[f"hole_{index}_center_y"] = center_y
+    return enriched
+
+
+def _has_circular_hole(text: str) -> bool:
+    normalized = _normalized(text)
+    return any(
+        keyword in text
+        for keyword in ("圆孔", "开孔", "孔径", "孔半径", "中心孔", "带孔", "多孔")
+    ) or any(keyword in normalized for keyword in ("hole", "perforated", "circular opening"))
+
+
+def _extract_plate_holes(
+    text: str,
+    length: float,
+    width: float,
+) -> tuple[tuple[float, float, float], ...]:
+    if re.search(r"(?:孔|hole)\s*\d+", text, flags=re.IGNORECASE):
+        return _extract_indexed_holes(text)
+
+    hole_radius = _extract_hole_radius(text)
+    if hole_radius is None:
+        return ()
+    center_x, center_y = _extract_hole_center(text, length, width)
+    return ((hole_radius, center_x, center_y),)
+
+
+def _extract_indexed_holes(text: str) -> tuple[tuple[float, float, float], ...]:
+    markers = tuple(re.finditer(r"(?:孔|hole)\s*\d+", text, flags=re.IGNORECASE))
+    holes: list[tuple[float, float, float]] = []
+    for marker_index, marker in enumerate(markers):
+        next_start = (
+            markers[marker_index + 1].start()
+            if marker_index + 1 < len(markers)
+            else len(text)
+        )
+        segment = text[marker.start() : next_start]
+        radius = _extract_hole_radius(segment)
+        center_x = _extract_named_length(
+            segment,
+            ("孔中心x", "孔心x", "中心x", "hole center x", "center x", "hole_center_x", "x"),
+        )
+        center_y = _extract_named_length(
+            segment,
+            ("孔中心y", "孔心y", "中心y", "hole center y", "center y", "hole_center_y", "y"),
+        )
+        if radius is None or center_x is None or center_y is None:
+            return ()
+        holes.append((radius, center_x, center_y))
+    return tuple(holes)
+
+
+def _extract_hole_radius(text: str) -> Optional[float]:
+    diameter_pattern = re.compile(
+        rf"(?:孔径|孔直径|圆孔直径|hole\s*diameter|diameter)\s*(?:为|是|=|:|：)?\s*"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})",
+        re.IGNORECASE,
+    )
+    match = diameter_pattern.search(text)
+    if match is not None:
+        return _length_to_mm(float(match.group(1)), match.group(2)) / 2.0
+
+    radius_pattern = re.compile(
+        rf"(?:孔半径|圆孔半径|hole\s*radius|radius)\s*(?:为|是|=|:|：)?\s*"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})",
+        re.IGNORECASE,
+    )
+    match = radius_pattern.search(text)
+    if match is not None:
+        return _length_to_mm(float(match.group(1)), match.group(2))
+    return None
+
+
+def _extract_hole_center(text: str, length: float, width: float) -> tuple[float, float]:
+    x_value = _extract_named_length(text, ("孔中心x", "孔心x", "hole center x", "hole_center_x"))
+    y_value = _extract_named_length(text, ("孔中心y", "孔心y", "hole center y", "hole_center_y"))
+    if x_value is not None and y_value is not None:
+        return (x_value, y_value)
+    return (length / 2.0, width / 2.0)
+
+
+def _is_perforated_plate_dimensions(dimensions: dict[str, float]) -> bool:
+    return "hole_radius" in dimensions or dimensions.get("hole_count", 0.0) >= 1.0
+
+
+def _plate_seed_size(length: float, width: float, dimensions: dict[str, float]) -> float:
+    base = max(min(length, width) / 40.0, 1.0)
+    hole_radii = _dimension_hole_radii(dimensions)
+    if not hole_radii:
+        return base
+    return max(min(base, min(hole_radii) / 3.0), 0.75)
+
+
+def _dimension_hole_radii(dimensions: dict[str, float]) -> tuple[float, ...]:
+    hole_count = int(dimensions.get("hole_count", 0.0))
+    radii = tuple(
+        radius
+        for index in range(1, hole_count + 1)
+        if (radius := dimensions.get(f"hole_{index}_radius")) is not None
+    )
+    if radii:
+        return radii
+    if (radius := dimensions.get("hole_radius")) is not None:
+        return (radius,)
+    return ()
 
 
 def _extract_solid_dimensions(text: str) -> Optional[dict[str, float]]:

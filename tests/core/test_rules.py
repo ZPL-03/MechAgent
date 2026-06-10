@@ -184,6 +184,33 @@ def test_static_execution_contract_rejects_oblique_solid_axial_load() -> None:
     assert "纯全局 X 向端面轴向载荷" in violations[0].message
 
 
+def test_static_execution_contract_rejects_overlapping_plate_holes() -> None:
+    base = tc02_model_params()
+    params = base.model_copy(
+        update={
+            "geometry": GeometrySpec(
+                type=GeometryType.PLATE,
+                dimensions={
+                    "length": 300.0,
+                    "width": 200.0,
+                    "thickness": 5.0,
+                    "hole_count": 2.0,
+                    "hole_1_radius": 35.0,
+                    "hole_1_center_x": 120.0,
+                    "hole_1_center_y": 100.0,
+                    "hole_2_radius": 35.0,
+                    "hole_2_center_x": 170.0,
+                    "hole_2_center_y": 100.0,
+                },
+            )
+        }
+    )
+
+    violations = check_static_execution_contract(params)
+
+    assert any("圆孔与第 2 个圆孔" in item.message for item in violations)
+
+
 def test_ensure_static_execution_contract_raises_readable_error() -> None:
     base = tc01_model_params()
     params = base.model_copy(

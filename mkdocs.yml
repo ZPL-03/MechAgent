@@ -1,5 +1,5 @@
 site_name: MechAgent
-site_description: 自然语言驱动开源 CAE/FEA 工作流的多智能体编排框架
+site_description: 自然语言驱动开源 CAE/FEA 工作流的多智能体仿真产品与编排框架
 repo_url: https://github.com/ZPL-03/MechAgent
 repo_name: ZPL-03/MechAgent
 theme:
@@ -7,6 +7,7 @@ theme:
   language: zh
 nav:
   - 首页: index.md
+  - 产品蓝图: product_blueprint.md
   - 本地开发配置: local_setup.md
   - 技术报告: technical_report.md
 markdown_extensions:

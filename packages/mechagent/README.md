@@ -1,13 +1,23 @@
 # mechagent
 
-`mechagent` 是 MechAgent 的多智能体主框架包，提供 SDK、CLI、LLM 后端、知识库和
-Agent 编排层，并提供 MechAgent Studio 本地工程工作台。
+`mechagent` 是 MechAgent 的多智能体主框架包，提供 SDK、CLI、LLM 后端、知识库、
+Agent 编排层和 MechAgent Studio 本地工程工作台。它负责把自然语言 CAE/FEA 需求编排为
+参数建模、网格划分、求解计算、后处理、校核、可视化和报告生成链路。
+
+更完整的产品蓝图、总体架构、3D 可视化目标、进度展示边界和能力路线见 [docs/product_blueprint.md](../../docs/product_blueprint.md)。
 
 ## 命令
 
 ```powershell
 python -m mechagent.cli studio --open-browser
+python -m mechagent.cli capabilities
+python -m mechagent.cli examples
+python -m mechagent.cli examples --geometry plate --model-case STATIC-PERFORATED-PLATE
+python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
+python -m mechagent.cli run "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
+python -m mechagent.cli run "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应"
+python -m mechagent.cli run "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --json
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
@@ -28,8 +38,9 @@ Planner 按 `SimulationCapability` 注册表生成 `SimulationIntent` 和 `TaskI
 能力默认工具使用工厂注册名称校验，并在注册时规范化为工厂注册名。扩展能力通过
 `register_capability()` 注册，通过 `unregister_capability()` 注销。Designer 按能力注册表生成 `DesignAgentOutput`，
 使用当前能力声明的 LLM 抽取契约和模型归一化函数，并调用当前能力声明的执行契约。
-MeshAgent 按能力或全局配置生成 `MeshAgentOutput`，SolverAgent 按能力或全局配置选择求解器并调用结果评价器。七个 Agent
-均具备 LLM trace，报告输出通信摘要。
+MeshAgent 按能力或全局配置生成 `MeshAgentOutput`，SolverAgent 按能力或全局配置选择求解器并调用结果评价器。
+启用 LLM Agent 时，MeshAgent 基于 `ModelParams` 生成并校验网格策略建议，ReporterAgent 基于求解摘要、后处理标量、网格元数据、载荷和边界条件输出 LLM 工程解释。
+七个 Agent 均具备 LLM trace，报告输出执行链路摘要。
 失败结果通过 `ErrorRecord(node, code, message, missing_fields)` 进入 SDK 摘要和报告。
 多个完整仿真任务在同一请求中出现时，Planner 输出多个 `TaskItem`；工作流按 `TASK_N`
 子目录隔离网格、求解输入和输出文件。
@@ -54,7 +65,9 @@ prompt 或 response。
 ## Studio
 
 Studio 后端使用 FastAPI 与 Uvicorn，由 `python -m mechagent.cli studio` 启动。
-前端使用 React、TypeScript、Vite、React Flow 和 Markdown 渲染组件，构建后的静态资源位于
-`mechagent/ui/static` 并随包发布。界面展示自然语言请求、LLM Agent 开关、Agent DAG、求解指标、
-阶段产物、结果 SVG、摘要 JSON 和 Markdown 报告。结果 SVG 由 Python 后处理层根据求解摘要、
-`.inp` 网格和 `.frd` 位移场生成。
+启动命令输出服务监听地址和浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。
+前端使用 React、TypeScript、Vite、Three.js 和 Markdown 渲染组件，构建后的静态资源位于
+`mechagent/ui/static` 并随包发布。宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局；宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布，宽度不超过 900px 时整体切换为单列布局。宽屏检查区使用整列滚动，验收指标面板按内容自适应高度，避免指标卡被内部滚动容器裁切。初始态、运行态和结果态保持固定响应式断点和面板尺寸约束，避免 3D 画布、报告或检查区造成浏览器横向溢出。界面展示自然语言请求、运行前预检、参数补全开关、示例库、当前工作台链接复制、基于当前 Python 执行器的 CLI 复现命令复制、运行历史、后端作业状态、求解流程、验收指标、
+任务结果矩阵、带类型标签和路径复制入口的阶段产物、3D 几何/网格/结果视图、摘要 JSON 和 Markdown 报告。Markdown 报告和摘要 JSON 支持复制和下载；CLI 复现命令、工作台链接、报告正文、阶段产物路径和摘要 JSON 的复制动作带有可见状态反馈。工作台链接通过 `request`、`llm` 和 `view` 查询参数恢复自然语言请求、参数补全状态和 3D 视图模式。Studio 使用 `/api/inspect` 读取 Planner 预检结果，使用 `/api/jobs` 创建作业并轮询
+`/api/jobs/{job_id}` 获取状态、阶段事件和最终结果；`/api/examples` 返回与 CLI `examples` 共用的自然语言示例库。3D 场景由 Python 后处理层根据
+`ModelParams`、`.inp` 网格、`.frd` 位移/应力场和求解摘要生成；浏览器端按几何类型映射求解坐标，梁保持横向弯曲视角，矩形板、开孔薄板和矩形实体块将求解 `Z` 轴映射为 Three.js 竖向轴；几何模式显示 `ModelParams.loads` 与 `ModelParams.bcs` 对应的前处理符号，包含集中力箭头、线载荷箭头、均布压力箭头、端面载荷、固定端夹持和边界支承；符号直接贴合载荷面或约束边界，不带文字标注。网格模式使用低透明单元面、高对比单元边和节点表达真实 `.inp` 拓扑，梁网格以矩形截面分段棱柱表达 B31 单元拓扑；结果模式只显示变形、网格边、节点场、颜色图例和当前结果场，默认显示 `U` 位移模量，场量下拉菜单可切换 `Ux`、`Uy`、`Uz` 位移分量；`.frd` 存在应力场时可切换 `S Mises`、`Sxx`、`Syy`、`Szz`、`Sxy`、`Syz` 和 `Sxz`。壳单元 `.frd` 派生节点场会按真实网格节点顺序对齐。结果视口提供等轴、俯视、前视和右视快捷视角，右下角透明嵌入式 XYZ 全局坐标系跟随主相机旋转，颜色图例随当前场量同步。开孔薄板的几何视图来自单孔或多孔参数化孔洞轮廓，网格和结果视图来自 Gmsh 生成的真实 `.inp` 单元。参照底网按当前几何或结果包围盒居中并留出视图边距。Three.js 画布在初始化、尺寸变化、视图切换和用户交互时按需渲染，静止状态不运行连续动画循环。当前 3D 画布支持 PNG 导出，SVG 用于兼容视图和静态下载。

@@ -52,6 +52,7 @@ def test_capability_registry_exposes_structural_static() -> None:
     assert capability.analysis_type == "static"
     assert capability.solver_name == "calculix"
     assert capability.mesher_name == "calculix-inp"
+    assert "STATIC-PERFORATED-PLATE" in capability.model_case_ids
     assert capability.execution_validator is not None
     assert capability.geometry_detector("长1000mm 的悬臂梁静力分析") == "beam"
     assert capability.evaluator(
@@ -91,7 +92,7 @@ def test_planner_uses_llm_capability_intent_when_local_match_misses(
     def fake_completion(prompt: str, _config: object) -> str:
         assert "已注册能力编号" in prompt
         assert "结构线弹性静力分析" in prompt
-        assert "钢制悬臂梁" in prompt
+        assert "端部向下1000N集中力" in prompt
         return """
         {
           "capability_id": "structural_static",
@@ -180,6 +181,25 @@ def test_match_capabilities_returns_solid_intent() -> None:
     assert intents[0].capability_id == "structural_static"
     assert intents[0].geometry_type == "solid"
     assert intents[0].complete
+
+
+def test_match_capabilities_returns_perforated_plate_intent() -> None:
+    request = (
+        "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，"
+        "四边简支，承受0.004MPa向下均布压力的静力响应"
+    )
+
+    intents = match_capabilities(request)
+    task = PlannerAgent().plan(request)[0]
+    params = DesignerAgent().design(task)
+
+    assert len(intents) == 1
+    assert intents[0].capability_id == "structural_static"
+    assert intents[0].geometry_type == "plate"
+    assert intents[0].complete
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["hole_radius"] == pytest.approx(30.0)
 
 
 def test_match_capabilities_splits_compound_static_request() -> None:

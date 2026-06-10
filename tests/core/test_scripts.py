@@ -128,7 +128,7 @@ def test_run_llm_smoke_uses_configured_output_dir_and_validates_trace_summary(
     output_dir = tmp_path / "runs"
     report_path = output_dir / "llm_smoke" / "RUN" / "report.md"
     report_path.parent.mkdir(parents=True)
-    report_path.write_text("# unit", encoding="utf-8")
+    report_path.write_text("# unit\n\n## LLM 工程解释\n\n### 综合结论\n\n- ok\n", encoding="utf-8")
     config = MechAgentConfig(output=OutputSettings(output_dir=output_dir))
     captured: dict[str, object] = {}
 
@@ -219,6 +219,44 @@ def test_run_llm_smoke_rejects_missing_agent_trace() -> None:
     )
 
 
+def test_run_llm_smoke_accepts_noncritical_advisory_errors(tmp_path: Path) -> None:
+    report_path = tmp_path / "RUN" / "report.md"
+    report_path.parent.mkdir()
+    report_path.write_text("# unit\n\n## LLM 工程解释\n\n### 综合结论\n\n- ok\n", encoding="utf-8")
+    summary = {
+        "success": True,
+        "report_path": str(report_path),
+        "reporter_llm_trace": _trace_summary("ReporterAgent"),
+        "tasks": [
+            {
+                "task_id": "TASK_1",
+                "planner_llm_trace": _trace_summary("Planner", error="请求超时"),
+                "designer_llm_trace": _trace_summary("Designer"),
+                "mesh_llm_trace": _trace_summary("MeshAgent", error="请求超时"),
+                "model_params": {"case_id": "STATIC-BEAM"},
+                "solver_result": {
+                    "success": True,
+                    "passed": True,
+                    "verification_status": "passed",
+                    "solver_llm_trace": _trace_summary("SolverAgent", error="请求超时"),
+                },
+                "post_summary": {
+                    "postproc_llm_trace": _trace_summary("PostProcAgent", error="请求超时"),
+                    "analyst_llm_trace": _trace_summary("AnalystAgent", error="请求超时"),
+                },
+            }
+        ],
+    }
+
+    smoke = run_llm_smoke.evaluate_llm_smoke_summary(summary)
+
+    assert smoke["passed"] is True
+    assert any(
+        item["name"] == "TASK_1.mesh_llm_trace_attempted" and item["passed"] is True
+        for item in smoke["checks"]
+    )
+
+
 def test_check_wheel_install_finds_single_wheel(tmp_path: Path) -> None:
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -257,11 +295,11 @@ def test_check_wheel_install_import_check_validates_license_files() -> None:
     assert "mechagent = mechagent.cli:app" in check_wheel_install._IMPORT_CHECK_CODE
 
 
-def _trace_summary(agent: str) -> dict[str, object]:
+def _trace_summary(agent: str, error: str | None = None) -> dict[str, object]:
     return {
         "agent": agent,
         "used": True,
-        "error": None,
+        "error": error,
         "prompt_chars": 10,
-        "response_chars": 10,
+        "response_chars": 0 if error else 10,
     }
