@@ -468,7 +468,7 @@ def test_public_docs_describe_studio_surface() -> None:
     for text in (readme, package_readme, local_setup, docs_index):
         assert "python -m mechagent.cli studio --open-browser" in text
         assert '--request "求解长420mm、宽260mm、厚6mm' in text
-        assert "--llm-agents --view geometry" in text
+        assert "--llm-agents --view geometry --auto-run" in text
 
     assert "FastAPI + React + TypeScript + Vite 工作台" in readme
     assert "![MechAgent Studio 几何可视化态](docs/assets/studio-geometry.png)" in readme
@@ -519,6 +519,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "Markdown 报告和摘要 JSON 支持复制和下载" in package_readme
     assert "当前工作台链接复制" in package_readme
     assert "`request`、`llm` 和 `view` 查询参数" in package_readme
+    assert "`run=1` 作为一次性自动运行信号" in package_readme
     assert "CLI 复现命令复制" in package_readme
     assert "带类型标签和路径复制入口的阶段产物" in package_readme
     assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in readme
@@ -533,8 +534,13 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "工作台链接复制" in technical_report
     assert "`request`、`llm` 和 `view` 查询参数" in technical_report
     assert "`--request`、`--llm-agents` 和 `--view geometry|mesh|result`" in technical_report
-    assert "`studio --request`、`--llm-agents` 和 `--view geometry|mesh|result`" in package_readme
-    assert "/studio?request=...&llm=1&view=..." in technical_report
+    assert "`--auto-run` 与 `--request` 同时使用" in technical_report
+    assert (
+        "`studio --request`、`--llm-agents`、`--view geometry|mesh|result` 和 `--auto-run`"
+        in package_readme
+    )
+    assert "/studio?request=…&llm=1&view=…&run=1" in technical_report
+    assert "`run=1` 是一次性自动运行信号" in technical_report
     assert "摘要 JSON 复制和摘要 JSON 下载" in technical_report
     assert "复制动作通过固定状态提示和 `aria-live` 区域反馈成功或失败" in technical_report
     assert "Clipboard API 和浏览器原生复制命令回退" in technical_report
@@ -551,7 +557,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
     assert "clamp(280px, 18vw, 360px) minmax(0, 1fr)" in studio_styles
     assert "clamp(270px, 16vw, 340px)" in studio_styles
-    assert ".right-rail {\n  grid-template-columns: minmax(0, 1fr);" in studio_styles
+    assert ".right-rail {\n  max-width: 100%;" in studio_styles
+    assert "grid-template-columns: minmax(0, 1fr);" in studio_styles
     result_right_rail_columns = ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
     assert result_right_rail_columns in studio_styles
     assert "@media (max-width: 1800px)" in studio_styles
@@ -564,14 +571,17 @@ def test_public_docs_describe_studio_surface() -> None:
         ".right-rail.has-result .verification-panel.has-result {\n  height: auto;"
     )
     assert adaptive_verification_panel in studio_styles
-    assert "padding-bottom: 18px" in studio_styles
+    assert "min-height: max-content;" in studio_styles
+    assert "padding-bottom: 20px" in studio_styles
     assert "min-height: 38px" in studio_styles
     assert "height: 310px" not in studio_styles
     assert "overflow: visible" in studio_styles
-    right_rail_style = studio_styles.split(
-        ".right-rail {\n  grid-template-columns",
+    right_rail_style = studio_styles.split("\n.right-rail {\n")[-1].split(
+        "}",
         maxsplit=1,
-    )[1].split("}", maxsplit=1)[0]
+    )[0]
+    assert "max-width: 100%" in right_rail_style
+    assert "grid-template-columns: minmax(0, 1fr)" in right_rail_style
     assert "overflow-y: auto" in right_rail_style
     assert "scrollbar-gutter: stable" in right_rail_style
     assert "grid-auto-rows: 32px" in studio_styles
@@ -582,7 +592,8 @@ def test_public_docs_describe_studio_surface() -> None:
     )[0]
     assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
-    assert "min-height: 304px" in studio_styles
+    assert "min-height: 304px" not in studio_styles
+    assert "min-height: 0;\n  overflow: visible;" in studio_styles
     assert "padding: 0;\n  list-style: none;" in studio_styles
     assert 'controls.addEventListener("change", scheduleRender)' in three_viewport
     assert 'controls.removeEventListener("change", scheduleRender)' in three_viewport
@@ -645,11 +656,16 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "initialRequestFromUrl" in studio_app
     assert "initialParameterCompletionFromUrl" in studio_app
     assert "initialRenderModeIndexFromUrl" in studio_app
+    assert "initialAutoRunFromUrl" in studio_app
+    assert 'const AUTO_RUN_QUERY_KEY = "run"' in studio_app
+    assert "autoRunRequested" in studio_app
+    assert "removeAutoRunQuery" in studio_app
     assert "studioWorkspaceLink" in studio_app
     assert "history.replaceState" in studio_app
     assert "request" in studio_app
     assert "llm" in studio_app
     assert 'const VIEW_QUERY_KEY = "view"' in studio_app
+    assert "url.searchParams.delete(AUTO_RUN_QUERY_KEY)" in studio_app
     assert "applyWorkspaceQuery(url, requestText, useLlmAgents, renderMode)" in studio_app
     assert "reproducibleCliCommand" in studio_app
     assert "python_executable" in studio_app
@@ -671,7 +687,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "clamp(270px, 16vw, 340px)" in studio_styles
     assert "clamp(300px, 20vw, 500px)" not in studio_styles
     assert "height: calc(100vh - 86px)" in studio_styles
-    assert "grid-template-rows: minmax(350px, 1fr) minmax(250px, 0.78fr)" in studio_styles
+    assert "grid-template-rows: minmax(330px, 0.88fr) minmax(300px, 0.92fr)" in studio_styles
+    assert "grid-template-rows: minmax(330px, 0.9fr) minmax(300px, 0.86fr)" in studio_styles
     assert "height: auto" in studio_styles
     assert "height: clamp(460px, 62vh, 620px)" in studio_styles
     assert ".right-rail.has-result {\n    grid-template-columns: 1fr;" in studio_styles

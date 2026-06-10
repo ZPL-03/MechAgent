@@ -9,6 +9,7 @@ from time import sleep
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pytest import CaptureFixture, MonkeyPatch
@@ -276,6 +277,25 @@ def test_studio_entry_url_preserves_default_view_with_request() -> None:
     )
 
 
+def test_studio_entry_url_supports_explicit_auto_run() -> None:
+    assert (
+        _studio_entry_url(
+            "127.0.0.1",
+            8765,
+            request="求解偏心圆孔薄板",
+            auto_run=True,
+        )
+        == "http://127.0.0.1:8765/studio?"
+        "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
+        "%E8%96%84%E6%9D%BF&view=geometry&run=1"
+    )
+
+
+def test_studio_entry_url_rejects_auto_run_without_request() -> None:
+    with pytest.raises(ValueError, match="自动运行"):
+        _studio_entry_url("127.0.0.1", 8765, auto_run=True)
+
+
 def test_run_studio_prints_bind_and_browser_urls(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -301,6 +321,7 @@ def test_run_studio_prints_bind_and_browser_urls(
         request="求解偏心圆孔薄板",
         use_llm_agents=True,
         view="mesh",
+        auto_run=True,
     )
 
     output = capsys.readouterr().out
@@ -308,13 +329,13 @@ def test_run_studio_prints_bind_and_browser_urls(
     assert (
         "浏览器入口: http://127.0.0.1:9876/studio?"
         "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
-        "%E8%96%84%E6%9D%BF&llm=1&view=mesh"
+        "%E8%96%84%E6%9D%BF&llm=1&view=mesh&run=1"
     ) in output
     assert captured == {
         "browser_url": (
             "http://127.0.0.1:9876/studio?"
             "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
-            "%E8%96%84%E6%9D%BF&llm=1&view=mesh"
+            "%E8%96%84%E6%9D%BF&llm=1&view=mesh&run=1"
         ),
         "host": "0.0.0.0",
         "port": 9876,
@@ -333,6 +354,7 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
         request: str | None,
         use_llm_agents: bool,
         view: str,
+        auto_run: bool,
     ) -> None:
         captured.update(
             {
@@ -343,6 +365,7 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
                 "request": request,
                 "use_llm_agents": use_llm_agents,
                 "view": view,
+                "auto_run": auto_run,
             }
         )
 
@@ -366,6 +389,7 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
             "--llm-agents",
             "--view",
             "result",
+            "--auto-run",
         ],
     )
 
@@ -378,6 +402,7 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
         "request": "求解偏心圆孔薄板",
         "use_llm_agents": True,
         "view": "result",
+        "auto_run": True,
     }
 
 
@@ -388,6 +413,15 @@ def test_cli_studio_rejects_invalid_view() -> None:
 
     assert result.exit_code != 0
     assert "bad-view" in result.output
+
+
+def test_cli_studio_rejects_auto_run_without_request() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["studio", "--auto-run"])
+
+    assert result.exit_code != 0
+    assert "--auto-run" in result.output
 
 
 def test_visualizations_cover_current_static_geometry_types() -> None:

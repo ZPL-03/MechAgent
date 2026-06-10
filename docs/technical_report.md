@@ -90,10 +90,10 @@ MechAgent Studio 是面向用户和开发者的本地工程工作台。产品入
 
 ```powershell
 python -m mechagent.cli studio --open-browser
-python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry
+python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry --auto-run
 ```
 
-启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`--open-browser` 打开浏览器入口。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始 3D 视图的可复现工作台入口，入口 URL 使用 `/studio?request=...&llm=1&view=...` 查询参数契约。
+启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`--open-browser` 打开浏览器入口。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始 3D 视图的可复现工作台入口；`--auto-run` 与 `--request` 同时使用时写入一次性自动运行信号。入口 URL 使用 `/studio?request=…&llm=1&view=…&run=1` 查询参数契约。
 
 Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`，使用 FastAPI 和 Uvicorn。
 API 入口包括：
@@ -134,7 +134,7 @@ npm --prefix apps/mechagent-studio run build
 
 Studio 不改变 Agent 通信契约。浏览器消费 `/api/health` 返回的 Python 执行器生成 CLI 复现命令，消费 `/api/jobs` 返回的作业状态、阶段事件、公开摘要和可视化列表；
 仿真参数、网格、求解、后处理、校核和报告仍由 Python 编排链路产生。
-工作台链接使用浏览器 URL 的 `request`、`llm` 和 `view` 查询参数表达自然语言请求、参数补全状态和 3D 视图模式，页面加载时从 URL 恢复输入状态与视图状态，输入或视图变化后通过 `history.replaceState()` 保持地址栏可复现。
+工作台链接使用浏览器 URL 的 `request`、`llm` 和 `view` 查询参数表达自然语言请求、参数补全状态和 3D 视图模式，页面加载时从 URL 恢复输入状态与视图状态，输入或视图变化后通过 `history.replaceState()` 保持地址栏可复现。`run=1` 是一次性自动运行信号，前端读取后会从地址栏移除，复制工作台链接时不会保留该信号。
 摘要 JSON 面板展示 SDK 公开摘要，支持复制和下载，下载文件名使用当前任务编号和通过状态生成。
 CLI 复现命令、工作台链接、报告正文、阶段产物路径和摘要 JSON 的复制动作通过固定状态提示和 `aria-live` 区域反馈成功或失败，执行路径使用 Clipboard API 和浏览器原生复制命令回退。
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Boxes,
@@ -98,6 +98,7 @@ const NOTICE_TIMEOUT_MS = 2800;
 const REQUEST_QUERY_KEY = "request";
 const LLM_QUERY_KEY = "llm";
 const VIEW_QUERY_KEY = "view";
+const AUTO_RUN_QUERY_KEY = "run";
 
 const DEFAULT_REQUEST =
   "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应";
@@ -163,6 +164,8 @@ const PERCENT_FORMATTER = new Intl.NumberFormat(undefined, {
 });
 
 export function App() {
+  const autoRunRequested = useRef(initialAutoRunFromUrl());
+  const autoRunStarted = useRef(false);
   const [request, setRequest] = useState(() => initialRequestFromUrl());
   const [capabilities, setCapabilities] = useState<StudioCapability[]>([]);
   const [catalogExamples, setCatalogExamples] = useState<StudioExample[]>([]);
@@ -319,6 +322,21 @@ export function App() {
       window.clearTimeout(timeoutId);
     };
   }, [request]);
+
+  useEffect(() => {
+    if (
+      !autoRunRequested.current ||
+      autoRunStarted.current ||
+      running ||
+      result ||
+      !request.trim()
+    ) {
+      return;
+    }
+    autoRunStarted.current = true;
+    removeAutoRunQuery();
+    void runSimulation();
+  }, [request, result, running]);
 
   const tasks = result?.summary.tasks ?? [];
   const examples = useMemo(
@@ -1947,6 +1965,14 @@ function initialRenderModeIndexFromUrl() {
   return index >= 0 ? index : 0;
 }
 
+function initialAutoRunFromUrl() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const value = new URLSearchParams(window.location.search).get(AUTO_RUN_QUERY_KEY);
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
 function studioWorkspaceLink(
   requestText: string,
   useLlmAgents: boolean,
@@ -1983,6 +2009,7 @@ function applyWorkspaceQuery(
   useLlmAgents: boolean,
   renderMode: RenderModeKey
 ) {
+  url.searchParams.delete(AUTO_RUN_QUERY_KEY);
   const requestValue = requestText.trim();
   if (requestValue && requestValue !== DEFAULT_REQUEST) {
     url.searchParams.set(REQUEST_QUERY_KEY, requestValue);
@@ -1999,6 +2026,18 @@ function applyWorkspaceQuery(
   } else {
     url.searchParams.delete(VIEW_QUERY_KEY);
   }
+}
+
+function removeAutoRunQuery() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(AUTO_RUN_QUERY_KEY)) {
+    return;
+  }
+  url.searchParams.delete(AUTO_RUN_QUERY_KEY);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function reproducibleCliCommand(

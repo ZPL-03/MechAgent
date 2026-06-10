@@ -286,6 +286,7 @@ def run_studio(
     request: str | None = None,
     use_llm_agents: bool = False,
     view: str = "geometry",
+    auto_run: bool = False,
 ) -> None:
     """启动 MechAgent Studio。"""
 
@@ -296,6 +297,7 @@ def run_studio(
         request=request,
         use_llm_agents=use_llm_agents,
         view=view,
+        auto_run=auto_run,
     )
     print(f"MechAgent Studio 服务: {bind_url}")
     print(f"浏览器入口: {browser_url}")
@@ -316,16 +318,22 @@ def _studio_entry_url(
     request: str | None = None,
     use_llm_agents: bool = False,
     view: str = "geometry",
+    auto_run: bool = False,
 ) -> str:
     normalized_view = _normalize_studio_view(view)
     query: dict[str, str] = {}
     request_text = request.strip() if request else ""
+    if auto_run and not request_text:
+        msg = "自动运行需要提供自然语言请求。"
+        raise ValueError(msg)
     if request_text:
         query["request"] = request_text
     if use_llm_agents:
         query["llm"] = "1"
-    if query or normalized_view != "geometry":
+    if query or auto_run or normalized_view != "geometry":
         query["view"] = normalized_view
+    if auto_run:
+        query["run"] = "1"
     if not query:
         return _browser_url(host, port)
     return f"{_browser_url(host, port).rstrip('/')}/studio?{urlencode(query)}"

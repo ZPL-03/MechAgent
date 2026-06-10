@@ -52,8 +52,12 @@ def studio(
         "--view",
         help="打开工作台时选中的 3D 视图。",
     ),
+    auto_run: bool = typer.Option(False, "--auto-run", help="打开工作台后自动提交当前请求。"),
 ) -> None:
     """启动 MechAgent Studio 工程工作台。"""
+
+    if auto_run and not (request and request.strip()):
+        raise typer.BadParameter("--auto-run 需要同时提供 --request。")
 
     run_studio(
         host=host,
@@ -63,6 +67,7 @@ def studio(
         request=request,
         use_llm_agents=llm_agents,
         view=view.value,
+        auto_run=auto_run,
     )
 
 
