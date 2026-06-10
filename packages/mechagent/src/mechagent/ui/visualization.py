@@ -238,8 +238,7 @@ def _scene_boundary_conditions(model_params: dict[str, Any]) -> list[dict[str, A
                 "values": [
                     value
                     for value in (
-                        _optional_float(raw_value)
-                        for raw_value in _list_value(bc.get("values"))
+                        _optional_float(raw_value) for raw_value in _list_value(bc.get("values"))
                     )
                     if value is not None
                 ],

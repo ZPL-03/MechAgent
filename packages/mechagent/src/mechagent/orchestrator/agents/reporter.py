@@ -103,13 +103,7 @@ class ReporterAgent:
 
         lines.extend(["", "## 工程解读", ""])
         for record in records:
-            if record.analysis_text:
-                lines.append(f"- {record.analysis_text}")
-            elif record.error is not None:
-                message = redact_sensitive_text(record.error.message)
-                lines.append(f"- {record.task.task_id} 执行失败：{message}")
-            else:
-                lines.append(f"- {record.task.task_id} 未生成工程解读。")
+            _append_engineering_interpretation(lines, record)
 
         _append_llm_engineering_report(lines, reporter_trace)
 
@@ -271,6 +265,160 @@ def _normalized_report_items(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return []
+
+
+def _append_engineering_interpretation(lines: list[str], record: TaskRunRecord) -> None:
+    task_label = _escape_heading_text(f"{record.task.task_id} {_record_case_label(record)}")
+    lines.extend([f"### {task_label}", ""])
+    if record.error is not None:
+        message = redact_sensitive_text(record.error.message)
+        lines.append(f"- 执行状态：任务在 `{record.error.node}` 阶段失败，错误信息为 {message}。")
+        if record.error.missing_fields:
+            lines.append(
+                f"- 输入诊断：缺失字段包括 {_format_missing_fields(record.error.missing_fields)}。"
+            )
+        lines.append(
+            "- 复核建议：补齐失败诊断中的输入项后重新运行，并检查上游自然语言描述是否唯一。"
+        )
+        lines.append("")
+        return
+
+    for item in _engineering_interpretation_items(record):
+        lines.append(f"- {item}")
+    lines.append("")
+
+
+def _engineering_interpretation_items(record: TaskRunRecord) -> list[str]:
+    result = record.solver_result
+    model_params = record.model_params
+    items: list[str] = []
+
+    primary_value = _format_optional_number(_reported_value(result, result.quantity))
+    quantity = _format_quantity(result.quantity, result.unit)
+    status = _status_label(result)
+    if record.analysis_text:
+        items.append(redact_sensitive_text(record.analysis_text))
+    else:
+        items.append(
+            f"结果结论：{_record_case_label(record)} 的 `{quantity}` 计算值为 "
+            f"{primary_value}，当前验收状态为{status}。"
+        )
+
+    if result.reference is not None and result.relative_error is not None:
+        items.append(
+            "验收解释：参考值为 "
+            f"{_format_optional_number(result.reference)}，相对误差为 "
+            f"{_format_optional_percent(result.relative_error, precision=4)}，"
+            f"阈值为 {_format_optional_percent(result.tolerance, precision=2)}。"
+        )
+    elif result.verification_status == "unverified":
+        items.append(
+            "验收解释：当前算例未提供解析参考值或验收阈值，报告保留求解结果但标记为未验证。"
+        )
+
+    mesh_text = _mesh_interpretation(record)
+    if mesh_text:
+        items.append(mesh_text)
+
+    if model_params is not None:
+        items.append(_model_interpretation(model_params))
+        items.append(_boundary_load_interpretation(model_params))
+
+    scalar_text = _scalar_interpretation(record)
+    if scalar_text:
+        items.append(scalar_text)
+
+    items.append(
+        "复核建议：围绕主结果、孔边或约束附近梯度区域进行网格收敛检查，并结合工程允许值或独立参考解确认安全裕度。"
+    )
+    return items
+
+
+def _model_interpretation(model_params: Any) -> str:
+    geometry = model_params.geometry
+    material = model_params.material
+    dimensions = "，".join(
+        _dimension_text(name, value) for name, value in geometry.dimensions.items()
+    )
+    return (
+        f"模型解释：几何类型为 `{_enum_value(geometry.type)}`，主要尺寸为 {dimensions}；"
+        f"材料采用 `{_enum_value(material.type)}`，弹性模量 "
+        f"{_format_optional_number(material.E)} MPa，"
+        f"泊松比 {_format_optional_number(material.nu)}。"
+    )
+
+
+def _boundary_load_interpretation(model_params: Any) -> str:
+    load_items = [
+        (
+            f"{_enum_value(load.type)} {load.magnitude:g} "
+            f"作用于 {load.region}，方向 {list(load.direction)}"
+        )
+        for load in model_params.loads
+    ]
+    bc_items = [
+        f"{_enum_value(bc.type)} 约束 {bc.region} 的 {'/'.join(bc.dofs)}" for bc in model_params.bcs
+    ]
+    return (
+        "边界与载荷："
+        f"载荷为 {'；'.join(load_items) if load_items else '未记录'}；"
+        f"边界为 {'；'.join(bc_items) if bc_items else '未记录'}。"
+    )
+
+
+def _mesh_interpretation(record: TaskRunRecord) -> str:
+    mesh_result = record.mesh_result
+    if mesh_result is None:
+        return ""
+    metadata = mesh_result.metadata
+    node_count = metadata.get("node_count") or metadata.get("nodes")
+    element_count = metadata.get("element_count") or metadata.get("elements")
+    element_type = metadata.get("element_type") or (
+        record.model_params.mesh.element_type if record.model_params is not None else ""
+    )
+    quality_items = [
+        f"{name}={_format_optional_number(value)}"
+        for name, value in mesh_result.quality.items()
+        if isinstance(value, (int, float))
+    ]
+    count_text = ""
+    if node_count is not None or element_count is not None:
+        count_text = (
+            f"，节点数 {node_count if node_count is not None else 'N/A'}，"
+            f"单元数 {element_count if element_count is not None else 'N/A'}"
+        )
+    quality_text = f"，质量指标 {'，'.join(quality_items)}" if quality_items else ""
+    mesh_status = "成功" if mesh_result.success else "失败"
+    return (
+        f"网格与求解：网格生成状态为 {mesh_status}，"
+        f"单元类型 `{element_type}`{count_text}{quality_text}。"
+    )
+
+
+def _scalar_interpretation(record: TaskRunRecord) -> str:
+    scalars = {
+        name: value
+        for name, value in record.post_summary.scalars.items()
+        if type(value) in {int, float} and name not in {"predicted", "reference", "success"}
+    }
+    if not scalars:
+        return ""
+    selected = list(scalars.items())[:5]
+    scalar_text = "，".join(f"{name}={_format_optional_number(value)}" for name, value in selected)
+    return f"后处理摘要：主要标量包括 {scalar_text}，用于辅助判断位移、应力或网格质量分布。"
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _dimension_text(name: str, value: float) -> str:
+    suffix = "" if name.endswith("count") else " mm"
+    return f"{name}={_format_optional_number(value)}{suffix}"
+
+
+def _escape_heading_text(value: str) -> str:
+    return value.replace("#", "\\#").strip()
 
 
 def _record_case_label(record: TaskRunRecord) -> str:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"
+
 
 @dataclass(frozen=True)
 class SimulationExample:
@@ -345,6 +347,24 @@ SIMULATION_EXAMPLES: tuple[SimulationExample, ...] = (
         tags=("plate", "multi_hole", "parametric_geometry", "pressure"),
     ),
 )
+
+
+def example_by_id(example_id: str) -> SimulationExample:
+    """按公开示例编号返回自然语言仿真示例。"""
+
+    normalized_id = example_id.strip().upper()
+    for example in SIMULATION_EXAMPLES:
+        if example.case_id == normalized_id:
+            return example
+    available_ids = "、".join(example.case_id for example in SIMULATION_EXAMPLES)
+    msg = f"未知示例编号 {example_id!r}，可用编号: {available_ids}"
+    raise ValueError(msg)
+
+
+def showcase_example(example_id: str = DEFAULT_SHOWCASE_EXAMPLE_ID) -> SimulationExample:
+    """返回 Studio 产品展示使用的自然语言仿真示例。"""
+
+    return example_by_id(example_id)
 
 
 def all_examples(

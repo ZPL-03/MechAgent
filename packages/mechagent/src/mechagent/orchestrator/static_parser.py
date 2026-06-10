@@ -671,8 +671,7 @@ def _with_plate_features(text: str, dimensions: dict[str, float]) -> dict[str, f
 def _has_circular_hole(text: str) -> bool:
     normalized = _normalized(text)
     return any(
-        keyword in text
-        for keyword in ("圆孔", "开孔", "孔径", "孔半径", "中心孔", "带孔", "多孔")
+        keyword in text for keyword in ("圆孔", "开孔", "孔径", "孔半径", "中心孔", "带孔", "多孔")
     ) or any(keyword in normalized for keyword in ("hole", "perforated", "circular opening"))
 
 
@@ -696,9 +695,7 @@ def _extract_indexed_holes(text: str) -> tuple[tuple[float, float, float], ...]:
     holes: list[tuple[float, float, float]] = []
     for marker_index, marker in enumerate(markers):
         next_start = (
-            markers[marker_index + 1].start()
-            if marker_index + 1 < len(markers)
-            else len(text)
+            markers[marker_index + 1].start() if marker_index + 1 < len(markers) else len(text)
         )
         segment = text[marker.start() : next_start]
         radius = _extract_hole_radius(segment)

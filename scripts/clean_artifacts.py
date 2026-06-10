@@ -43,6 +43,7 @@ def main() -> int:
         "*.msg",
     ]
     fixed_paths = [
+        REPO_ROOT / ".playwright-cli",
         REPO_ROOT / ".playwright-mcp",
         REPO_ROOT / "mechagent_output",
         REPO_ROOT / "output/playwright",

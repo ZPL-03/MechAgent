@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ def test_clean_artifacts_uses_repository_root(
     (repo / "build").mkdir()
     (repo / "build" / "artifact.txt").write_text("x", encoding="utf-8")
     (repo / "case.frd").write_text("x", encoding="utf-8")
+    (repo / ".playwright-cli").mkdir()
+    (repo / ".playwright-cli" / "session.json").write_text("x", encoding="utf-8")
     (repo / ".playwright-mcp").mkdir()
     (repo / ".playwright-mcp" / "snapshot.yml").write_text("x", encoding="utf-8")
     (repo / "output" / "playwright").mkdir(parents=True)
@@ -46,6 +49,7 @@ def test_clean_artifacts_uses_repository_root(
     assert result == 0
     assert not (repo / "build").exists()
     assert not (repo / "case.frd").exists()
+    assert not (repo / ".playwright-cli").exists()
     assert not (repo / ".playwright-mcp").exists()
     assert not (repo / "output").exists()
     assert not (repo / "mechagent_output").exists()
@@ -76,7 +80,7 @@ def test_clean_artifacts_scan_tolerates_vanished_paths(
     cache.mkdir()
 
     class VanishingRoot:
-        def rglob(self, _pattern: str):
+        def rglob(self, _pattern: str) -> Iterator[Path]:
             yield cache
             raise FileNotFoundError("vanished")
 

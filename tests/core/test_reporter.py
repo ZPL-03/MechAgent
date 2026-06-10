@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from mechagent.config import LLMSettings, MechAgentConfig, OrchestratorSettings
+from mechagent.core.mesher import MeshResult
+from mechagent.core.models import ModelParams
 from mechagent.orchestrator.agents import ReporterAgent
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.orchestrator.models import (
@@ -35,6 +39,78 @@ def test_reporter_marks_missing_reference_values_as_not_available() -> None:
     assert (
         "| TASK_1 | STATIC-CUSTOM | max_displacement (mm) | 2.5 | N/A | N/A | N/A | 未验证 |"
     ) in report
+
+
+def test_reporter_local_engineering_interpretation_is_structured() -> None:
+    record = TaskRunRecord(
+        task=TaskItem(
+            task_id="TASK_1",
+            case_id="STATIC-PERFORATED-PLATE",
+            title="偏心圆孔薄板",
+        ),
+        model_params=ModelParams.model_validate(
+            {
+                "geometry": {
+                    "type": "plate",
+                    "dimensions": {
+                        "length": 420,
+                        "width": 260,
+                        "thickness": 6,
+                        "hole_radius": 25,
+                    },
+                },
+                "material": {"E": 210000, "nu": 0.3, "rho": 7.85e-9},
+                "loads": [
+                    {
+                        "type": "pressure",
+                        "magnitude": 0.003,
+                        "region": "top_surface",
+                        "direction": [0, 0, -1],
+                    }
+                ],
+                "bcs": [
+                    {
+                        "type": "simple_support",
+                        "region": "all_edges",
+                        "dofs": ["uz"],
+                        "values": [0],
+                    }
+                ],
+                "mesh": {"element_type": "S4", "seed_size": 6.5},
+                "analysis": {"type": "static"},
+                "case_id": "STATIC-PERFORATED-PLATE",
+            }
+        ),
+        mesh_result=MeshResult(
+            success=True,
+            mesh_file=Path("plate.inp"),
+            quality={"min_jacobian": 1.0},
+            metadata={"node_count": 2837, "element_count": 2718, "element_type": "S4"},
+        ),
+        solver_result=SolverRunSummary(
+            success=True,
+            model_case_id="STATIC-PERFORATED-PLATE",
+            quantity="max_displacement",
+            unit="mm",
+            predicted=0.0311804,
+            solver="calculix",
+            verification_status="unverified",
+        ),
+        post_summary=PostProcessingSummary(
+            success=True,
+            scalars={"max_mises_mpa": 3.415, "max_displacement_mm": 0.0311804},
+        ),
+    )
+
+    report = ReporterAgent().render([record])
+
+    assert "### TASK_1 STATIC-PERFORATED-PLATE" in report
+    assert "验收解释：当前算例未提供解析参考值或验收阈值" in report
+    assert "模型解释：几何类型为 `plate`" in report
+    assert "边界与载荷：载荷为 pressure 0.003 作用于 top_surface" in report
+    assert "网格与求解：网格生成状态为 成功" in report
+    assert "后处理摘要：主要标量包括 max_mises_mpa=3.415" in report
+    assert "复核建议：围绕主结果" in report
 
 
 def test_reporter_uses_quantity_field_when_predicted_is_not_explicit() -> None:

@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import mechagent
-from mechagent import MechAgent, MechAgentInspection, MechAgentResult, SimulationExample
+from mechagent import (
+    DEFAULT_SHOWCASE_EXAMPLE_ID,
+    MechAgent,
+    MechAgentInspection,
+    MechAgentResult,
+    SimulationExample,
+)
 from mechagent import core as mechagent_core
 from mechagent.config import MechAgentConfig
 
@@ -18,12 +24,25 @@ def test_public_api_exports_version_and_sdk() -> None:
         "MechAgent",
         "MechAgentInspection",
         "MechAgentResult",
+        "DEFAULT_SHOWCASE_EXAMPLE_ID",
         "SimulationExample",
         "all_examples",
+        "example_by_id",
         "example_payloads",
+        "showcase_example",
         "__version__",
     } <= set(mechagent.__all__)
     assert isinstance(mechagent.all_examples()[0], SimulationExample)
+
+
+def test_public_api_exposes_showcase_example() -> None:
+    example = mechagent.showcase_example()
+
+    assert DEFAULT_SHOWCASE_EXAMPLE_ID == "SC-23"
+    assert example.case_id == DEFAULT_SHOWCASE_EXAMPLE_ID
+    assert example.model_case_id == "STATIC-PERFORATED-PLATE"
+    assert "偏心圆孔" in example.title
+    assert mechagent.example_by_id("sc-25").case_id == "SC-25"
 
 
 def test_sdk_inspect_returns_planner_preflight_without_solving() -> None:

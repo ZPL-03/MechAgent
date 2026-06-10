@@ -3,6 +3,8 @@ AGENTS.md
 MechAgent_Project_Plan.docx
 .venv/
 apps/mechagent-studio/node_modules/
+.playwright-cli/
+.playwright-mcp/
 __pycache__/
 .pytest_cache/
 .mypy_cache/

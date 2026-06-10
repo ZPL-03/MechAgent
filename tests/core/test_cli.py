@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from mechagent.cli import app
 from mechagent.core.validation import BenchmarkResult
+from mechagent.examples import showcase_example
 
 
 def test_cli_main_module_import_has_no_side_effect() -> None:
@@ -190,6 +191,82 @@ def test_cli_examples_table_can_limit_rows() -> None:
     assert "SC-02" in result.output
     assert "SC-03" not in result.output
     assert "共 2 条示例" in result.output
+
+
+def test_cli_demo_launches_showcase_example(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_studio(
+        *,
+        host: str,
+        port: int,
+        config: Path,
+        open_browser: bool,
+        request: str | None,
+        use_llm_agents: bool,
+        view: str,
+        auto_run: bool,
+    ) -> None:
+        captured.update(
+            {
+                "host": host,
+                "port": port,
+                "config": config,
+                "open_browser": open_browser,
+                "request": request,
+                "use_llm_agents": use_llm_agents,
+                "view": view,
+                "auto_run": auto_run,
+            }
+        )
+
+    monkeypatch.setattr("mechagent.cli.run_studio", fake_run_studio)
+    config_path = tmp_path / "mechagent.yaml"
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "demo",
+            "--config",
+            str(config_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9876",
+            "--example",
+            "SC-25",
+            "--no-open-browser",
+            "--llm-agents",
+            "--view",
+            "result",
+            "--no-auto-run",
+        ],
+    )
+
+    example = showcase_example("SC-25")
+    assert result.exit_code == 0
+    assert "演示工况: SC-25 多孔安装薄板 · 均布压力" in result.output
+    assert captured == {
+        "host": "0.0.0.0",
+        "port": 9876,
+        "config": config_path,
+        "open_browser": False,
+        "request": example.request,
+        "use_llm_agents": True,
+        "view": "result",
+        "auto_run": False,
+    }
+
+
+def test_cli_demo_rejects_unknown_example() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["demo", "--example", "SC-999", "--no-open-browser"])
+
+    assert result.exit_code != 0
+    assert "SC-999" in result.output
+    assert "可用编号" in result.output
 
 
 def test_cli_run_non_json_prints_engineering_summary(

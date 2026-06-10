@@ -15,7 +15,12 @@ from rich.table import Table
 from mechagent import MechAgent
 from mechagent.config import config_to_public_dict
 from mechagent.core.validation import run_core_benchmarks
-from mechagent.examples import SimulationExample, all_examples
+from mechagent.examples import (
+    DEFAULT_SHOWCASE_EXAMPLE_ID,
+    SimulationExample,
+    all_examples,
+    showcase_example,
+)
 from mechagent.knowledge import build_index, query_index, standardize_documents
 from mechagent.llm import LLMConfig, check_connection
 from mechagent.orchestrator.capabilities import SimulationCapability, all_capabilities
@@ -65,6 +70,54 @@ def studio(
         config=config,
         open_browser=open_browser,
         request=request,
+        use_llm_agents=llm_agents,
+        view=view.value,
+        auto_run=auto_run,
+    )
+
+
+@app.command()
+def demo(
+    config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
+    host: str = typer.Option("127.0.0.1", help="Studio 服务监听地址。"),
+    port: int = typer.Option(8765, min=1, max=65535, help="Studio 服务监听端口。"),
+    open_browser: bool = typer.Option(
+        True,
+        "--open-browser/--no-open-browser",
+        help="启动后打开浏览器。",
+    ),
+    example: str = typer.Option(
+        DEFAULT_SHOWCASE_EXAMPLE_ID,
+        "--example",
+        "-e",
+        help="自然语言示例编号。",
+    ),
+    llm_agents: bool = typer.Option(False, "--llm-agents", help="打开工作台时启用参数补全开关。"),
+    view: StudioView = typer.Option(
+        StudioView.geometry,
+        "--view",
+        help="打开工作台时选中的 3D 视图。",
+    ),
+    auto_run: bool = typer.Option(
+        True,
+        "--auto-run/--no-auto-run",
+        help="打开工作台后自动提交当前示例。",
+    ),
+) -> None:
+    """启动内置工程示例的 MechAgent Studio。"""
+
+    try:
+        selected = showcase_example(example)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--example") from exc
+
+    console.print(f"演示工况: {selected.case_id} {selected.title}")
+    run_studio(
+        host=host,
+        port=port,
+        config=config,
+        open_browser=open_browser,
+        request=selected.request,
         use_llm_agents=llm_agents,
         view=view.value,
         auto_run=auto_run,

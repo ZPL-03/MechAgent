@@ -122,6 +122,9 @@ def test_public_docs_describe_llm_structured_extraction() -> None:
     docs_index = Path("docs/index.md").read_text(encoding="utf-8")
     local_setup = Path("docs/local_setup.md").read_text(encoding="utf-8")
     package_readme = Path("packages/mechagent/README.md").read_text(encoding="utf-8")
+    reporter_source = Path(
+        "packages/mechagent/src/mechagent/orchestrator/agents/reporter.py"
+    ).read_text(encoding="utf-8")
 
     assert "LLM 生成 `ModelParams`" in readme
     assert "合并能力缺参诊断" in readme
@@ -148,6 +151,20 @@ def test_public_docs_describe_llm_structured_extraction() -> None:
     assert "后续链路使用本地参数" in package_readme
     assert "`ModelParams.case_id` 必须属于声明集合" in package_readme
     assert "SDK 单次覆盖使用独立配置副本" in package_readme
+    assert "确定性工程解读、可选 LLM 工程解释" in readme
+    assert "ReporterAgent 始终基于 `TaskRunRecord` 写入确定性工程解读" in readme
+    assert "结果结论、验收解释、网格与求解、模型材料、边界载荷、后处理标量和复核建议" in readme
+    assert "Markdown 报告、确定性工程解读、可选 LLM 工程解释" in technical_report
+    assert "ReporterAgent 不依赖远端 LLM 生成基础工程解释" in technical_report
+    assert (
+        "结果结论、验收解释、网格与求解、模型材料、边界载荷、后处理标量和复核建议"
+        in technical_report
+    )
+    assert "Markdown 报告包含确定性工程解读" in package_readme
+    assert "启用 LLM Agent 时追加 LLM 工程解释" in package_readme
+    assert "_append_engineering_interpretation" in reporter_source
+    assert "_engineering_interpretation_items" in reporter_source
+    assert "_boundary_load_interpretation" in reporter_source
     assert "不直接覆盖 `ModelParams`" not in technical_report
     assert "不直接覆盖 `ModelParams`" not in local_setup
     assert "Designer 不进行本地参数建模或 LLM 参数抽取" not in technical_report
@@ -177,9 +194,9 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     assert [item.case_id for item in all_examples()] == [
         item.case_id for item in STATIC_LANGUAGE_CASES
     ]
-    assert "测试集包含 391 个测试" in readme
+    assert "测试集包含 404 个测试" in readme
     assert "完整测试范围、质量结果和清理策略见" in readme
-    assert "`pytest`：391 passed" in technical_report
+    assert "`pytest`：404 passed" in technical_report
     for coverage_label in [
         "插件主结果字段推断",
         "插件数值字符串解析",
@@ -199,6 +216,7 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
         "LLM 中文结构化字段归一化",
         "LLM 多孔薄板孔洞归一化",
         "MeshAgent LLM 网格策略校验",
+        "ReporterAgent 确定性工程解读报告",
         "ReporterAgent LLM 工程解释报告",
         "Planner LLM 字符串意图归一化",
         "LLM 单对象载荷边界归一化",
@@ -464,11 +482,22 @@ def test_public_docs_describe_studio_surface() -> None:
     studio_styles = Path("apps/mechagent-studio/src/styles.css").read_text(encoding="utf-8")
     three_viewport = Path("apps/mechagent-studio/src/ThreeViewport.tsx").read_text(encoding="utf-8")
     workflow = Path(".github/workflows/pr.yml").read_text(encoding="utf-8")
+    cli_source = Path("packages/mechagent/src/mechagent/cli/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    examples_source = Path("packages/mechagent/src/mechagent/examples.py").read_text(
+        encoding="utf-8"
+    )
 
     for text in (readme, package_readme, local_setup, docs_index):
+        assert "python -m mechagent.cli demo --llm-agents" in text
         assert "python -m mechagent.cli studio --open-browser" in text
         assert '--request "求解长420mm、宽260mm、厚6mm' in text
         assert "--llm-agents --view geometry --auto-run" in text
+
+    for text in (readme, package_readme, local_setup, technical_report):
+        assert "`SC-23`" in text
+        assert "--example" in text
 
     assert "FastAPI + React + TypeScript + Vite 工作台" in readme
     assert "![MechAgent Studio 几何可视化态](docs/assets/studio-geometry.png)" in readme
@@ -555,8 +584,15 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'aria-live="polite"' in studio_app
     assert 'inputMode="text"' in studio_app
     assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
-    assert "clamp(280px, 18vw, 360px) minmax(0, 1fr)" in studio_styles
+    assert 'DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"' in examples_source
+    assert "def example_by_id" in examples_source
+    assert "def showcase_example" in examples_source
+    assert "@app.command()\ndef demo" in cli_source
+    assert "--open-browser/--no-open-browser" in cli_source
+    assert "--auto-run/--no-auto-run" in cli_source
+    assert "minmax(0, clamp(280px, 18vw, 360px)) minmax(0, 1fr)" in studio_styles
     assert "clamp(270px, 16vw, 340px)" in studio_styles
+    assert ".left-rail,\n.workspace,\n.right-rail {\n  min-width: 0;" in studio_styles
     assert ".right-rail {\n  max-width: 100%;" in studio_styles
     assert "grid-template-columns: minmax(0, 1fr);" in studio_styles
     result_right_rail_columns = ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
@@ -572,8 +608,16 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert adaptive_verification_panel in studio_styles
     assert "min-height: max-content;" in studio_styles
-    assert "padding-bottom: 20px" in studio_styles
-    assert "min-height: 38px" in studio_styles
+    assert "padding-bottom: 24px" in studio_styles
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(122px, 100%), 1fr));" in (
+        studio_styles
+    )
+    assert "min-height: 46px" in studio_styles
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));" in (
+        studio_styles
+    )
+    assert "min-height: 48px" in studio_styles
+    assert "align-content: center" in studio_styles
     assert "height: 310px" not in studio_styles
     assert "overflow: visible" in studio_styles
     right_rail_style = studio_styles.split("\n.right-rail {\n")[-1].split(
@@ -680,9 +724,11 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "复制阶段产物路径" in studio_app
     assert "mechagent-${taskName}-${statusName}.md" in studio_app
     assert "apps/mechagent-studio/node_modules/" in Path(".gitignore").read_text(encoding="utf-8")
+    assert ".playwright-cli/" in Path(".gitignore").read_text(encoding="utf-8")
     assert "apps/mechagent-studio/node_modules" in Path("scripts/clean_artifacts.py").read_text(
         encoding="utf-8"
     )
+    assert ".playwright-cli" in Path("scripts/clean_artifacts.py").read_text(encoding="utf-8")
     assert "actions/setup-node@v6" in workflow
     assert "clamp(270px, 16vw, 340px)" in studio_styles
     assert "clamp(300px, 20vw, 500px)" not in studio_styles
