@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock, Thread
 from typing import Any, Optional
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import uvicorn
@@ -25,6 +26,7 @@ from mechagent.ui.visualization import visualizations_from_summary
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _MAX_STUDIO_JOBS = 16
+_STUDIO_VIEW_MODES = {"geometry", "mesh", "result"}
 
 
 class StudioRunRequest(BaseModel):
@@ -281,11 +283,20 @@ def run_studio(
     port: int = 8765,
     config: Path = Path("config/mechagent.yaml"),
     open_browser: bool = False,
+    request: str | None = None,
+    use_llm_agents: bool = False,
+    view: str = "geometry",
 ) -> None:
     """启动 MechAgent Studio。"""
 
     bind_url = _studio_url(host, port)
-    browser_url = _browser_url(host, port)
+    browser_url = _studio_entry_url(
+        host,
+        port,
+        request=request,
+        use_llm_agents=use_llm_agents,
+        view=view,
+    )
     print(f"MechAgent Studio 服务: {bind_url}")
     print(f"浏览器入口: {browser_url}")
     if open_browser:
@@ -296,6 +307,37 @@ def run_studio(
 def _browser_url(host: str, port: int) -> str:
     browser_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
     return _studio_url(browser_host, port)
+
+
+def _studio_entry_url(
+    host: str,
+    port: int,
+    *,
+    request: str | None = None,
+    use_llm_agents: bool = False,
+    view: str = "geometry",
+) -> str:
+    normalized_view = _normalize_studio_view(view)
+    query: dict[str, str] = {}
+    request_text = request.strip() if request else ""
+    if request_text:
+        query["request"] = request_text
+    if use_llm_agents:
+        query["llm"] = "1"
+    if query or normalized_view != "geometry":
+        query["view"] = normalized_view
+    if not query:
+        return _browser_url(host, port)
+    return f"{_browser_url(host, port).rstrip('/')}/studio?{urlencode(query)}"
+
+
+def _normalize_studio_view(view: str) -> str:
+    normalized = view.strip().lower()
+    if normalized not in _STUDIO_VIEW_MODES:
+        choices = "、".join(sorted(_STUDIO_VIEW_MODES))
+        msg = f"Studio 视图必须是 {choices}。"
+        raise ValueError(msg)
+    return normalized
 
 
 def _studio_url(host: str, port: int) -> str:

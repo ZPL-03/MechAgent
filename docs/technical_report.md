@@ -90,9 +90,10 @@ MechAgent Studio 是面向用户和开发者的本地工程工作台。产品入
 
 ```powershell
 python -m mechagent.cli studio --open-browser
+python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry
 ```
 
-启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`--open-browser` 打开浏览器入口。
+启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`--open-browser` 打开浏览器入口。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始 3D 视图的可复现工作台入口，入口 URL 使用 `/studio?request=...&llm=1&view=...` 查询参数契约。
 
 Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`，使用 FastAPI 和 Uvicorn。
 API 入口包括：

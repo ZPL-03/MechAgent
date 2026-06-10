@@ -467,6 +467,8 @@ def test_public_docs_describe_studio_surface() -> None:
 
     for text in (readme, package_readme, local_setup, docs_index):
         assert "python -m mechagent.cli studio --open-browser" in text
+        assert '--request "求解长420mm、宽260mm、厚6mm' in text
+        assert "--llm-agents --view geometry" in text
 
     assert "FastAPI + React + TypeScript + Vite 工作台" in readme
     assert "![MechAgent Studio 几何可视化态](docs/assets/studio-geometry.png)" in readme
@@ -530,6 +532,9 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "后者展示开孔薄板 S Mises 应力云图" in technical_report
     assert "工作台链接复制" in technical_report
     assert "`request`、`llm` 和 `view` 查询参数" in technical_report
+    assert "`--request`、`--llm-agents` 和 `--view geometry|mesh|result`" in technical_report
+    assert "`studio --request`、`--llm-agents` 和 `--view geometry|mesh|result`" in package_readme
+    assert "/studio?request=...&llm=1&view=..." in technical_report
     assert "摘要 JSON 复制和摘要 JSON 下载" in technical_report
     assert "复制动作通过固定状态提示和 `aria-live` 区域反馈成功或失败" in technical_report
     assert "Clipboard API 和浏览器原生复制命令回退" in technical_report
@@ -547,9 +552,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "clamp(280px, 18vw, 360px) minmax(0, 1fr)" in studio_styles
     assert "clamp(270px, 16vw, 340px)" in studio_styles
     assert ".right-rail {\n  grid-template-columns: minmax(0, 1fr);" in studio_styles
-    result_right_rail_columns = (
-        ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
-    )
+    result_right_rail_columns = ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
     assert result_right_rail_columns in studio_styles
     assert "@media (max-width: 1800px)" in studio_styles
     assert "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr)" in studio_styles
@@ -561,6 +564,8 @@ def test_public_docs_describe_studio_surface() -> None:
         ".right-rail.has-result .verification-panel.has-result {\n  height: auto;"
     )
     assert adaptive_verification_panel in studio_styles
+    assert "padding-bottom: 18px" in studio_styles
+    assert "min-height: 38px" in studio_styles
     assert "height: 310px" not in studio_styles
     assert "overflow: visible" in studio_styles
     right_rail_style = studio_styles.split(
@@ -572,9 +577,9 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "grid-auto-rows: 32px" in studio_styles
     assert "height: clamp(300px, 28vh, 312px)" in studio_styles
     assert "min-height: clamp(300px, 28vh, 312px)" in studio_styles
-    result_right_rail_style = studio_styles.split(".right-rail.has-result {", maxsplit=1)[
-        1
-    ].split("}", maxsplit=1)[0]
+    result_right_rail_style = studio_styles.split(".right-rail.has-result {", maxsplit=1)[1].split(
+        "}", maxsplit=1
+    )[0]
     assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
     assert "min-height: 304px" in studio_styles

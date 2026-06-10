@@ -102,6 +102,7 @@ SDK 单次调用可使用
 
 ```powershell
 python -m mechagent.cli studio --open-browser
+python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry
 python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
@@ -113,7 +114,7 @@ python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40
 python scripts/run_llm_smoke.py
 ```
 
-Studio 命令输出服务监听地址和浏览器入口。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。
+Studio 命令输出服务监听地址和浏览器入口。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始视图的可复现工作台入口。
 
 ## 验证命令
 

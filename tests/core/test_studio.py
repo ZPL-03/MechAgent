@@ -16,7 +16,13 @@ from typer.testing import CliRunner
 
 from mechagent.cli import app
 from mechagent.orchestrator.progress import emit_progress
-from mechagent.ui.server import _browser_url, create_studio_app, render_index_html, run_studio
+from mechagent.ui.server import (
+    _browser_url,
+    _studio_entry_url,
+    create_studio_app,
+    render_index_html,
+    run_studio,
+)
 from mechagent.ui.visualization import visualizations_from_summary
 
 
@@ -241,6 +247,35 @@ def test_studio_browser_url_uses_loopback_for_wildcard_host() -> None:
     assert _browser_url("::1", 8765) == "http://[::1]:8765"
 
 
+def test_studio_entry_url_encodes_request_llm_and_view() -> None:
+    url = _studio_entry_url(
+        "0.0.0.0",
+        8765,
+        request="求解 偏心圆孔薄板",
+        use_llm_agents=True,
+        view="result",
+    )
+
+    assert url == (
+        "http://127.0.0.1:8765/studio?"
+        "request=%E6%B1%82%E8%A7%A3+%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
+        "%E8%96%84%E6%9D%BF&llm=1&view=result"
+    )
+
+
+def test_studio_entry_url_omits_empty_query_for_default_state() -> None:
+    assert _studio_entry_url("127.0.0.1", 8765) == "http://127.0.0.1:8765"
+
+
+def test_studio_entry_url_preserves_default_view_with_request() -> None:
+    assert (
+        _studio_entry_url("127.0.0.1", 8765, request="求解偏心圆孔薄板")
+        == "http://127.0.0.1:8765/studio?"
+        "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
+        "%E8%96%84%E6%9D%BF&view=geometry"
+    )
+
+
 def test_run_studio_prints_bind_and_browser_urls(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -258,13 +293,29 @@ def test_run_studio_prints_bind_and_browser_urls(
         lambda url: captured.update({"browser_url": url}),
     )
 
-    run_studio(host="0.0.0.0", port=9876, config=tmp_path / "mechagent.yaml", open_browser=True)
+    run_studio(
+        host="0.0.0.0",
+        port=9876,
+        config=tmp_path / "mechagent.yaml",
+        open_browser=True,
+        request="求解偏心圆孔薄板",
+        use_llm_agents=True,
+        view="mesh",
+    )
 
     output = capsys.readouterr().out
     assert "MechAgent Studio 服务: http://0.0.0.0:9876" in output
-    assert "浏览器入口: http://127.0.0.1:9876" in output
+    assert (
+        "浏览器入口: http://127.0.0.1:9876/studio?"
+        "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
+        "%E8%96%84%E6%9D%BF&llm=1&view=mesh"
+    ) in output
     assert captured == {
-        "browser_url": "http://127.0.0.1:9876",
+        "browser_url": (
+            "http://127.0.0.1:9876/studio?"
+            "request=%E6%B1%82%E8%A7%A3%E5%81%8F%E5%BF%83%E5%9C%86%E5%AD%94"
+            "%E8%96%84%E6%9D%BF&llm=1&view=mesh"
+        ),
         "host": "0.0.0.0",
         "port": 9876,
     }
@@ -279,6 +330,9 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
         port: int,
         config: Path,
         open_browser: bool,
+        request: str | None,
+        use_llm_agents: bool,
+        view: str,
     ) -> None:
         captured.update(
             {
@@ -286,6 +340,9 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
                 "port": port,
                 "config": config,
                 "open_browser": open_browser,
+                "request": request,
+                "use_llm_agents": use_llm_agents,
+                "view": view,
             }
         )
 
@@ -304,6 +361,11 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
             "--port",
             "9876",
             "--open-browser",
+            "--request",
+            "求解偏心圆孔薄板",
+            "--llm-agents",
+            "--view",
+            "result",
         ],
     )
 
@@ -313,7 +375,19 @@ def test_cli_studio_delegates_to_server(monkeypatch: MonkeyPatch, tmp_path: Path
         "port": 9876,
         "config": config_path,
         "open_browser": True,
+        "request": "求解偏心圆孔薄板",
+        "use_llm_agents": True,
+        "view": "result",
     }
+
+
+def test_cli_studio_rejects_invalid_view() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["studio", "--view", "bad-view"])
+
+    assert result.exit_code != 0
+    assert "bad-view" in result.output
 
 
 def test_visualizations_cover_current_static_geometry_types() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
@@ -28,16 +29,41 @@ app.add_typer(knowledge_app, name="knowledge")
 console = Console()
 
 
+class StudioView(str, Enum):
+    """Studio 初始 3D 视图。"""
+
+    geometry = "geometry"
+    mesh = "mesh"
+    result = "result"
+
+
 @app.command()
 def studio(
     config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
     host: str = typer.Option("127.0.0.1", help="Studio 服务监听地址。"),
     port: int = typer.Option(8765, min=1, max=65535, help="Studio 服务监听端口。"),
     open_browser: bool = typer.Option(False, "--open-browser", help="启动后打开浏览器。"),
+    request: Optional[str] = typer.Option(
+        None, "--request", "-r", help="打开工作台时填入的自然语言请求。"
+    ),
+    llm_agents: bool = typer.Option(False, "--llm-agents", help="打开工作台时启用参数补全开关。"),
+    view: StudioView = typer.Option(
+        StudioView.geometry,
+        "--view",
+        help="打开工作台时选中的 3D 视图。",
+    ),
 ) -> None:
     """启动 MechAgent Studio 工程工作台。"""
 
-    run_studio(host=host, port=port, config=config, open_browser=open_browser)
+    run_studio(
+        host=host,
+        port=port,
+        config=config,
+        open_browser=open_browser,
+        request=request,
+        use_llm_agents=llm_agents,
+        view=view.value,
+    )
 
 
 @app.command()
