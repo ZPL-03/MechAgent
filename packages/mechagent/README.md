@@ -40,7 +40,7 @@ Planner 按 `SimulationCapability` 注册表生成 `SimulationIntent` 和 `TaskI
 使用当前能力声明的 LLM 抽取契约和模型归一化函数，并调用当前能力声明的执行契约。
 MeshAgent 按能力或全局配置生成 `MeshAgentOutput`，SolverAgent 按能力或全局配置选择求解器并调用结果评价器。
 启用 LLM Agent 时，MeshAgent 基于 `ModelParams` 生成并校验网格策略建议，ReporterAgent 基于求解摘要、后处理标量、网格元数据、载荷和边界条件输出 LLM 工程解释。
-七个 Agent 均具备 LLM trace，报告输出执行链路摘要。
+ReporterAgent 的工程解释上下文递归剥离执行链路 trace 审计字段；七个 Agent 均具备 LLM trace，报告输出执行链路摘要。
 失败结果通过 `ErrorRecord(node, code, message, missing_fields)` 进入 SDK 摘要和报告。
 多个完整仿真任务在同一请求中出现时，Planner 输出多个 `TaskItem`；工作流按 `TASK_N`
 子目录隔离网格、求解输入和输出文件。

@@ -69,7 +69,7 @@ class ReporterAgent:
         reporter_trace = self.advisor.complete(
             "ReporterAgent",
             "基于有限元求解结果生成工程解释性报告",
-            advisory_payload(_report_context(records)),
+            advisory_payload(_strip_llm_trace_context(_report_context(records))),
             (
                 "只输出 JSON 对象，字段包括 executive_summary、result_interpretation、"
                 "mesh_and_solver_assessment、boundary_load_interpretation、limitations、"
@@ -202,6 +202,22 @@ def _model_dump(value: Any, *, exclude: set[str] | None = None) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", exclude=exclude or set())
     return value
+
+
+def _strip_llm_trace_context(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_llm_trace_context(item)
+            for key, item in value.items()
+            if not _is_llm_trace_key(str(key))
+        }
+    if isinstance(value, list):
+        return [_strip_llm_trace_context(item) for item in value]
+    return value
+
+
+def _is_llm_trace_key(key: str) -> bool:
+    return key.endswith("_llm_trace")
 
 
 def _append_llm_engineering_report(lines: list[str], trace: AgentLLMTrace) -> None:

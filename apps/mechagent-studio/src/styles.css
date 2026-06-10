@@ -323,7 +323,7 @@ summary:focus-visible {
 }
 
 .workspace {
-  grid-template-rows: minmax(380px, 1fr) minmax(250px, 0.76fr);
+  grid-template-rows: minmax(350px, 0.96fr) minmax(250px, 0.82fr);
   height: calc(100vh - 86px);
   min-height: 620px;
   overflow: hidden;
@@ -1355,12 +1355,11 @@ textarea:focus-visible {
 
 .verification-panel {
   display: grid;
-  gap: 7px;
+  gap: 8px;
   align-content: start;
   grid-auto-rows: max-content;
-  overflow-x: hidden;
-  overflow-y: visible;
-  padding: 12px;
+  overflow: visible;
+  padding: 12px 12px 14px;
 }
 
 .verification-panel.has-result {
@@ -1447,18 +1446,18 @@ textarea:focus-visible {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 7px;
 }
 
 .metric-card {
-  min-height: 42px;
+  min-height: 44px;
   display: grid;
   align-content: center;
   gap: 3px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-subtle);
-  padding: 5px 8px;
+  padding: 6px 8px;
 }
 
 .metric-card span {
@@ -1497,20 +1496,20 @@ textarea:focus-visible {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  height: clamp(316px, 30vh, 328px);
-  min-height: clamp(316px, 30vh, 328px);
+  height: clamp(300px, 28vh, 312px);
+  min-height: clamp(300px, 28vh, 312px);
   overflow: hidden;
 }
 
 .right-rail.has-result .flow-panel {
   grid-template-rows: auto auto;
   height: auto;
-  min-height: 306px;
+  min-height: 304px;
 }
 
 .workflow-steps {
   display: grid;
-  grid-auto-rows: 34px;
+  grid-auto-rows: 32px;
   align-content: start;
   gap: 4px;
   margin: 0;
@@ -1526,7 +1525,7 @@ textarea:focus-visible {
 
 .workflow-step {
   min-width: 0;
-  min-height: 34px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 25px minmax(0, 1fr) auto;
   align-items: center;
@@ -1946,7 +1945,7 @@ textarea:focus-visible {
   }
 
   .right-rail.has-result .flow-panel {
-    min-height: 306px;
+    min-height: 304px;
   }
 
   .right-rail.has-result .artifacts-panel {
@@ -1977,7 +1976,7 @@ textarea:focus-visible {
   }
 
   .workspace {
-    grid-template-rows: minmax(380px, 1.08fr) minmax(230px, 0.7fr);
+    grid-template-rows: minmax(350px, 1fr) minmax(250px, 0.78fr);
     overflow: hidden;
   }
 

@@ -562,22 +562,22 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert adaptive_verification_panel in studio_styles
     assert "height: 310px" not in studio_styles
-    assert "overflow-y: visible" in studio_styles
+    assert "overflow: visible" in studio_styles
     right_rail_style = studio_styles.split(
         ".right-rail {\n  grid-template-columns",
         maxsplit=1,
     )[1].split("}", maxsplit=1)[0]
     assert "overflow-y: auto" in right_rail_style
     assert "scrollbar-gutter: stable" in right_rail_style
-    assert "grid-auto-rows: 34px" in studio_styles
-    assert "height: clamp(316px, 30vh, 328px)" in studio_styles
-    assert "min-height: clamp(316px, 30vh, 328px)" in studio_styles
+    assert "grid-auto-rows: 32px" in studio_styles
+    assert "height: clamp(300px, 28vh, 312px)" in studio_styles
+    assert "min-height: clamp(300px, 28vh, 312px)" in studio_styles
     result_right_rail_style = studio_styles.split(".right-rail.has-result {", maxsplit=1)[
         1
     ].split("}", maxsplit=1)[0]
     assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
-    assert "min-height: 306px" in studio_styles
+    assert "min-height: 304px" in studio_styles
     assert "padding: 0;\n  list-style: none;" in studio_styles
     assert 'controls.addEventListener("change", scheduleRender)' in three_viewport
     assert 'controls.removeEventListener("change", scheduleRender)' in three_viewport
@@ -666,7 +666,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "clamp(270px, 16vw, 340px)" in studio_styles
     assert "clamp(300px, 20vw, 500px)" not in studio_styles
     assert "height: calc(100vh - 86px)" in studio_styles
-    assert "grid-template-rows: minmax(380px, 1.08fr) minmax(230px, 0.7fr)" in studio_styles
+    assert "grid-template-rows: minmax(350px, 1fr) minmax(250px, 0.78fr)" in studio_styles
     assert "height: auto" in studio_styles
     assert "height: clamp(460px, 62vh, 620px)" in studio_styles
     assert ".right-rail.has-result {\n    grid-template-columns: 1fr;" in studio_styles

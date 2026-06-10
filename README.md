@@ -177,7 +177,7 @@ python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
 ```
 
-`orchestrator.use_llm_agents` 默认值为 `false`。SDK 单次调用可传入 `use_llm_agents=True`；SDK 单次覆盖使用独立配置副本，不改变 `MechAgent.config` 的持久值。启用 LLM Agent 时，`SimulationIntent.missing_fields` 非空时 Designer 仍尝试 LLM 结构化补齐。本地 parser 已生成验证通过的本地 `ModelParams` 时，后续链路使用本地参数，LLM 输出进入 trace 审计；能力声明 `model_case_ids` 时，`ModelParams.case_id` 必须属于声明集合。MeshAgent 在启用 LLM Agent 时把 `ModelParams` 和当前网格设置交给 LLM，解析 `seed_size` 与 `element_type` 建议，并在本地校验通过后应用到网格生成。ReporterAgent 在启用 LLM Agent 时把结构化求解摘要、后处理标量、网格元数据、边界条件和载荷信息交给 LLM，报告中输出“LLM 工程解释”章节；该章节解释结果含义、网格与求解可信度、边界载荷影响、局限和复核建议。
+`orchestrator.use_llm_agents` 默认值为 `false`。SDK 单次调用可传入 `use_llm_agents=True`；SDK 单次覆盖使用独立配置副本，不改变 `MechAgent.config` 的持久值。启用 LLM Agent 时，`SimulationIntent.missing_fields` 非空时 Designer 仍尝试 LLM 结构化补齐。本地 parser 已生成验证通过的本地 `ModelParams` 时，后续链路使用本地参数，LLM 输出进入 trace 审计；能力声明 `model_case_ids` 时，`ModelParams.case_id` 必须属于声明集合。MeshAgent 在启用 LLM Agent 时把 `ModelParams` 和当前网格设置交给 LLM，解析 `seed_size` 与 `element_type` 建议，并在本地校验通过后应用到网格生成。ReporterAgent 在启用 LLM Agent 时把结构化求解摘要、后处理标量、网格元数据、边界条件和载荷信息交给 LLM，递归剥离执行链路 trace 审计字段，报告中输出“LLM 工程解释”章节；该章节解释结果含义、网格与求解可信度、边界载荷影响、局限和复核建议。执行链路 trace 单独写入报告的“执行链路摘要”和 SDK/CLI JSON 摘要。
 
 非 JSON 模式会输出 Markdown 工程报告、任务摘要表、报告路径和输出目录；`--json` 模式只输出结构化摘要，适合脚本和 CI 消费。
 

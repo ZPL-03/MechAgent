@@ -9,6 +9,7 @@ from mechagent.orchestrator.agents import ReporterAgent
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.orchestrator.models import (
     ErrorRecord,
+    PostProcessingSummary,
     SolverRunSummary,
     TaskItem,
     TaskRunRecord,
@@ -164,6 +165,7 @@ def test_reporter_adds_llm_engineering_interpretation(
         assert "post_summary" in prompt
         assert "planner_llm_trace" not in prompt
         assert "solver_llm_trace" not in prompt
+        assert "嵌套求解 trace 超时" not in prompt
         assert "Agent trace" in prompt
         return (
             '{"executive_summary":["最大位移处于当前线弹性静力模型的可接受范围。"],'
@@ -206,6 +208,19 @@ def test_reporter_adds_llm_engineering_interpretation(
                 prompt="solver prompt",
                 response="solver response",
             ),
+        ),
+        post_summary=PostProcessingSummary(
+            success=True,
+            scalars={
+                "max_displacement_mm": 0.031,
+                "solver_llm_trace": {
+                    "agent": "SolverAgent",
+                    "used": True,
+                    "error": "嵌套求解 trace 超时",
+                    "prompt_chars": 1105,
+                    "response_chars": 0,
+                },
+            },
         ),
     )
 
