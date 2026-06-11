@@ -314,6 +314,8 @@ summary:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 2px;
+  padding-bottom: var(--layout-gutter);
+  scroll-padding-bottom: var(--layout-gutter);
   scrollbar-gutter: stable;
 }
 
@@ -856,8 +858,8 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-subtle);
-  min-height: 46px;
-  padding: 6px 7px;
+  min-height: 40px;
+  padding: 5px 7px;
   align-content: center;
 }
 
@@ -1373,11 +1375,11 @@ textarea:focus-visible {
 
 .verification-panel {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   align-content: start;
   grid-auto-rows: max-content;
   overflow: visible;
-  padding: 12px 12px 16px;
+  padding: 12px 12px 14px;
 }
 
 .verification-panel.has-result {
@@ -1388,7 +1390,7 @@ textarea:focus-visible {
   height: auto;
   min-height: max-content;
   overflow: visible;
-  padding-bottom: 24px;
+  padding-bottom: 16px;
 }
 
 .verdict-card {
@@ -1465,18 +1467,18 @@ textarea:focus-visible {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));
-  gap: 7px;
+  gap: 6px;
 }
 
 .metric-card {
-  min-height: 48px;
+  min-height: 42px;
   display: grid;
   align-content: center;
   gap: 2px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-subtle);
-  padding: 6px 7px;
+  padding: 5px 7px;
 }
 
 .metric-card span {

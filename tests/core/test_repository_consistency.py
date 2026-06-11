@@ -608,15 +608,15 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert adaptive_verification_panel in studio_styles
     assert "min-height: max-content;" in studio_styles
-    assert "padding-bottom: 24px" in studio_styles
+    assert "padding-bottom: 16px" in studio_styles
     assert "grid-template-columns: repeat(auto-fit, minmax(min(122px, 100%), 1fr));" in (
         studio_styles
     )
-    assert "min-height: 46px" in studio_styles
+    assert "min-height: 40px" in studio_styles
     assert "grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));" in (
         studio_styles
     )
-    assert "min-height: 48px" in studio_styles
+    assert "min-height: 42px" in studio_styles
     assert "align-content: center" in studio_styles
     assert "height: 310px" not in studio_styles
     assert "overflow: visible" in studio_styles
@@ -627,6 +627,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "max-width: 100%" in right_rail_style
     assert "grid-template-columns: minmax(0, 1fr)" in right_rail_style
     assert "overflow-y: auto" in right_rail_style
+    assert "padding-bottom: var(--layout-gutter)" in right_rail_style
+    assert "scroll-padding-bottom: var(--layout-gutter)" in right_rail_style
     assert "scrollbar-gutter: stable" in right_rail_style
     assert "grid-auto-rows: 32px" in studio_styles
     assert "height: clamp(300px, 28vh, 312px)" in studio_styles

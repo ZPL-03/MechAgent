@@ -90,6 +90,7 @@ type Notice = {
 const HISTORY_STORAGE_KEY = "mechagent.studio.runHistory";
 const MAX_HISTORY_ITEMS = 8;
 const HISTORY_STORAGE_FALLBACK_ITEMS = 3;
+const HISTORY_REPORT_CHAR_LIMIT = 24_000;
 const HISTORY_UNDO_TIMEOUT_MS = 20_000;
 const JOB_POLL_INTERVAL_MS = 700;
 const INSPECTION_DEBOUNCE_MS = 420;
@@ -2364,7 +2365,7 @@ function isStudioRunResponse(value: unknown): value is StudioRunResponse {
 function compactHistoryResult(result: StudioRunResponse): StudioRunResponse {
   return {
     success: result.success,
-    report: "",
+    report: trimStorageText(result.report, HISTORY_REPORT_CHAR_LIMIT),
     summary: {
       success: result.summary.success,
       work_dir: result.summary.work_dir ?? null,
