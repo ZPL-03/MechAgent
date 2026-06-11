@@ -489,27 +489,31 @@ def test_public_docs_describe_studio_surface() -> None:
         encoding="utf-8"
     )
 
-    for text in (readme, package_readme, local_setup, docs_index):
+    for text in (package_readme, local_setup, docs_index):
         assert "python -m mechagent.cli doctor" in text
         assert "python -m mechagent.cli demo --llm-agents" in text
         assert "python -m mechagent.cli studio --open-browser" in text
         assert '--request "求解长420mm、宽260mm、厚6mm' in text
         assert "--llm-agents --view geometry --auto-run" in text
+    assert "python -m mechagent.cli doctor" in readme
+    assert "python -m mechagent.cli demo --llm-agents" in readme
+    assert "python -m mechagent.cli studio --open-browser" in readme
+    assert '--request "<自然语言仿真请求>" --llm-agents --view geometry --auto-run' in readme
 
-    for text in (readme, package_readme, local_setup, technical_report):
+    for text in (package_readme, local_setup, technical_report):
         assert "`SC-23`" in text
         assert "--example" in text
 
-    assert "FastAPI + React + TypeScript + Vite 工作台" in readme
-    assert "![MechAgent Studio 几何可视化态](docs/assets/studio-geometry.png)" in readme
-    assert "![MechAgent Studio 结果与工程解读态](docs/assets/studio-workbench.png)" in readme
-    assert "几何可视化态展示自然语言输入、Planner 预检、偏心圆孔薄板参数化几何" in readme
-    assert "结果与工程解读态展示开孔薄板 S Mises 应力云图" in readme
-    assert "宽屏右侧检查区展示作业状态、验收状态、求解流程" in readme
-    assert "几何模式显示 `ModelParams.loads` 与 `ModelParams.bcs` 对应的前处理符号" in readme
-    assert "结果模式只显示变形、网格边、节点场、颜色图例和当前结果场" in readme
-    assert "壳单元 `.frd` 派生节点场会按网格节点顺序对齐" in readme
-    assert "重跑此请求" in readme
+    assert "用智能体组织仿真流程" in readme
+    assert "![MechAgent Studio 几何工作流](docs/assets/studio-geometry.png)" in readme
+    assert "![MechAgent Studio 结果与报告](docs/assets/studio-workbench.png)" in readme
+    assert "Studio 的可视化层服务于完整仿真工作流" in readme
+    assert "后处理数据来自求解摘要、网格文件和结果文件" in readme
+    assert "报告层由 ReporterAgent 生成" in readme
+    assert "当前验证范围不包含非线性材料、渐进损伤、接触、多物理场和任意 CAD 导入" in readme
+    assert "扩展求解能力：几何非线性、材料非线性、接触、热-结构耦合、动力学和渐进损伤" in readme
+    assert "开孔薄板用于展示复杂几何特征" not in readme
+    assert "均布压力箭头" not in readme
     assert "右侧承载状态" not in readme
     assert "右侧展示作业状态" not in readme
     assert Path("docs/assets/studio-geometry.png").exists()
@@ -528,7 +532,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`" in technical_report
     assert "宽屏桌面视口展示左侧请求区、中央结果区和右侧检查区三栏布局" in technical_report
     assert "检查区：作业状态、验收状态、求解流程" in technical_report
-    assert "顶栏运行环境胶囊显示必需诊断项通过数" in technical_report
+    assert "顶栏运行环境面板显示必需诊断项通过数" in technical_report
+    assert "键盘和鼠标均可展开查看" in technical_report
     assert "结果视口、报告面板、验收面板、流程面板和阶段产物面板" in technical_report
     assert "doctor` 检查 Python 版本、Python 依赖、配置解析" in technical_report
     assert "GET /api/health" in technical_report
@@ -542,7 +547,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "Three.js 画布在初始化、尺寸变化、视图切换和用户交互时按需渲染" in package_readme
     assert "静止状态不运行连续 `requestAnimationFrame` 循环" in technical_report
     assert "当前 3D 画布支持 PNG 导出，SVG 用于兼容视图和静态下载" in package_readme
-    for text in (readme, package_readme, technical_report):
+    for text in (package_readme, technical_report):
         assert "网格模式使用低透明单元面" in text
         assert "矩形截面分段棱柱" in text
         assert "右下角透明嵌入式 XYZ 全局坐标系" in text
@@ -551,16 +556,16 @@ def test_public_docs_describe_studio_surface() -> None:
         assert "可切换 `Ux`、`Uy`、`Uz`" in text
         assert "可切换 `S Mises`" in text
     assert "Markdown 报告和摘要 JSON 支持复制和下载" in package_readme
-    assert "运行环境摘要" in package_readme
+    assert "可展开运行环境面板" in package_readme
+    assert "顶栏运行环境面板展示 Python、配置、依赖" in package_readme
     assert "/api/diagnostics" in package_readme
     assert "当前工作台链接复制" in package_readme
     assert "`request`、`llm` 和 `view` 查询参数" in package_readme
     assert "`run=1` 作为一次性自动运行信号" in package_readme
     assert "CLI 复现命令复制" in package_readme
     assert "带类型标签和路径复制入口的阶段产物" in package_readme
-    assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in readme
-    assert "页面加载默认不触发远端 LLM 连接检查" in readme
-    assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in readme
+    assert "界面包含自然语言请求、运行环境诊断、任务预检" in readme
+    assert "工作台链接支持恢复请求、LLM 开关和视图模式" in readme
     assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in package_readme
     assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in package_readme
     assert "宽度不超过 900px" in package_readme
@@ -596,6 +601,12 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
     assert 'fetch("/api/diagnostics")' in studio_app
     assert "runtimeStatus(diagnostics, health)" in studio_app
+    assert "RuntimeDiagnosticsMenu" in studio_app
+    assert 'className="runtime-menu"' in studio_app
+    assert 'className="runtime-popover"' in studio_app
+    assert 'aria-label="运行环境诊断摘要"' in studio_app
+    assert "diagnosticCheckDescription" in studio_app
+    assert "packageSummary" in studio_app
     assert "环境 ${summary.required_passed}/${summary.required_total}" in studio_app
     assert "empty-action" in studio_app
     assert 'DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"' in examples_source
@@ -635,6 +646,12 @@ def test_public_docs_describe_studio_surface() -> None:
     assert ".utility-pill.tone-ok" in studio_styles
     assert ".utility-pill.tone-warn" in studio_styles
     assert ".utility-pill.tone-bad" in studio_styles
+    assert ".runtime-popover {" in studio_styles
+    assert "width: min(390px, calc(100vw - 24px));" in studio_styles
+    assert "width: min(360px, calc(100vw - 48px));" in studio_styles
+    assert ".runtime-checks {" in studio_styles
+    assert "max-height: min(360px, calc(100vh - 126px));" in studio_styles
+    assert ".runtime-check-kind" in studio_styles
     assert "align-content: center" in studio_styles
     assert ".empty-action {" in studio_styles
     assert "height: 310px" not in studio_styles

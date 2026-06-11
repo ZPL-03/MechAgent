@@ -30,6 +30,7 @@ import type {
   StageState,
   StudioCapabilitiesResponse,
   StudioCapability,
+  StudioDiagnosticCheck,
   StudioDiagnosticsResponse,
   StudioExample,
   StudioExamplesResponse,
@@ -551,14 +552,11 @@ export function App() {
         </div>
         <div className="topbar-actions" aria-live="polite" aria-label={statusMessage}>
           <StatusPill result={result} running={running} />
-          <span
-            aria-label={runtimeStatusInfo.ariaLabel}
-            className={`utility-pill tone-${runtimeStatusInfo.tone}`}
-            title={runtimeStatusInfo.title}
-          >
-            <Settings2 aria-hidden="true" size={16} />
-            {runtimeStatusInfo.label}
-          </span>
+          <RuntimeDiagnosticsMenu
+            diagnostics={diagnostics}
+            health={health}
+            status={runtimeStatusInfo}
+          />
         </div>
       </header>
 
@@ -947,6 +945,59 @@ function StatusPill({
   );
 }
 
+function RuntimeDiagnosticsMenu({
+  diagnostics,
+  health,
+  status
+}: {
+  diagnostics: StudioDiagnosticsResponse | null;
+  health: StudioHealth | null;
+  status: RuntimeStatus;
+}) {
+  return (
+    <details className="runtime-menu">
+      <summary
+        aria-label={status.ariaLabel}
+        className={`utility-pill tone-${status.tone}`}
+        title={status.title}
+      >
+        <Settings2 aria-hidden="true" size={16} />
+        <span>{status.label}</span>
+      </summary>
+      <div className="runtime-popover" role="group" aria-label="运行环境诊断摘要">
+        <div className="runtime-popover-head">
+          <div>
+            <strong>运行环境</strong>
+            <span>{runtimeSummaryText(diagnostics, health)}</span>
+          </div>
+          <span className={`runtime-summary-badge tone-${status.tone}`}>
+            {diagnostics ? (diagnostics.ok ? "通过" : "异常") : health?.ok ? "检测中" : "连接中"}
+          </span>
+        </div>
+        <p className="runtime-config">
+          配置：{diagnostics?.config_path ?? health?.config ?? "等待后端返回"}
+        </p>
+        {diagnostics ? (
+          <ol className="runtime-checks">
+            {diagnostics.checks.map((check) => (
+              <li className={`runtime-check tone-${check.ok ? "ok" : "bad"}`} key={check.key}>
+                <span className="runtime-check-dot" aria-hidden="true" />
+                <div>
+                  <strong>{check.label || check.key}</strong>
+                  <small>{diagnosticCheckDescription(check)}</small>
+                </div>
+                <span className="runtime-check-kind">{check.required ? "必需" : "可选"}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <CompactEmpty text={health?.ok ? "正在读取本机环境诊断。" : "正在连接本地 Studio 服务。"} />
+        )}
+      </div>
+    </details>
+  );
+}
+
 function runtimeStatus(
   diagnostics: StudioDiagnosticsResponse | null,
   health: StudioHealth | null
@@ -1003,6 +1054,97 @@ function diagnosticFailureLabels(
     .filter((item) => item.required === required && !item.ok)
     .slice(0, 4)
     .map((item) => item.label || item.key);
+}
+
+function runtimeSummaryText(
+  diagnostics: StudioDiagnosticsResponse | null,
+  health: StudioHealth | null
+): string {
+  if (diagnostics) {
+    const summary = diagnostics.summary;
+    return `必需 ${summary.required_passed}/${summary.required_total} · 可选 ${summary.optional_passed}/${summary.optional_total}`;
+  }
+  return health?.ok ? "本地服务已连接，环境检测中" : "等待本地服务健康检查";
+}
+
+function diagnosticCheckDescription(check: StudioDiagnosticCheck): string {
+  const details = check.details;
+  switch (check.key) {
+    case "python":
+      return joinRuntimeParts([detailText(details, "version"), detailText(details, "executable")]);
+    case "config":
+      return joinRuntimeParts([
+        `solver=${detailText(details, "solver")}`,
+        `mesher=${detailText(details, "mesher")}`,
+        `orchestrator=${detailText(details, "orchestrator")}`
+      ]);
+    case "packages":
+      return packageSummary(details);
+    case "studio_static":
+      return `JS ${detailArrayLength(details, "js_assets")} · CSS ${detailArrayLength(
+        details,
+        "css_assets"
+      )}`;
+    case "registry":
+      return `solver ${detailArrayLength(details, "solvers")} · mesher ${detailArrayLength(
+        details,
+        "meshers"
+      )} · capability ${detailArrayLength(details, "capabilities")}`;
+    case "solver":
+      return joinRuntimeParts([detailText(details, "name"), detailText(details, "resolved")]);
+    case "llm":
+      return joinRuntimeParts([
+        detailText(details, "model"),
+        detailBoolean(details, "api_key_present") ? "密钥已配置" : "密钥未配置",
+        detailBoolean(details, "connection_checked") ? "已远端检查" : "未远端检查"
+      ]);
+    case "frontend_source":
+      return joinRuntimeParts([detailText(details, "package_json"), detailText(details, "npm")]);
+    case "git":
+      return detailText(details, "git") || (check.ok ? "Git 可用" : "Git 不可用");
+    default:
+      return check.ok ? "通过" : "失败";
+  }
+}
+
+function packageSummary(details: Record<string, unknown>): string {
+  const modules = details.modules;
+  if (!modules || typeof modules !== "object" || Array.isArray(modules)) {
+    return "依赖状态已返回";
+  }
+  const entries = Object.entries(modules);
+  const passed = entries.filter(([, ok]) => ok === true).length;
+  const failed = entries
+    .filter(([, ok]) => ok !== true)
+    .map(([name]) => name)
+    .slice(0, 3);
+  return failed.length > 0
+    ? `依赖 ${passed}/${entries.length} · 缺少 ${failed.join("、")}`
+    : `依赖 ${passed}/${entries.length}`;
+}
+
+function detailText(details: Record<string, unknown>, key: string): string {
+  const value = details[key];
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function detailBoolean(details: Record<string, unknown>, key: string): boolean {
+  return details[key] === true;
+}
+
+function detailArrayLength(details: Record<string, unknown>, key: string): number {
+  const value = details[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function joinRuntimeParts(parts: string[]): string {
+  return parts.filter((part) => part.trim()).join(" · ");
 }
 
 function PreflightPanel({
