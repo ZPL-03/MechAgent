@@ -279,7 +279,7 @@ summary:focus-visible {
   display: grid;
   grid-template-columns:
     minmax(0, clamp(280px, 18vw, 360px)) minmax(0, 1fr)
-    minmax(0, clamp(270px, 16vw, 340px));
+    minmax(0, clamp(320px, 17vw, 380px));
   gap: var(--layout-gap);
   min-height: calc(100vh - 62px);
   align-items: start;
@@ -313,10 +313,9 @@ summary:focus-visible {
   min-height: 620px;
   overflow-x: hidden;
   overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 0;
   padding-bottom: var(--layout-gutter);
   scroll-padding-bottom: var(--layout-gutter);
-  scrollbar-gutter: stable;
 }
 
 .right-rail.has-result {
@@ -328,7 +327,7 @@ summary:focus-visible {
 }
 
 .workspace {
-  grid-template-rows: minmax(330px, 0.88fr) minmax(300px, 0.92fr);
+  grid-template-rows: minmax(310px, 0.78fr) minmax(330px, 1fr);
   height: calc(100vh - 86px);
   min-height: 620px;
   overflow: hidden;
@@ -1868,6 +1867,21 @@ textarea:focus-visible {
   color: var(--text);
 }
 
+.empty-action {
+  min-height: 34px;
+  border-color: var(--primary);
+  border-radius: 7px;
+  background: var(--primary);
+  color: #ffffff;
+  padding: 0 14px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.empty-action:hover:not(:disabled) {
+  background: var(--primary-strong);
+}
+
 .compact-empty {
   border: 1px dashed var(--line);
   border-radius: 7px;
@@ -1998,7 +2012,7 @@ textarea:focus-visible {
   }
 
   .workspace {
-    grid-template-rows: minmax(330px, 0.9fr) minmax(300px, 0.86fr);
+    grid-template-rows: minmax(310px, 0.78fr) minmax(330px, 1fr);
     overflow: hidden;
   }
 

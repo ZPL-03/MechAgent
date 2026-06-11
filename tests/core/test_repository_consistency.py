@@ -508,6 +508,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "几何模式显示 `ModelParams.loads` 与 `ModelParams.bcs` 对应的前处理符号" in readme
     assert "结果模式只显示变形、网格边、节点场、颜色图例和当前结果场" in readme
     assert "壳单元 `.frd` 派生节点场会按网格节点顺序对齐" in readme
+    assert "重跑此请求" in readme
     assert "右侧承载状态" not in readme
     assert "右侧展示作业状态" not in readme
     assert Path("docs/assets/studio-geometry.png").exists()
@@ -560,6 +561,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "运行前后保持左右外边距一致" in technical_report
     assert "前者展示几何模式下的偏心圆孔薄板、边界支承符号和均布压力箭头" in technical_report
     assert "后者展示开孔薄板 S Mises 应力云图" in technical_report
+    assert "重跑此请求恢复几何、网格和结果视图" in technical_report
     assert "工作台链接复制" in technical_report
     assert "`request`、`llm` 和 `view` 查询参数" in technical_report
     assert "`--request`、`--llm-agents` 和 `--view geometry|mesh|result`" in technical_report
@@ -574,6 +576,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "复制动作通过固定状态提示和 `aria-live` 区域反馈成功或失败" in technical_report
     assert "Clipboard API 和浏览器原生复制命令回退" in technical_report
     assert "复制动作带有可见状态反馈" in package_readme
+    assert "重跑此请求" in package_readme
     assert "复制 CLI 复现命令" in studio_app
     assert "复制当前工作台链接" in studio_app
     assert "copyTextToClipboard" in studio_app
@@ -584,6 +587,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'aria-live="polite"' in studio_app
     assert 'inputMode="text"' in studio_app
     assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
+    assert "empty-action" in studio_app
     assert 'DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"' in examples_source
     assert "def example_by_id" in examples_source
     assert "def showcase_example" in examples_source
@@ -591,7 +595,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "--open-browser/--no-open-browser" in cli_source
     assert "--auto-run/--no-auto-run" in cli_source
     assert "minmax(0, clamp(280px, 18vw, 360px)) minmax(0, 1fr)" in studio_styles
-    assert "clamp(270px, 16vw, 340px)" in studio_styles
+    assert "clamp(320px, 17vw, 380px)" in studio_styles
     assert ".left-rail,\n.workspace,\n.right-rail {\n  min-width: 0;" in studio_styles
     assert ".right-rail {\n  max-width: 100%;" in studio_styles
     assert "grid-template-columns: minmax(0, 1fr);" in studio_styles
@@ -618,6 +622,7 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert "min-height: 42px" in studio_styles
     assert "align-content: center" in studio_styles
+    assert ".empty-action {" in studio_styles
     assert "height: 310px" not in studio_styles
     assert "overflow: visible" in studio_styles
     right_rail_style = studio_styles.split("\n.right-rail {\n")[-1].split(
@@ -629,7 +634,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "overflow-y: auto" in right_rail_style
     assert "padding-bottom: var(--layout-gutter)" in right_rail_style
     assert "scroll-padding-bottom: var(--layout-gutter)" in right_rail_style
-    assert "scrollbar-gutter: stable" in right_rail_style
+    assert "scrollbar-gutter" not in right_rail_style
     assert "grid-auto-rows: 32px" in studio_styles
     assert "height: clamp(300px, 28vh, 312px)" in studio_styles
     assert "min-height: clamp(300px, 28vh, 312px)" in studio_styles
@@ -732,11 +737,10 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert ".playwright-cli" in Path("scripts/clean_artifacts.py").read_text(encoding="utf-8")
     assert "actions/setup-node@v6" in workflow
-    assert "clamp(270px, 16vw, 340px)" in studio_styles
+    assert "clamp(320px, 17vw, 380px)" in studio_styles
     assert "clamp(300px, 20vw, 500px)" not in studio_styles
     assert "height: calc(100vh - 86px)" in studio_styles
-    assert "grid-template-rows: minmax(330px, 0.88fr) minmax(300px, 0.92fr)" in studio_styles
-    assert "grid-template-rows: minmax(330px, 0.9fr) minmax(300px, 0.86fr)" in studio_styles
+    assert "grid-template-rows: minmax(310px, 0.78fr) minmax(330px, 1fr)" in studio_styles
     assert "height: auto" in studio_styles
     assert "height: clamp(460px, 62vh, 620px)" in studio_styles
     assert ".right-rail.has-result {\n    grid-template-columns: 1fr;" in studio_styles

@@ -194,6 +194,10 @@ export function App() {
     null
   );
   const [notice, setNotice] = useState<Notice | null>(null);
+  const activeHistoryItem = useMemo(
+    () => history.find((item) => item.id === activeHistoryId) ?? null,
+    [activeHistoryId, history]
+  );
   const selectedRenderMode = RENDER_MODES[selectedRenderModeIndex] ?? RENDER_MODES[0];
 
   useEffect(() => {
@@ -387,11 +391,14 @@ export function App() {
       ? `仿真${outcome.label}`
       : "等待仿真";
 
-  async function runSimulation() {
-    const requestText = request.trim();
+  async function runSimulation(requestOverride?: string) {
+    const requestText = (requestOverride ?? request).trim();
     if (!requestText) {
       setResult(runError("请输入结构、材料、边界和载荷信息。"));
       return;
+    }
+    if (requestOverride !== undefined) {
+      setRequest(requestText);
     }
     setRunning(true);
     setActiveJob(null);
@@ -461,6 +468,11 @@ export function App() {
     setSelectedTaskIndex(0);
     setSelectedVisualIndex(0);
     setSelectedRenderModeIndex(defaultRenderModeIndex(item.result));
+  }
+
+  function rerunHistoryItem(item: RunHistoryItem) {
+    setActiveHistoryId(item.id);
+    void runSimulation(item.request);
   }
 
   function clearHistory() {
@@ -564,7 +576,7 @@ export function App() {
                 className="primary-action"
                 type="button"
                 disabled={running}
-                onClick={runSimulation}
+                onClick={() => void runSimulation()}
               >
                 {running ? (
                   <LoaderCircle aria-hidden="true" className="spin" size={18} />
@@ -729,8 +741,14 @@ export function App() {
               ) : (
                 <EmptyState
                   icon={<Boxes size={30} />}
-                  title="等待结果场"
-                  text="运行后展示由求解摘要、网格文件和位移场生成的工程视图。"
+                  title={activeHistoryItem ? "历史结果已回看" : "等待结果场"}
+                  text={
+                    activeHistoryItem
+                      ? "当前历史仅保留摘要和报告。重跑此请求可恢复几何、网格和结果视图。"
+                      : "运行后展示由求解摘要、网格文件和位移场生成的工程视图。"
+                  }
+                  actionLabel={activeHistoryItem ? "重跑此请求" : undefined}
+                  onAction={activeHistoryItem ? () => rerunHistoryItem(activeHistoryItem) : undefined}
                 />
               )}
             </div>
@@ -1042,17 +1060,26 @@ function ResultMatrix({
 function EmptyState({
   icon,
   title,
-  text
+  text,
+  actionLabel,
+  onAction
 }: {
   icon: ReactNode;
   title: string;
   text: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="empty-state">
       <span aria-hidden="true">{icon}</span>
       <strong>{title}</strong>
       <span>{text}</span>
+      {actionLabel && onAction ? (
+        <button className="empty-action" type="button" onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
