@@ -647,7 +647,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
     assert "min-height: 304px" not in studio_styles
-    assert "min-height: 0;\n  overflow: visible;" in studio_styles
+    assert "height: max-content;\n  min-height: max-content;" in studio_styles
+    assert ".right-rail.has-result .workflow-steps {\n  height: max-content;" in studio_styles
     assert "padding: 0;\n  list-style: none;" in studio_styles
     assert 'controls.addEventListener("change", scheduleRender)' in three_viewport
     assert 'controls.removeEventListener("change", scheduleRender)' in three_viewport

@@ -1524,8 +1524,8 @@ textarea:focus-visible {
 
 .right-rail.has-result .flow-panel {
   grid-template-rows: auto auto;
-  height: auto;
-  min-height: 0;
+  height: max-content;
+  min-height: max-content;
   overflow: visible;
 }
 
@@ -1541,6 +1541,7 @@ textarea:focus-visible {
 }
 
 .right-rail.has-result .workflow-steps {
+  height: max-content;
   overflow: visible;
   overscroll-behavior: contain;
 }
@@ -1982,7 +1983,8 @@ textarea:focus-visible {
   }
 
   .right-rail.has-result .flow-panel {
-    min-height: 0;
+    height: max-content;
+    min-height: max-content;
   }
 
   .right-rail.has-result .artifacts-panel {
