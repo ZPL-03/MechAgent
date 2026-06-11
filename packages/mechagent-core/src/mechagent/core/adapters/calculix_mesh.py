@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import gmsh
@@ -133,6 +134,7 @@ class CalculiXInpMesher(AbstractMesher):
         ny = max(4, int(round(width / self.config.seed_size)))
         nodes: dict[int, tuple[float, float, float]] = {}
         quads: list[tuple[int, int, int, int]] = []
+        quality: dict[str, float] = {}
         gmsh.initialize(interruptible=False)
         try:
             gmsh.option.setNumber("General.Terminal", 0)
@@ -155,6 +157,7 @@ class CalculiXInpMesher(AbstractMesher):
             gmsh.model.geo.mesh.setRecombine(2, surface)
             gmsh.model.geo.synchronize()
             gmsh.model.mesh.generate(2)
+            quality = _gmsh_quality_metrics(2)
             nodes = _gmsh_nodes()
             quads = _gmsh_quad_elements()
             if not nodes or not quads:
@@ -168,11 +171,12 @@ class CalculiXInpMesher(AbstractMesher):
         return MeshResult(
             success=True,
             mesh_file=mesh_file,
-            quality={"min_jacobian": 1.0},
+            quality=quality,
             metadata={
                 "format": "calculix_mesh_inp",
                 "element_type": "S4",
                 "source": "gmsh",
+                "quality_source": "gmsh_minSICN",
                 "seed_size_mm": self.config.seed_size,
                 "node_count": len(nodes),
                 "element_count": len(quads),
@@ -197,6 +201,7 @@ class CalculiXInpMesher(AbstractMesher):
 
         nodes: dict[int, tuple[float, float, float]] = {}
         elements: list[tuple[str, tuple[int, ...]]] = []
+        quality: dict[str, float] = {}
         gmsh.initialize(interruptible=False)
         try:
             gmsh.option.setNumber("General.Terminal", 0)
@@ -221,6 +226,7 @@ class CalculiXInpMesher(AbstractMesher):
             for surface in surface_tags:
                 gmsh.model.mesh.setRecombine(2, surface)
             gmsh.model.mesh.generate(2)
+            quality = _gmsh_quality_metrics(2)
             nodes = _gmsh_nodes()
             elements = _gmsh_shell_elements()
             if not nodes or not elements:
@@ -248,11 +254,12 @@ class CalculiXInpMesher(AbstractMesher):
         return MeshResult(
             success=True,
             mesh_file=mesh_file,
-            quality={"min_jacobian": 1.0},
+            quality=quality,
             metadata={
                 "format": "calculix_mesh_inp",
                 "element_type": "S3/S4",
                 "source": "gmsh_perforated_plate",
+                "quality_source": "gmsh_minSICN",
                 "seed_size_mm": self.config.seed_size,
                 "node_count": len(nodes),
                 "element_count": len(elements),
@@ -379,6 +386,25 @@ def _gmsh_shell_elements() -> list[tuple[str, tuple[int, ...]]]:
                     )
                 )
     return elements
+
+
+def _gmsh_quality_metrics(dimension: int) -> dict[str, float]:
+    _, element_tag_groups, _ = gmsh.model.mesh.getElements(dimension)
+    element_tags = [int(tag) for group in element_tag_groups for tag in group]
+    if not element_tags:
+        return {}
+
+    values = [
+        float(value)
+        for value in gmsh.model.mesh.getElementQualities(element_tags, "minSICN")
+        if math.isfinite(float(value))
+    ]
+    if not values:
+        return {}
+    return {
+        "min_sicn": min(values),
+        "mean_sicn": sum(values) / len(values),
+    }
 
 
 def _write_calculix_s4_mesh(

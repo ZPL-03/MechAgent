@@ -509,6 +509,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "![MechAgent Studio 结果与报告](docs/assets/studio-workbench.png)" in readme
     assert "Studio 的可视化层服务于完整仿真工作流" in readme
     assert "后处理数据来自求解摘要、网格文件和结果文件" in readme
+    assert "Agent 链路面板展示各阶段结构化产物" in readme
     assert "报告层由 ReporterAgent 生成" in readme
     assert "当前验证范围不包含非线性材料、渐进损伤、接触、多物理场和任意 CAD 导入" in readme
     assert "扩展求解能力：几何非线性、材料非线性、接触、热-结构耦合、动力学和渐进损伤" in readme
@@ -531,10 +532,15 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "结果模式只显示变形、网格边、节点场、颜色图例和当前结果场" in technical_report
     assert "Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`" in technical_report
     assert "宽屏桌面视口展示左侧请求区、中央结果区和右侧检查区三栏布局" in technical_report
-    assert "检查区：作业状态、验收状态、求解流程" in technical_report
+    assert "检查区：作业状态、验收状态、求解流程、Agent 链路" in technical_report
+    assert "Agent 链路面板读取公开摘要中的 `TaskItem`" in technical_report
+    assert '`gmsh.model.mesh.getElementQualities(..., "minSICN")`' in technical_report
+    assert "`MeshResult.quality.min_sicn`" in technical_report
     assert "顶栏运行环境面板显示必需诊断项通过数" in technical_report
     assert "键盘和鼠标均可展开查看" in technical_report
-    assert "结果视口、报告面板、验收面板、流程面板和阶段产物面板" in technical_report
+    assert (
+        "结果视口、报告面板、验收面板、流程面板、Agent 链路面板和阶段产物面板" in technical_report
+    )
     assert "doctor` 检查 Python 版本、Python 依赖、配置解析" in technical_report
     assert "GET /api/health" in technical_report
     assert "GET /api/diagnostics" in technical_report
@@ -564,6 +570,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "`run=1` 作为一次性自动运行信号" in package_readme
     assert "CLI 复现命令复制" in package_readme
     assert "带类型标签和路径复制入口的阶段产物" in package_readme
+    assert "Agent 链路面板读取公开摘要中的 `TaskItem`" in package_readme
     assert "界面包含自然语言请求、运行环境诊断、任务预检" in readme
     assert "工作台链接支持恢复请求、LLM 开关和视图模式" in readme
     assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in package_readme
@@ -602,6 +609,10 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'fetch("/api/diagnostics")' in studio_app
     assert "runtimeStatus(diagnostics, health)" in studio_app
     assert "RuntimeDiagnosticsMenu" in studio_app
+    assert "AgentChainPanel" in studio_app
+    assert "buildAgentChain(result, selectedTask)" in studio_app
+    assert "meshQualityLabel(task.mesh_result ?? null)" in studio_app
+    assert 'PanelTitle icon={<Network size={18} />} title="Agent 链路"' in studio_app
     assert 'className="runtime-menu"' in studio_app
     assert 'className="runtime-popover"' in studio_app
     assert 'aria-label="运行环境诊断摘要"' in studio_app
@@ -620,11 +631,14 @@ def test_public_docs_describe_studio_surface() -> None:
     assert ".left-rail,\n.workspace,\n.right-rail {\n  min-width: 0;" in studio_styles
     assert ".right-rail {\n  max-width: 100%;" in studio_styles
     assert "grid-template-columns: minmax(0, 1fr);" in studio_styles
-    result_right_rail_columns = ".right-rail.has-result {\n  grid-template-columns: minmax(0, 1fr);"
+    result_right_rail_columns = (
+        ".right-rail.has-result {\n  display: flex;\n  flex-direction: column;"
+    )
     assert result_right_rail_columns in studio_styles
     assert "@media (max-width: 1800px)" in studio_styles
     assert "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr)" in studio_styles
-    assert ".right-rail,\n  .right-rail.has-result {\n    grid-column: 1 / -1;" in studio_styles
+    assert ".right-rail,\n  .right-rail.has-result {\n    display: grid;" in studio_styles
+    assert "grid-column: 1 / -1;" in studio_styles
     assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in studio_styles
     assert "grid-template-rows: auto auto minmax(150px, 1fr) auto" not in studio_styles
     assert ".verification-panel.has-result" in studio_styles
@@ -672,9 +686,21 @@ def test_public_docs_describe_studio_surface() -> None:
     result_right_rail_style = studio_styles.split(".right-rail.has-result {", maxsplit=1)[1].split(
         "}", maxsplit=1
     )[0]
-    assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
+    assert "display: flex;" in result_right_rail_style
+    assert "flex-direction: column;" in result_right_rail_style
+    assert "grid-template-rows: auto auto auto auto auto;" in result_right_rail_style
     assert "grid-auto-rows: max-content;" in result_right_rail_style
+    assert ".right-rail.has-result > .panel {\n  flex: 0 0 auto;" in studio_styles
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
+    assert ".agent-chain-panel {" in studio_styles
+    assert ".agent-chain-list {" in studio_styles
+    assert ".right-rail.has-result .agent-chain-panel {" in studio_styles
+    assert "height: 334px;" in studio_styles
+    assert "min-height: 334px;" in studio_styles
+    assert "max-height: 334px;" in studio_styles
+    assert "display: flex;\n  flex-direction: column;" in studio_styles
+    assert "flex: 0 0 auto;" in studio_styles
+    assert "height: 38px;\n  min-height: 38px;" in studio_styles
     assert "min-height: 304px" not in studio_styles
     assert "height: max-content;\n  min-height: max-content;" in studio_styles
     assert ".right-rail.has-result .workflow-steps {\n  height: max-content;" in studio_styles
@@ -776,7 +802,9 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "grid-template-rows: minmax(310px, 0.78fr) minmax(330px, 1fr)" in studio_styles
     assert "height: auto" in studio_styles
     assert "height: clamp(460px, 62vh, 620px)" in studio_styles
-    assert ".right-rail.has-result {\n    grid-template-columns: 1fr;" in studio_styles
+    assert ".right-rail.has-result {\n    display: grid;\n    grid-template-columns: 1fr;" in (
+        studio_styles
+    )
 
 
 def test_package_metadata_declares_open_source_release_fields() -> None:

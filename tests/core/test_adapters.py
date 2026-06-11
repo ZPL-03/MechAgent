@@ -345,6 +345,11 @@ def test_calculix_plate_mesher_disables_gmsh_signal_handlers(
         "getElements",
         lambda _dim: ([3], [[1]], [[1, 2, 3, 4]]),
     )
+    monkeypatch.setattr(
+        gmsh_module.model.mesh,
+        "getElementQualities",
+        lambda _tags, _name: [0.95],
+    )
     mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=20.0))
 
     result = mesher.generate(tc02_model_params())
@@ -497,6 +502,8 @@ def test_calculix_perforated_plate_input_distributes_pressure_over_net_area(
     mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
     mesh_result = mesher.generate(params)
     assert mesh_result.mesh_file is not None
+    assert mesh_result.quality["min_sicn"] > 0.3
+    assert mesh_result.quality["mean_sicn"] >= mesh_result.quality["min_sicn"]
     adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
 
     input_file = adapter.generate_input(

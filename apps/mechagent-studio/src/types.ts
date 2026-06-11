@@ -111,6 +111,7 @@ export interface SolverResult {
   passed?: boolean;
   verification_status?: string;
   solver?: string;
+  solver_llm_trace?: AgentTrace | null;
   output_files?: string[];
   mesh_file?: string | null;
   mesh_metadata?: Record<string, unknown>;
