@@ -259,6 +259,94 @@ def test_cli_demo_launches_showcase_example(monkeypatch: MonkeyPatch, tmp_path: 
     }
 
 
+def test_cli_doctor_json_reports_runtime(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_diagnostics(config: Path, *, check_llm: bool) -> dict[str, object]:
+        captured["config"] = config
+        captured["check_llm"] = check_llm
+        return {
+            "ok": True,
+            "checks": [{"key": "python", "label": "Python 运行时", "ok": True, "required": True}],
+            "summary": {
+                "required_passed": 1,
+                "required_total": 1,
+                "optional_passed": 0,
+                "optional_total": 0,
+            },
+        }
+
+    monkeypatch.setattr("mechagent.cli.run_environment_diagnostics", fake_diagnostics)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["doctor", "--config", str(tmp_path / "mechagent.yaml"), "--json"])
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 0
+    assert payload["ok"] is True
+    assert captured == {"config": tmp_path / "mechagent.yaml", "check_llm": False}
+
+
+def test_cli_doctor_llm_flag_enables_remote_check(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, bool] = {}
+
+    def fake_diagnostics(_config: Path, *, check_llm: bool) -> dict[str, object]:
+        captured["check_llm"] = check_llm
+        return {
+            "ok": True,
+            "checks": [{"key": "llm", "label": "LLM 配置", "ok": True, "required": True}],
+            "summary": {
+                "required_passed": 1,
+                "required_total": 1,
+                "optional_passed": 0,
+                "optional_total": 0,
+            },
+        }
+
+    monkeypatch.setattr("mechagent.cli.run_environment_diagnostics", fake_diagnostics)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["doctor", "--llm", "--json"])
+
+    assert result.exit_code == 0
+    assert captured == {"check_llm": True}
+
+
+def test_cli_doctor_returns_nonzero_when_required_check_fails(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def fake_diagnostics(_config: Path, *, check_llm: bool) -> dict[str, object]:
+        assert check_llm is False
+        return {
+            "ok": False,
+            "checks": [
+                {
+                    "key": "solver",
+                    "label": "求解器",
+                    "ok": False,
+                    "required": True,
+                    "details": {"reason": "求解器路径不存在。"},
+                }
+            ],
+            "summary": {
+                "required_passed": 0,
+                "required_total": 1,
+                "optional_passed": 0,
+                "optional_total": 0,
+            },
+        }
+
+    monkeypatch.setattr("mechagent.cli.run_environment_diagnostics", fake_diagnostics)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "MechAgent 环境诊断" in result.output
+    assert "求解器" in result.output
+    assert "失败" in result.output
+
+
 def test_cli_demo_rejects_unknown_example() -> None:
     runner = CliRunner()
 

@@ -85,6 +85,16 @@ CALCULIX_CCX=ccx
 
 命令示例默认在已激活的虚拟环境中执行。CalculiX 可执行文件通过 `CALCULIX_CCX` 指向本机路径，也可以使用 PATH 中可直接调用的 `ccx`。
 
+本机环境自检：
+
+```powershell
+python -m mechagent.cli doctor
+python -m mechagent.cli doctor --json
+python -m mechagent.cli doctor --llm
+```
+
+`doctor` 检查 Python 版本、Python 依赖、配置解析、CalculiX 路径、求解器/网格器/能力注册表、Studio 静态资源、可选前端开发工具和 Git；`--llm` 会使用当前 `.env` 或环境变量调用远端 OpenAI 兼容接口做连接检查。
+
 ## 启动 Studio
 
 ```powershell
@@ -220,6 +230,7 @@ Markdown 报告中的“LLM 工程解释”章节。
 ## 质量门禁
 
 ```powershell
+python -m mechagent.cli doctor
 python scripts/check_env.py
 npm --prefix apps/mechagent-studio ci --no-audit --no-fund
 npm --prefix apps/mechagent-studio run build
@@ -243,7 +254,7 @@ python -m mkdocs build --strict
 python scripts/clean_artifacts.py
 ```
 
-测试集包含 404 个测试，覆盖公开 API、Studio UI 服务、编排、LLM、知识库、MeshAgent 输出契约、求解失败归一化、LangGraph 状态契约校验、自然语言案例、运行前预检和真实 CalculiX 验证。完整测试范围、质量结果和清理策略见 `docs/technical_report.md`。
+测试集包含 407 个测试，覆盖公开 API、Studio UI 服务、编排、LLM、知识库、MeshAgent 输出契约、求解失败归一化、LangGraph 状态契约校验、自然语言案例、运行前预检和真实 CalculiX 验证。完整测试范围、质量结果和清理策略见 `docs/technical_report.md`。
 
 ## 文档
 

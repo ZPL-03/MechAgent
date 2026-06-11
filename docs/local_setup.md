@@ -91,6 +91,16 @@ SDK 单次调用可使用
 
 几何建模、网格划分、结果场和进度状态的统一工作台目标见 [产品蓝图](product_blueprint.md)。
 
+本机运行环境自检：
+
+```powershell
+python -m mechagent.cli doctor
+python -m mechagent.cli doctor --json
+python -m mechagent.cli doctor --llm
+```
+
+`doctor` 检查 Python 版本、Python 依赖、配置解析、CalculiX 路径、求解器/网格器/能力注册表、Studio 静态资源、可选前端开发工具和 Git；`--llm` 使用当前 `.env` 或环境变量调用远端 OpenAI 兼容接口做连接检查。
+
 `scripts/check_env.py` 默认检查 Python、依赖和配置解析后的 CalculiX 可执行文件。
 `--config` 可指定运行配置文件；`--require-llm` 要求 `.env` 或环境变量中
 `URL`、`API_KEY`、`MODEL_NAME` 均已配置。环境摘要同时报告 `CALCULIX_CCX`

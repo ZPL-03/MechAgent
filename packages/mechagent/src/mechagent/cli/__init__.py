@@ -15,6 +15,7 @@ from rich.table import Table
 from mechagent import MechAgent
 from mechagent.config import config_to_public_dict
 from mechagent.core.validation import run_core_benchmarks
+from mechagent.diagnostics import run_environment_diagnostics
 from mechagent.examples import (
     DEFAULT_SHOWCASE_EXAMPLE_ID,
     SimulationExample,
@@ -122,6 +123,26 @@ def demo(
         view=view.value,
         auto_run=auto_run,
     )
+
+
+@app.command()
+def doctor(
+    config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON 诊断结果。"),
+    llm: bool = typer.Option(False, "--llm", help="同时调用 LLM 远端连接检查。"),
+) -> None:
+    """检查本机 MechAgent 运行环境。"""
+
+    report = run_environment_diagnostics(config, check_llm=llm)
+    if json_output:
+        _echo_json(report)
+        if not bool(report.get("ok")):
+            raise typer.Exit(code=1)
+        return
+
+    _print_diagnostics(report)
+    if not bool(report.get("ok")):
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -404,6 +425,81 @@ def query_knowledge(
         preview = hit.text[:120] + ("..." if len(hit.text) > 120 else "")
         table.add_row(hit.doc_id, f"{hit.score:.6f}", hit.source, preview)
     console.print(table)
+
+
+def _print_diagnostics(report: dict[str, Any]) -> None:
+    table = Table(title="MechAgent 环境诊断", expand=True)
+    table.add_column("项目", no_wrap=True)
+    table.add_column("必需", no_wrap=True)
+    table.add_column("状态", no_wrap=True)
+    table.add_column("摘要", overflow="fold")
+    checks = report.get("checks")
+    if isinstance(checks, list):
+        for item in checks:
+            check = item if isinstance(item, dict) else {}
+            table.add_row(
+                _text(check.get("label"), "-"),
+                "是" if bool(check.get("required")) else "可选",
+                "通过" if bool(check.get("ok")) else "失败",
+                _diagnostic_summary(check),
+            )
+    console.print(table)
+    summary = _dict_value(report.get("summary"))
+    console.print(
+        "必需项 "
+        f"{_text(summary.get('required_passed'), '0')}/"
+        f"{_text(summary.get('required_total'), '0')}，"
+        "可选项 "
+        f"{_text(summary.get('optional_passed'), '0')}/{_text(summary.get('optional_total'), '0')}"
+    )
+
+
+def _diagnostic_summary(check: dict[str, Any]) -> str:
+    details = _dict_value(check.get("details"))
+    if not bool(check.get("ok")):
+        return _text(details.get("error") or details.get("reason") or details.get("message"), "-")
+    key = _text(check.get("key"), "")
+    if key == "python":
+        return f"{_text(details.get('version'), '-')} · {_text(details.get('executable'), '-')}"
+    if key == "config":
+        return (
+            f"{_text(details.get('path'), '-')} · "
+            f"solver={_text(details.get('solver'), '-')} · "
+            f"mesher={_text(details.get('mesher'), '-')}"
+        )
+    if key == "packages":
+        modules = _dict_value(details.get("modules"))
+        missing = [name for name, present in modules.items() if not bool(present)]
+        return "依赖完整" if not missing else f"缺少 {', '.join(missing)}"
+    if key == "studio_static":
+        js_assets = details.get("js_assets")
+        css_assets = details.get("css_assets")
+        js_count = len(js_assets) if isinstance(js_assets, list) else 0
+        css_count = len(css_assets) if isinstance(css_assets, list) else 0
+        return f"index.html · JS {js_count} · CSS {css_count}"
+    if key == "registry":
+        solvers = details.get("solvers")
+        meshers = details.get("meshers")
+        capabilities = details.get("capabilities")
+        return (
+            f"solver {len(solvers) if isinstance(solvers, list) else 0} · "
+            f"mesher {len(meshers) if isinstance(meshers, list) else 0} · "
+            f"capability {len(capabilities) if isinstance(capabilities, list) else 0}"
+        )
+    if key == "solver":
+        return f"{_text(details.get('name'), '-')} · {_text(details.get('resolved'), '-')}"
+    if key == "llm":
+        checked = bool(details.get("connection_checked"))
+        status = "已连接" if bool(details.get("connection_ok")) else "已配置"
+        if not checked:
+            status = "未远端检查"
+        return f"{status} · {_text(details.get('model'), '-')}"
+    if key == "frontend_source":
+        package_json_exists = _text(details.get("package_json_exists"), "False")
+        return f"package.json={package_json_exists} · npm={_text(details.get('npm'), '-')}"
+    if key == "git":
+        return _text(details.get("git"), "-")
+    return _text(details, "-")
 
 
 def _print_run_summary(summary: dict[str, Any]) -> None:

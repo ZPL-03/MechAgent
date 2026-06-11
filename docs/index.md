@@ -55,6 +55,7 @@ python scripts/run_benchmarks.py
 ## 质量门禁
 
 ```powershell
+python -m mechagent.cli doctor
 python scripts/check_env.py
 python scripts/check_env.py --help
 npm --prefix apps/mechagent-studio ci --no-audit --no-fund

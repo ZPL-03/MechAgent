@@ -89,12 +89,13 @@ Agent 编排层
 MechAgent Studio 是面向用户和开发者的本地工程工作台。产品入口由 CLI 提供：
 
 ```powershell
+python -m mechagent.cli doctor
 python -m mechagent.cli demo --llm-agents
 python -m mechagent.cli studio --open-browser
 python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry --auto-run
 ```
 
-启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`demo` 从示例库读取 `SC-23` 作为默认展示工况，向 Studio 写入偏心圆孔薄板请求、初始视图和一次性自动运行信号，`--example` 可选择其他示例编号。`--open-browser` 打开浏览器入口。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始 3D 视图的可复现工作台入口；`--auto-run` 与 `--request` 同时使用时写入一次性自动运行信号。入口 URL 使用 `/studio?request=…&llm=1&view=…&run=1` 查询参数契约。
+`doctor` 检查 Python 版本、Python 依赖、配置解析、CalculiX 路径、求解器/网格器/能力注册表、Studio 静态资源、可选前端开发工具和 Git；`--llm` 会调用当前 `.env` 或环境变量配置的远端 OpenAI 兼容接口做连接检查。启动命令输出服务监听地址和浏览器入口。监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`；`demo` 从示例库读取 `SC-23` 作为默认展示工况，向 Studio 写入偏心圆孔薄板请求、初始视图和一次性自动运行信号，`--example` 可选择其他示例编号。`--open-browser` 打开浏览器入口。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始 3D 视图的可复现工作台入口；`--auto-run` 与 `--request` 同时使用时写入一次性自动运行信号。入口 URL 使用 `/studio?request=…&llm=1&view=…&run=1` 查询参数契约。
 
 Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`，使用 FastAPI 和 Uvicorn。
 API 入口包括：
@@ -581,6 +582,7 @@ LLM：
 `python` 命令执行同一组门禁。
 
 ```powershell
+python -m mechagent.cli doctor
 python scripts/check_env.py
 python scripts/check_env.py --help
 npm --prefix apps/mechagent-studio ci --no-audit --no-fund

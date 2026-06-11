@@ -194,7 +194,7 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     assert [item.case_id for item in all_examples()] == [
         item.case_id for item in STATIC_LANGUAGE_CASES
     ]
-    assert "测试集包含 404 个测试" in readme
+    assert "测试集包含 407 个测试" in readme
     assert "完整测试范围、质量结果和清理策略见" in readme
     assert "`pytest`：404 passed" in technical_report
     for coverage_label in [
@@ -490,6 +490,7 @@ def test_public_docs_describe_studio_surface() -> None:
     )
 
     for text in (readme, package_readme, local_setup, docs_index):
+        assert "python -m mechagent.cli doctor" in text
         assert "python -m mechagent.cli demo --llm-agents" in text
         assert "python -m mechagent.cli studio --open-browser" in text
         assert '--request "求解长420mm、宽260mm、厚6mm' in text
@@ -528,6 +529,7 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "宽屏桌面视口展示左侧请求区、中央结果区和右侧检查区三栏布局" in technical_report
     assert "检查区：作业状态、验收状态、求解流程" in technical_report
     assert "结果视口、报告面板、验收面板、流程面板和阶段产物面板" in technical_report
+    assert "doctor` 检查 Python 版本、Python 依赖、配置解析" in technical_report
     assert "GET /api/health" in technical_report
     assert "POST /api/run" in technical_report
     assert "`packages/mechagent/src/mechagent/ui/static`" in technical_report
@@ -613,14 +615,15 @@ def test_public_docs_describe_studio_surface() -> None:
     assert adaptive_verification_panel in studio_styles
     assert "min-height: max-content;" in studio_styles
     assert "padding-bottom: 16px" in studio_styles
-    assert "grid-template-columns: repeat(auto-fit, minmax(min(122px, 100%), 1fr));" in (
+    assert ".verification-list {\n  grid-template-columns: repeat(2, minmax(0, 1fr));" in (
         studio_styles
     )
-    assert "min-height: 40px" in studio_styles
+    assert "min-height: 48px" in studio_styles
     assert "grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));" in (
         studio_styles
     )
-    assert "min-height: 42px" in studio_styles
+    assert "font-size: 11.5px;\n  line-height: 1.28;" in studio_styles
+    assert "font-size: 13px;\n  line-height: 1.25;" in studio_styles
     assert "align-content: center" in studio_styles
     assert ".empty-action {" in studio_styles
     assert "height: 310px" not in studio_styles
