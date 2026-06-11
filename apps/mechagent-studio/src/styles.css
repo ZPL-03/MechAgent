@@ -342,8 +342,8 @@ summary:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 0;
-  padding-bottom: var(--layout-gutter);
-  scroll-padding-bottom: var(--layout-gutter);
+  padding-bottom: calc(var(--layout-gutter) * 2);
+  scroll-padding-bottom: calc(var(--layout-gutter) * 2);
 }
 
 .right-rail.has-result {
@@ -352,6 +352,7 @@ summary:focus-visible {
   align-content: start;
   overflow-x: hidden;
   overflow-y: auto;
+  grid-auto-rows: max-content;
 }
 
 .workspace {
@@ -1418,7 +1419,7 @@ textarea:focus-visible {
   height: auto;
   min-height: max-content;
   overflow: visible;
-  padding-bottom: 16px;
+  padding-bottom: 18px;
 }
 
 .verdict-card {
@@ -1494,19 +1495,19 @@ textarea:focus-visible {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(118px, 100%), 1fr));
   gap: 6px;
 }
 
 .metric-card {
-  min-height: 48px;
+  min-height: 45px;
   display: grid;
   align-content: center;
   gap: 2px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-subtle);
-  padding: 7px 8px;
+  padding: 6px 8px;
 }
 
 .metric-card span {
@@ -2003,10 +2004,13 @@ textarea:focus-visible {
     align-content: start;
     overflow-x: hidden;
     overflow-y: auto;
+    padding-bottom: calc(var(--layout-gutter) * 3);
+    scroll-padding-bottom: calc(var(--layout-gutter) * 3);
   }
 
   .right-rail.has-result .verification-panel.has-result {
-    min-height: auto;
+    height: max-content;
+    min-height: max-content;
     overflow: visible;
   }
 

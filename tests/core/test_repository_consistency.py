@@ -622,12 +622,12 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert adaptive_verification_panel in studio_styles
     assert "min-height: max-content;" in studio_styles
-    assert "padding-bottom: 16px" in studio_styles
+    assert "padding-bottom: 18px" in studio_styles
     assert ".verification-list {\n  grid-template-columns: repeat(2, minmax(0, 1fr));" in (
         studio_styles
     )
-    assert "min-height: 48px" in studio_styles
-    assert "grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));" in (
+    assert "min-height: 45px" in studio_styles
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(118px, 100%), 1fr));" in (
         studio_styles
     )
     assert "font-size: 11.5px;\n  line-height: 1.28;" in studio_styles
@@ -646,8 +646,8 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "max-width: 100%" in right_rail_style
     assert "grid-template-columns: minmax(0, 1fr)" in right_rail_style
     assert "overflow-y: auto" in right_rail_style
-    assert "padding-bottom: var(--layout-gutter)" in right_rail_style
-    assert "scroll-padding-bottom: var(--layout-gutter)" in right_rail_style
+    assert "padding-bottom: calc(var(--layout-gutter) * 2)" in right_rail_style
+    assert "scroll-padding-bottom: calc(var(--layout-gutter) * 2)" in right_rail_style
     assert "scrollbar-gutter" not in right_rail_style
     assert "grid-auto-rows: 32px" in studio_styles
     assert "height: clamp(300px, 28vh, 312px)" in studio_styles
@@ -656,6 +656,7 @@ def test_public_docs_describe_studio_surface() -> None:
         "}", maxsplit=1
     )[0]
     assert "grid-template-rows: auto auto auto auto;" in result_right_rail_style
+    assert "grid-auto-rows: max-content;" in result_right_rail_style
     assert ".right-rail.has-result .flow-panel {\n  grid-template-rows: auto auto;" in studio_styles
     assert "min-height: 304px" not in studio_styles
     assert "height: max-content;\n  min-height: max-content;" in studio_styles
