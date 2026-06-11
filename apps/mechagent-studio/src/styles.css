@@ -249,6 +249,16 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.utility-pill {
+  max-width: min(220px, 38vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.utility-pill svg {
+  flex: 0 0 auto;
+}
+
 .status-pill.ok {
   color: var(--success);
   border-color: #a8d2b8;
@@ -271,6 +281,24 @@ summary:focus-visible {
   color: var(--warning);
   border-color: #eac27a;
   background: #fff8ea;
+}
+
+.utility-pill.tone-ok {
+  color: var(--success);
+  border-color: #a8d2b8;
+  background: #f1fbf4;
+}
+
+.utility-pill.tone-warn {
+  color: var(--warning);
+  border-color: #eac27a;
+  background: #fff8ea;
+}
+
+.utility-pill.tone-bad {
+  color: var(--danger);
+  border-color: #f0b5b0;
+  background: #fff4f2;
 }
 
 .studio-layout {

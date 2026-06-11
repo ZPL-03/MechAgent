@@ -29,6 +29,8 @@ import type {
   StageKey,
   StageState,
   StudioCapabilitiesResponse,
+  StudioCapability,
+  StudioDiagnosticsResponse,
   StudioExample,
   StudioExamplesResponse,
   StudioHealth,
@@ -36,7 +38,6 @@ import type {
   StudioJobResponse,
   StudioProgressEvent,
   StudioRunResponse,
-  StudioCapability,
   TaskError,
   TaskSummary,
   Visualization,
@@ -85,6 +86,13 @@ type Notice = {
   id: number;
   message: string;
   tone: "ok" | "bad";
+};
+
+type RuntimeStatus = {
+  ariaLabel: string;
+  label: string;
+  title: string;
+  tone: "neutral" | "ok" | "warn" | "bad";
 };
 
 const HISTORY_STORAGE_KEY = "mechagent.studio.runHistory";
@@ -180,6 +188,7 @@ export function App() {
   const [inspection, setInspection] = useState<StudioInspectionResponse | null>(null);
   const [inspectionRunning, setInspectionRunning] = useState(false);
   const [health, setHealth] = useState<StudioHealth | null>(null);
+  const [diagnostics, setDiagnostics] = useState<StudioDiagnosticsResponse | null>(null);
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [selectedVisualIndex, setSelectedVisualIndex] = useState(0);
   const [selectedRenderModeIndex, setSelectedRenderModeIndex] = useState(() =>
@@ -208,6 +217,17 @@ export function App() {
       })
       .catch(() => {
         setHealth(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/diagnostics")
+      .then((response) => response.json())
+      .then((data: StudioDiagnosticsResponse) => {
+        setDiagnostics(data);
+      })
+      .catch(() => {
+        setDiagnostics(null);
       });
   }, []);
 
@@ -390,6 +410,7 @@ export function App() {
     : outcome
       ? `仿真${outcome.label}`
       : "等待仿真";
+  const runtimeStatusInfo = runtimeStatus(diagnostics, health);
 
   async function runSimulation(requestOverride?: string) {
     const requestText = (requestOverride ?? request).trim();
@@ -530,9 +551,13 @@ export function App() {
         </div>
         <div className="topbar-actions" aria-live="polite" aria-label={statusMessage}>
           <StatusPill result={result} running={running} />
-          <span className="utility-pill" title={health?.config ?? ""}>
+          <span
+            aria-label={runtimeStatusInfo.ariaLabel}
+            className={`utility-pill tone-${runtimeStatusInfo.tone}`}
+            title={runtimeStatusInfo.title}
+          >
             <Settings2 aria-hidden="true" size={16} />
-            {health?.ok ? "本地服务已连接" : "服务检测中"}
+            {runtimeStatusInfo.label}
           </span>
         </div>
       </header>
@@ -920,6 +945,64 @@ function StatusPill({
       {outcome.label}
     </span>
   );
+}
+
+function runtimeStatus(
+  diagnostics: StudioDiagnosticsResponse | null,
+  health: StudioHealth | null
+): RuntimeStatus {
+  if (diagnostics) {
+    const summary = diagnostics.summary;
+    const requiredText = `必需 ${summary.required_passed}/${summary.required_total}`;
+    const optionalText = `可选 ${summary.optional_passed}/${summary.optional_total}`;
+    const requiredFailures = diagnosticFailureLabels(diagnostics, true);
+    const optionalFailures = diagnosticFailureLabels(diagnostics, false);
+    const failureText =
+      requiredFailures.length > 0
+        ? `；必需异常：${requiredFailures.join("、")}`
+        : optionalFailures.length > 0
+          ? `；可选异常：${optionalFailures.join("、")}`
+          : "";
+    const title = `运行环境：${requiredText}，${optionalText}；配置 ${diagnostics.config_path}${failureText}`;
+    if (!diagnostics.ok) {
+      return {
+        ariaLabel: `运行环境异常，${requiredText}，${optionalText}`,
+        label: "环境异常",
+        title,
+        tone: "bad"
+      };
+    }
+    return {
+      ariaLabel: `运行环境通过，${requiredText}，${optionalText}`,
+      label: `环境 ${summary.required_passed}/${summary.required_total}`,
+      title,
+      tone: optionalFailures.length > 0 ? "warn" : "ok"
+    };
+  }
+  if (health?.ok) {
+    return {
+      ariaLabel: "本地服务已连接，运行环境检测中",
+      label: "环境检测中",
+      title: health.config,
+      tone: "neutral"
+    };
+  }
+  return {
+    ariaLabel: "本地服务检测中",
+    label: "服务检测中",
+    title: "等待后端健康检查返回。",
+    tone: "neutral"
+  };
+}
+
+function diagnosticFailureLabels(
+  diagnostics: StudioDiagnosticsResponse,
+  required: boolean
+): string[] {
+  return diagnostics.checks
+    .filter((item) => item.required === required && !item.ok)
+    .slice(0, 4)
+    .map((item) => item.label || item.key);
 }
 
 function PreflightPanel({

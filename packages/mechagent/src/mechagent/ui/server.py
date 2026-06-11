@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent import MechAgent
+from mechagent.diagnostics import run_environment_diagnostics
 from mechagent.examples import example_payloads
 from mechagent.orchestrator.capabilities import all_capabilities
 from mechagent.orchestrator.progress import ProgressEvent, progress_sink
@@ -76,6 +77,10 @@ def create_studio_app(config: Path = Path("config/mechagent.yaml")) -> FastAPI:
             "python_executable": sys.executable,
             "static_ready": _STATIC_DIR.joinpath("index.html").exists(),
         }
+
+    @app.get("/api/diagnostics")
+    def diagnostics(llm: bool = False) -> dict[str, Any]:
+        return run_environment_diagnostics(config_path, check_llm=llm)
 
     @app.get("/api/capabilities")
     def capabilities() -> dict[str, Any]:

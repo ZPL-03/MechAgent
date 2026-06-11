@@ -17,6 +17,26 @@ export interface StudioHealth {
   static_ready: boolean;
 }
 
+export interface StudioDiagnosticCheck {
+  key: string;
+  label: string;
+  ok: boolean;
+  required: boolean;
+  details: Record<string, unknown>;
+}
+
+export interface StudioDiagnosticsResponse {
+  ok: boolean;
+  config_path: string;
+  checks: StudioDiagnosticCheck[];
+  summary: {
+    required_passed: number;
+    required_total: number;
+    optional_passed: number;
+    optional_total: number;
+  };
+}
+
 export interface StudioCapability {
   capability_id: string;
   task_case_id: string;

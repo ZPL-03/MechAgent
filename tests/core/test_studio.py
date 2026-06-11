@@ -43,6 +43,46 @@ def test_studio_health_endpoint_reports_config(tmp_path: Path) -> None:
     assert isinstance(payload["static_ready"], bool)
 
 
+def test_studio_diagnostics_endpoint_reuses_environment_doctor(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    captured: list[tuple[Path, bool]] = []
+
+    def fake_diagnostics(config: Path, *, check_llm: bool) -> dict[str, object]:
+        captured.append((config, check_llm))
+        return {
+            "ok": True,
+            "config_path": str(config),
+            "checks": [
+                {
+                    "key": "python",
+                    "label": "Python 运行时",
+                    "ok": True,
+                    "required": True,
+                    "details": {"version": "3.9"},
+                }
+            ],
+            "summary": {
+                "required_passed": 1,
+                "required_total": 1,
+                "optional_passed": 0,
+                "optional_total": 0,
+            },
+        }
+
+    config_path = tmp_path / "mechagent.yaml"
+    monkeypatch.setattr("mechagent.ui.server.run_environment_diagnostics", fake_diagnostics)
+    client = TestClient(create_studio_app(config_path))
+
+    default_response = client.get("/api/diagnostics")
+    llm_response = client.get("/api/diagnostics?llm=true")
+
+    assert default_response.status_code == 200
+    assert llm_response.status_code == 200
+    assert default_response.json()["summary"]["required_passed"] == 1
+    assert captured == [(config_path, False), (config_path, True)]
+
+
 def test_studio_run_rejects_empty_request(tmp_path: Path) -> None:
     client = TestClient(create_studio_app(tmp_path / "mechagent.yaml"))
 

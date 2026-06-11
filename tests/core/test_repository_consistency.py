@@ -194,9 +194,9 @@ def test_public_docs_match_current_test_and_case_counts() -> None:
     assert [item.case_id for item in all_examples()] == [
         item.case_id for item in STATIC_LANGUAGE_CASES
     ]
-    assert "测试集包含 407 个测试" in readme
+    assert "测试集包含 408 个测试" in readme
     assert "完整测试范围、质量结果和清理策略见" in readme
-    assert "`pytest`：404 passed" in technical_report
+    assert "`pytest`：408 passed" in technical_report
     for coverage_label in [
         "插件主结果字段推断",
         "插件数值字符串解析",
@@ -528,9 +528,11 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`" in technical_report
     assert "宽屏桌面视口展示左侧请求区、中央结果区和右侧检查区三栏布局" in technical_report
     assert "检查区：作业状态、验收状态、求解流程" in technical_report
+    assert "顶栏运行环境胶囊显示必需诊断项通过数" in technical_report
     assert "结果视口、报告面板、验收面板、流程面板和阶段产物面板" in technical_report
     assert "doctor` 检查 Python 版本、Python 依赖、配置解析" in technical_report
     assert "GET /api/health" in technical_report
+    assert "GET /api/diagnostics" in technical_report
     assert "POST /api/run" in technical_report
     assert "`packages/mechagent/src/mechagent/ui/static`" in technical_report
     assert "lucide-react 和 react-markdown" in technical_report
@@ -549,12 +551,15 @@ def test_public_docs_describe_studio_surface() -> None:
         assert "可切换 `Ux`、`Uy`、`Uz`" in text
         assert "可切换 `S Mises`" in text
     assert "Markdown 报告和摘要 JSON 支持复制和下载" in package_readme
+    assert "运行环境摘要" in package_readme
+    assert "/api/diagnostics" in package_readme
     assert "当前工作台链接复制" in package_readme
     assert "`request`、`llm` 和 `view` 查询参数" in package_readme
     assert "`run=1` 作为一次性自动运行信号" in package_readme
     assert "CLI 复现命令复制" in package_readme
     assert "带类型标签和路径复制入口的阶段产物" in package_readme
     assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in readme
+    assert "页面加载默认不触发远端 LLM 连接检查" in readme
     assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in readme
     assert "宽屏桌面视口采用左侧输入、中部结果、右侧检查器三栏布局" in package_readme
     assert "宽度不超过 1800px 时检查区位于主工作区下方并保持两列排布" in package_readme
@@ -589,6 +594,9 @@ def test_public_docs_describe_studio_surface() -> None:
     assert 'aria-live="polite"' in studio_app
     assert 'inputMode="text"' in studio_app
     assert 'className={`panel verification-panel ${result ? "has-result" : ""}`}' in studio_app
+    assert 'fetch("/api/diagnostics")' in studio_app
+    assert "runtimeStatus(diagnostics, health)" in studio_app
+    assert "环境 ${summary.required_passed}/${summary.required_total}" in studio_app
     assert "empty-action" in studio_app
     assert 'DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"' in examples_source
     assert "def example_by_id" in examples_source
@@ -624,6 +632,9 @@ def test_public_docs_describe_studio_surface() -> None:
     )
     assert "font-size: 11.5px;\n  line-height: 1.28;" in studio_styles
     assert "font-size: 13px;\n  line-height: 1.25;" in studio_styles
+    assert ".utility-pill.tone-ok" in studio_styles
+    assert ".utility-pill.tone-warn" in studio_styles
+    assert ".utility-pill.tone-bad" in studio_styles
     assert "align-content: center" in studio_styles
     assert ".empty-action {" in studio_styles
     assert "height: 310px" not in studio_styles
