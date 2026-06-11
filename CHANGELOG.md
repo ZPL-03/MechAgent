@@ -8,7 +8,10 @@
 - `mechagent`：SDK、Typer CLI、配置模型、LLM 后端、知识库索引和 Agent 编排层。
 - MechAgent Studio：FastAPI 本地服务、React/TypeScript/Vite 前端工作台、Agent DAG、
   Three.js 几何/网格/结果视口、SVG 兼容输出、运行前预检、指标、阶段产物、摘要 JSON 和 Markdown 报告。
+- Studio 检查区：验收状态、求解流程、Agent 链路、阶段产物和摘要 JSON 使用公开摘要驱动，宽屏、窄屏和结果态保持响应式布局。
 - 3D 可视化坐标与场图：梁保持横向弯曲视角；矩形板和矩形实体块将求解 `Z` 轴映射为 Three.js 竖向轴；结果模式提供单元面、网格边、节点标量颜色、位移/应力场量切换、快捷视角和图例。
+- 开孔薄板：支持单孔、偏心孔和多孔参数化薄板，Gmsh OCC 布尔建模，外边界简支、孔边自由、均布压力、真实求解和结果场展示。
+- 网格质量：Gmsh 路径提取 `min_sicn` 与 `mean_sicn`，MeshAgent 按 `mesher.min_quality` 对 `min_*` 指标执行质量门禁。
 - 多 Agent 编排：顺序工作流与 LangGraph DAG，节点为 Planner、Designer、
   MeshAgent、SolverAgent、PostProcAgent、AnalystAgent、ReporterAgent。
 - 能力注册表：Planner 生成标准化 `SimulationIntent`，`TaskItem` 携带结构化意图，

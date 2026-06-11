@@ -126,12 +126,9 @@ def test_public_docs_describe_llm_structured_extraction() -> None:
         "packages/mechagent/src/mechagent/orchestrator/agents/reporter.py"
     ).read_text(encoding="utf-8")
 
-    assert "LLM 生成 `ModelParams`" in readme
-    assert "合并能力缺参诊断" in readme
-    assert "`SimulationIntent.missing_fields` 非空时" in readme
-    assert "本地 `ModelParams`" in readme
-    assert "`model_case_ids`" in readme
-    assert "SDK 单次覆盖使用独立配置副本" in readme
+    assert "可选 OpenAI 兼容接口" in readme
+    assert "LLM 工程解释章节" in readme
+    assert "所有输出经过 schema、能力契约和脱敏规则处理" in readme
     assert "Planner 可让 LLM" in technical_report
     assert "注册能力自身的缺参诊断" in technical_report
     assert "缺参补齐与门禁" in technical_report
@@ -512,7 +509,9 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "Agent 链路面板展示各阶段结构化产物" in readme
     assert "报告层由 ReporterAgent 生成" in readme
     assert "当前验证范围不包含非线性材料、渐进损伤、接触、多物理场和任意 CAD 导入" in readme
-    assert "扩展求解能力：几何非线性、材料非线性、接触、热-结构耦合、动力学和渐进损伤" in readme
+    assert "非线性与高级结构分析" in readme
+    assert "几何非线性、材料非线性、接触、渐进损伤、屈曲和模态分析" in readme
+    assert "热-结构耦合和瞬态动力学" in readme
     assert "开孔薄板用于展示复杂几何特征" not in readme
     assert "均布压力箭头" not in readme
     assert "右侧承载状态" not in readme
