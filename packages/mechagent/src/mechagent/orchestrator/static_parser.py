@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from mechagent.core.cad import GeometryCandidate
 from mechagent.core.materials import match_builtin_material
 from mechagent.core.models import (
     AnalysisSpec,
@@ -163,6 +164,81 @@ def parse_static_model_params(request: str) -> ModelParams:
 
     msg = "结构静力分析缺少必要参数: 几何类型。"
     raise ValueError(msg)
+
+
+def build_static_request_from_geometry(candidate: GeometryCandidate, completion: str) -> str:
+    """由 CAD 几何候选与自然语言补全合成结构静力请求。
+
+    把几何候选的包围盒尺寸按几何类型重新解释（梁取最长边为长度、其余两边为截面；板取最薄边为厚度；
+    实体取长宽高），与用户补全的材料、载荷与边界文本拼接为完整自然语言请求，复用既有结构静力解析器。
+
+    Args:
+        candidate: 由 CAD 几何摘要派生的几何候选。
+        completion: 描述材料、载荷与边界的自然语言补全。
+
+    Returns:
+        str: 可由 `parse_static_model_params` 解析的结构静力请求。
+
+    Raises:
+        ValueError: 当几何类型不支持 CAD 到求解链路或补全为空时抛出。
+
+    Example:
+        >>> request = build_static_request_from_geometry(candidate, "材料钢，一端固支，端部1000N")
+        >>> "悬臂梁" in request
+        True
+    """
+
+    ordered = sorted(candidate.dimensions.values(), reverse=True)
+    if len(ordered) < 3:
+        msg = "几何候选尺寸不足以合成求解请求。"
+        raise ValueError(msg)
+    large = _format_length(ordered[0])
+    mid = _format_length(ordered[1])
+    small = _format_length(ordered[2])
+    completion_text = completion.strip().rstrip("。.，,")
+    if not completion_text:
+        msg = "缺少材料、载荷与边界的自然语言补全。"
+        raise ValueError(msg)
+
+    if candidate.geometry_type is GeometryType.BEAM:
+        phrase = f"长{large}mm、截面{mid}mmx{small}mm的悬臂梁"
+    elif candidate.geometry_type is GeometryType.PLATE:
+        phrase = f"长{large}mm、宽{mid}mm、厚{small}mm的矩形板"
+    elif candidate.geometry_type is GeometryType.SOLID:
+        phrase = f"长方体实体{large}mmx{mid}mmx{small}mm"
+    else:
+        msg = f"几何类型 {candidate.geometry_type.value} 暂不支持 CAD 到求解链路。"
+        raise ValueError(msg)
+
+    request = f"{phrase}，{completion_text}"
+    if not any(keyword in request for keyword in ("分析", "求解", "求")):
+        request = f"{request}静力分析"
+    return request
+
+
+def parse_static_model_params_from_geometry(
+    candidate: GeometryCandidate, completion: str
+) -> ModelParams:
+    """将 CAD 几何候选与自然语言补全合并解析为结构化仿真参数。
+
+    Args:
+        candidate: 由 CAD 几何摘要派生的几何候选。
+        completion: 描述材料、载荷与边界的自然语言补全。
+
+    Returns:
+        ModelParams: 可传递给网格器和求解器的结构化参数，`metadata.geometry_source` 标记为 ``cad``。
+
+    Raises:
+        ValueError: 当合成请求缺少必要仿真参数或几何类型不支持时抛出。
+    """
+
+    request = build_static_request_from_geometry(candidate, completion)
+    params = parse_static_model_params(request)
+    return params.model_copy(update={"metadata": {**params.metadata, "geometry_source": "cad"}})
+
+
+def _format_length(value: float) -> str:
+    return f"{value:g}"
 
 
 def detect_static_geometry_type(request: str) -> Optional[str]:
@@ -529,6 +605,12 @@ def _missing_plate_fields(request: str) -> list[str]:
         and not _is_perforated_plate_dimensions(dimensions)
     ):
         missing.append("圆孔直径或半径")
+    if (
+        _has_plate_slot(request)
+        and dimensions is not None
+        and not _is_slotted_plate_dimensions(dimensions)
+    ):
+        missing.append("槽孔长度和宽度")
     if _extract_material(request) is None:
         missing.append("材料")
     if not _has_simple_support(request):
@@ -648,23 +730,38 @@ def _extract_plate_dimensions(text: str) -> Optional[dict[str, float]]:
 
 
 def _with_plate_features(text: str, dimensions: dict[str, float]) -> dict[str, float]:
-    holes = _extract_plate_holes(text, dimensions["length"], dimensions["width"])
-    if not holes:
-        return dimensions
     enriched = dict(dimensions)
-    first_radius, first_center_x, first_center_y = holes[0]
-    enriched.update(
-        {
-            "hole_count": float(len(holes)),
-            "hole_radius": first_radius,
-            "hole_center_x": first_center_x,
-            "hole_center_y": first_center_y,
-        }
-    )
-    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
-        enriched[f"hole_{index}_radius"] = radius
-        enriched[f"hole_{index}_center_x"] = center_x
-        enriched[f"hole_{index}_center_y"] = center_y
+    holes = _extract_plate_holes(text, dimensions["length"], dimensions["width"])
+    if holes:
+        first_radius, first_center_x, first_center_y = holes[0]
+        enriched.update(
+            {
+                "hole_count": float(len(holes)),
+                "hole_radius": first_radius,
+                "hole_center_x": first_center_x,
+                "hole_center_y": first_center_y,
+            }
+        )
+        for index, (radius, center_x, center_y) in enumerate(holes, start=1):
+            enriched[f"hole_{index}_radius"] = radius
+            enriched[f"hole_{index}_center_x"] = center_x
+            enriched[f"hole_{index}_center_y"] = center_y
+    slot = _extract_plate_slot(text, dimensions["length"], dimensions["width"])
+    if slot is not None:
+        slot_length, slot_width, slot_center_x, slot_center_y = slot
+        enriched.update(
+            {
+                "slot_count": 1.0,
+                "slot_length": slot_length,
+                "slot_width": slot_width,
+                "slot_center_x": slot_center_x,
+                "slot_center_y": slot_center_y,
+                "slot_1_length": slot_length,
+                "slot_1_width": slot_width,
+                "slot_1_center_x": slot_center_x,
+                "slot_1_center_y": slot_center_y,
+            }
+        )
     return enriched
 
 
@@ -673,6 +770,15 @@ def _has_circular_hole(text: str) -> bool:
     return any(
         keyword in text for keyword in ("圆孔", "开孔", "孔径", "孔半径", "中心孔", "带孔", "多孔")
     ) or any(keyword in normalized for keyword in ("hole", "perforated", "circular opening"))
+
+
+def _has_plate_slot(text: str) -> bool:
+    normalized = _normalized(text)
+    return any(
+        keyword in text for keyword in ("槽孔", "长圆孔", "长圆槽孔", "腰型孔", "槽长", "槽宽")
+    ) or any(
+        keyword in normalized for keyword in ("slot", "slotted hole", "obround", "rounded slot")
+    )
 
 
 def _extract_plate_holes(
@@ -742,8 +848,135 @@ def _extract_hole_center(text: str, length: float, width: float) -> tuple[float,
     return (length / 2.0, width / 2.0)
 
 
+def _extract_plate_slot(
+    text: str,
+    length: float,
+    width: float,
+) -> Optional[tuple[float, float, float, float]]:
+    if not _has_plate_slot(text):
+        return None
+
+    slot_length = _extract_named_length(
+        text,
+        (
+            "槽孔长度",
+            "槽孔长",
+            "槽长",
+            "长圆孔长度",
+            "长圆孔长",
+            "长圆槽孔长度",
+            "长圆槽孔长",
+            "腰型孔长度",
+            "腰型孔长",
+            "slot length",
+            "slot_length",
+            "obround length",
+        ),
+    )
+    slot_width = _extract_named_length(
+        text,
+        (
+            "槽孔宽度",
+            "槽孔宽",
+            "槽宽",
+            "长圆孔宽度",
+            "长圆孔宽",
+            "长圆槽孔宽度",
+            "长圆槽孔宽",
+            "腰型孔宽度",
+            "腰型孔宽",
+            "slot width",
+            "slot_width",
+            "obround width",
+        ),
+    )
+    if slot_length is None or slot_width is None:
+        compact = _extract_compact_slot_size(text)
+        if compact is not None:
+            slot_length = slot_length if slot_length is not None else compact[0]
+            slot_width = slot_width if slot_width is not None else compact[1]
+    if slot_length is None or slot_width is None:
+        return None
+
+    center_x, center_y = _extract_slot_center(text, length, width)
+    return (slot_length, slot_width, center_x, center_y)
+
+
+def _extract_compact_slot_size(text: str) -> Optional[tuple[float, float]]:
+    named_pair_pattern = re.compile(
+        rf"(?:槽孔|长圆孔|长圆槽孔|腰型孔|slot|slotted\s+hole|obround)[^0-9]{{0,30}}"
+        rf"(?:长|长度|槽长|槽孔长|槽孔长度|长圆孔长|长圆孔长度|长圆槽孔长|长圆槽孔长度|"
+        rf"slot\s+length|slot_length|obround\s+length)\s*(?:为|是|=|:|：)?\s*"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})?[^0-9]{{0,20}}"
+        rf"(?:宽|宽度|槽宽|槽孔宽|槽孔宽度|长圆孔宽|长圆孔宽度|长圆槽孔宽|长圆槽孔宽度|"
+        rf"slot\s+width|slot_width|obround\s+width)\s*(?:为|是|=|:|：)?\s*"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})?",
+        re.IGNORECASE,
+    )
+    match = named_pair_pattern.search(text)
+    if match is not None:
+        length_unit = match.group(2) or match.group(4) or "mm"
+        width_unit = match.group(4) or match.group(2) or "mm"
+        return (
+            _length_to_mm(float(match.group(1)), length_unit),
+            _length_to_mm(float(match.group(3)), width_unit),
+        )
+
+    pattern = re.compile(
+        rf"(?:槽孔|长圆孔|长圆槽孔|腰型孔|slot|slotted\s+hole|obround)[^0-9]{{0,20}}"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})?\s*{_DIMENSION_SEPARATOR}\s*"
+        rf"({_NUMBER})\s*({_LENGTH_UNITS})?",
+        re.IGNORECASE,
+    )
+    match = pattern.search(text)
+    if match is None:
+        return None
+    length_unit = match.group(2) or match.group(4) or "mm"
+    width_unit = match.group(4) or match.group(2) or "mm"
+    return (
+        _length_to_mm(float(match.group(1)), length_unit),
+        _length_to_mm(float(match.group(3)), width_unit),
+    )
+
+
+def _extract_slot_center(text: str, length: float, width: float) -> tuple[float, float]:
+    x_value = _extract_named_length(
+        text,
+        (
+            "槽孔中心x",
+            "槽中心x",
+            "长圆孔中心x",
+            "长圆槽孔中心x",
+            "slot center x",
+            "slot_center_x",
+        ),
+    )
+    y_value = _extract_named_length(
+        text,
+        (
+            "槽孔中心y",
+            "槽中心y",
+            "长圆孔中心y",
+            "长圆槽孔中心y",
+            "slot center y",
+            "slot_center_y",
+        ),
+    )
+    if x_value is not None and y_value is not None:
+        return (x_value, y_value)
+    return (length / 2.0, width / 2.0)
+
+
 def _is_perforated_plate_dimensions(dimensions: dict[str, float]) -> bool:
-    return "hole_radius" in dimensions or dimensions.get("hole_count", 0.0) >= 1.0
+    return (
+        "hole_radius" in dimensions
+        or dimensions.get("hole_count", 0.0) >= 1.0
+        or _is_slotted_plate_dimensions(dimensions)
+    )
+
+
+def _is_slotted_plate_dimensions(dimensions: dict[str, float]) -> bool:
+    return "slot_length" in dimensions or dimensions.get("slot_count", 0.0) >= 1.0
 
 
 def _plate_seed_size(length: float, width: float, dimensions: dict[str, float]) -> float:
@@ -756,16 +989,20 @@ def _plate_seed_size(length: float, width: float, dimensions: dict[str, float]) 
 
 def _dimension_hole_radii(dimensions: dict[str, float]) -> tuple[float, ...]:
     hole_count = int(dimensions.get("hole_count", 0.0))
-    radii = tuple(
+    radii = [
         radius
         for index in range(1, hole_count + 1)
         if (radius := dimensions.get(f"hole_{index}_radius")) is not None
-    )
-    if radii:
-        return radii
+    ]
     if (radius := dimensions.get("hole_radius")) is not None:
-        return (radius,)
-    return ()
+        radii.append(radius)
+    slot_count = int(dimensions.get("slot_count", 0.0))
+    for index in range(1, slot_count + 1):
+        if (slot_width := dimensions.get(f"slot_{index}_width")) is not None:
+            radii.append(slot_width / 2.0)
+    if (slot_width := dimensions.get("slot_width")) is not None:
+        radii.append(slot_width / 2.0)
+    return tuple(radii)
 
 
 def _extract_solid_dimensions(text: str) -> Optional[dict[str, float]]:

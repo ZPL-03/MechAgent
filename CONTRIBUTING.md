@@ -3,7 +3,7 @@
 MechAgent 采用 monorepo 结构。贡献者先创建并激活独立 Python 环境，再安装项目依赖：
 
 ```powershell
-py -3.9 -m venv .venv
+py -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e packages/mechagent-core
@@ -13,8 +13,8 @@ python -m pip install -e "packages/mechagent[dev,docs]"
 Conda 环境可使用：
 
 ```powershell
-conda create -n mechagent python=3.9 -y
-conda activate mechagent
+conda create -n AGENT python=3.10 -y
+conda activate AGENT
 python -m pip install --upgrade pip
 python -m pip install -e packages/mechagent-core
 python -m pip install -e "packages/mechagent[dev,docs]"
@@ -25,14 +25,14 @@ python -m pip install -e "packages/mechagent[dev,docs]"
 或通过环境变量指定 CalculiX 可执行文件。
 `.env.example` 保留公开模板值。
 
-Studio 前端源码使用 Node.js 构建。构建产物写入 Python 包的静态资源目录：
+Studio 前端源码使用 Node.js 构建。构建产物写入 Python 包的静态资源目录。前端目录结构、模块边界与样式约定见 [docs/frontend_architecture.md](docs/frontend_architecture.md)，设计令牌与主题规范见 [docs/design_system.md](docs/design_system.md)：
 
 ```powershell
 npm --prefix apps/mechagent-studio ci --no-audit --no-fund
 npm --prefix apps/mechagent-studio run build
 ```
 
-公开 PR 便携门禁由 GitHub Actions 执行，使用 Python 3.9、Node.js 22、
+公开 PR 便携门禁由 GitHub Actions 执行，使用 Python 3.10、Node.js 22、
 `scripts/check_env.py --profile portable`、Studio 前端构建和
 `pytest -m "not real_solver"`，不依赖本机 D 盘路径、CalculiX 可执行文件或远端 LLM 凭证。
 维护者发布前运行本地完整门禁：

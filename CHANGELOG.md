@@ -22,7 +22,7 @@
   `post_summary`、Agent trace 和错误记录。
 - 运行前预检：`MechAgent.inspect()`、`python -m mechagent.cli inspect` 和 `/api/inspect`
   提供任务识别、缺项诊断、能力编号、几何类型和可执行状态。
-- 自然语言案例：二十六个独立结构静力请求真实执行并通过验收。
+- 自然语言案例：二十八个独立结构静力请求真实执行并通过验收。
 - 材料目录：`mechagent-core` 提供钢和铝合金内置材料别名匹配。
 - 标准验证：TC-01 至 TC-05 均使用真实 CalculiX 求解并通过解析参考验收。
 - 本机配置：公开配置使用 `${CALCULIX_CCX:-ccx}`，本机 `.env` 将 `CALCULIX_CCX`

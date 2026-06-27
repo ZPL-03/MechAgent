@@ -7,9 +7,22 @@ theme:
   language: zh
 nav:
   - 首页: index.md
-  - 产品蓝图: product_blueprint.md
-  - 本地开发配置: local_setup.md
-  - 技术报告: technical_report.md
+  - 产品与使用:
+      - 产品蓝图: product_blueprint.md
+      - 长周期开发计划书: development_plan.md
+      - Studio 使用指南: studio_ui.md
+  - 设计与前端:
+      - 设计系统规范: design_system.md
+      - 前端架构: frontend_architecture.md
+  - 系统架构:
+      - 架构与数据契约: architecture.md
+      - 编排与 Agent 通信: orchestration.md
+      - 能力与自然语言解析: capabilities.md
+      - 求解器、网格与后处理: solver_mesh.md
+  - 验证与开发:
+      - 验证与质量门禁: validation.md
+      - 本地开发配置: local_setup.md
+      - 技术报告（索引）: technical_report.md
 markdown_extensions:
   - admonition
   - tables

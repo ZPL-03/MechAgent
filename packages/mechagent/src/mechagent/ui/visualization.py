@@ -283,7 +283,7 @@ def _scene_fallback_elements(
 ) -> list[tuple[int, ...]]:
     ordered = sorted(nodes)
     if geometry_type == "beam":
-        return [(a, b) for a, b in zip(ordered, ordered[1:])]
+        return [(a, b) for a, b in zip(ordered, ordered[1:], strict=False)]
     if geometry_type == "plate":
         return _plate_fallback_elements()
     if geometry_type == "solid" and len(ordered) >= 8:

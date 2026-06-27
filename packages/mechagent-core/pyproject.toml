@@ -7,7 +7,7 @@ name = "mechagent-core"
 version = "0.1.0"
 description = "开源 CAE/FEA 工具抽象层，提供求解器、网格器、后处理与验证算例核心接口。"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "MechAgent Contributors" }]
@@ -18,7 +18,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
   "Topic :: Scientific/Engineering",
   "Typing :: Typed",
 ]

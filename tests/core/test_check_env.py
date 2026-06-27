@@ -11,8 +11,8 @@ from scripts import check_env
 
 def test_python_path_comparison_normalizes_separators() -> None:
     assert check_env._same_path(
-        Path("D:/anaconda3/envs/GPT/python.exe"),
-        Path(r"D:\anaconda3\envs\GPT\python.exe"),
+        Path("D:/anaconda3/envs/AGENT/python.exe"),
+        Path(r"D:\anaconda3\envs\AGENT\python.exe"),
     )
 
 

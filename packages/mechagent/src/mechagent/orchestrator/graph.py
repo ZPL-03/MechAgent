@@ -213,7 +213,9 @@ def _mesh_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, Any]
     traces: list[AgentLLMTrace] = []
     errors: list[ErrorRecord] = []
     failed_records: list[TaskRunRecord] = []
-    for index, (task_value, params_value) in enumerate(zip(active_tasks, model_params_values)):
+    for index, (task_value, params_value) in enumerate(
+        zip(active_tasks, model_params_values, strict=False)
+    ):
         task = _task_item(task_value)
         params = _model_params(params_value)
         designer_trace = _designer_trace(state, index)
@@ -291,6 +293,7 @@ def _solver_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, An
             active_tasks,
             model_params_values,
             mesh_values,
+            strict=False,
         )
     ):
         task_item = _task_item(task)
@@ -366,6 +369,7 @@ def _postproc_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, 
             model_params_values,
             mesh_values,
             solver_values,
+            strict=False,
         )
     ):
         task_item = _task_item(task)
@@ -452,6 +456,7 @@ def _analyst_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, A
             mesh_values,
             solver_values,
             post_summary_values,
+            strict=False,
         )
     ):
         task_item = _task_item(task)
@@ -549,6 +554,7 @@ def _records_from_state(state: MechAgentState) -> list[TaskRunRecord]:
             solver_values,
             post_summary_values,
             analysis_text_values,
+            strict=False,
         )
     ):
         records.append(
@@ -580,7 +586,7 @@ def _report_records_and_errors(
         ]
         contract_failed_records = [
             TaskRunRecord(task=task, error=error)
-            for task, error in zip(active_tasks, contract_errors)
+            for task, error in zip(active_tasks, contract_errors, strict=False)
         ]
         records = _ordered_report_records(
             state,
@@ -705,7 +711,8 @@ def _state_contract_failure(
 ) -> dict[str, Any]:
     errors = [ErrorRecord.from_exception(node, exc, task) for task in active_tasks]
     failed_records = [
-        TaskRunRecord(task=task, error=error) for task, error in zip(active_tasks, errors)
+        TaskRunRecord(task=task, error=error)
+        for task, error in zip(active_tasks, errors, strict=False)
     ]
     result: dict[str, Any] = {"active_tasks": []}
     _append_failures(result, state, errors, failed_records)

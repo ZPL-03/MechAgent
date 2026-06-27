@@ -163,7 +163,7 @@ def query_index(
     )
 
     hits = []
-    for row, score in zip(rows, scores):
+    for row, score in zip(rows, scores, strict=False):
         if score > 0:
             hits.append(
                 KnowledgeHit(
@@ -362,7 +362,7 @@ def _fuse_scores(
     tfidf_norm = _normalize_scores(tfidf_scores)
     return [
         (bm25_weight * bm25 + tfidf_weight * tfidf) / weight_sum
-        for bm25, tfidf in zip(bm25_norm, tfidf_norm)
+        for bm25, tfidf in zip(bm25_norm, tfidf_norm, strict=False)
     ]
 
 

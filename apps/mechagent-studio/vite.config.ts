@@ -18,8 +18,11 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          markdown: ["react-markdown"]
+        manualChunks(id) {
+          if (id.includes("node_modules/react-markdown") || id.includes("node_modules/remark-gfm")) {
+            return "markdown";
+          }
+          return undefined;
         }
       }
     }

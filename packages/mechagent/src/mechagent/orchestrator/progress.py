@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Callable, Literal, TypedDict
+from typing import Literal, TypedDict
 
 StageName = Literal[
     "planner",

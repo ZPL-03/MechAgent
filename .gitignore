@@ -1,5 +1,6 @@
 .env
 AGENTS.md
+CLAUDE.md
 MechAgent_Project_Plan.docx
 .venv/
 apps/mechagent-studio/node_modules/

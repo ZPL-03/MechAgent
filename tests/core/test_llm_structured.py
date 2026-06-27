@@ -199,6 +199,55 @@ def test_parse_llm_model_params_normalizes_multi_hole_plate_payload() -> None:
     assert params.bcs[0].region == "all_edges"
 
 
+def test_parse_llm_model_params_normalizes_slotted_plate_payload() -> None:
+    trace = AgentLLMTrace(
+        agent="Designer",
+        used=True,
+        response=json.dumps(
+            {
+                "geometry": {
+                    "type": "plate",
+                    "dimensions": {
+                        "length": "480mm",
+                        "width": "280mm",
+                        "thickness": "6mm",
+                        "slot": {
+                            "center": {"x": "240mm", "y": "140mm"},
+                            "length": "160mm",
+                            "width": "40mm",
+                        },
+                    },
+                },
+                "material": {"E": "210000MPa", "nu": 0.3, "rho": "7.85e-9 tonne/mm3"},
+                "loads": [{"type": "pressure", "magnitude": "0.003MPa", "direction": "downward"}],
+                "bcs": [{"type": "simple_support"}],
+                "mesh": {"element_type": "S4", "seed_size": "6.6666666667mm"},
+                "analysis": {"type": "static", "nlgeom": False},
+                "metadata": {},
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    capability = get_capability("structural_static")
+    params, parsed_trace = parse_llm_model_params(
+        trace,
+        "槽孔薄板静力分析",
+        normalizer=capability.model_normalizer,
+    )
+
+    assert parsed_trace.error is None
+    assert params is not None
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["slot_count"] == 1.0
+    assert params.geometry.dimensions["slot_length"] == 160.0
+    assert params.geometry.dimensions["slot_width"] == 40.0
+    assert params.geometry.dimensions["slot_center_x"] == 240.0
+    assert params.geometry.dimensions["slot_center_y"] == 140.0
+    assert params.loads[0].direction == (0.0, 0.0, -1.0)
+
+
 def test_parse_llm_model_params_rejects_incomplete_multi_hole_payload() -> None:
     trace = AgentLLMTrace(
         agent="Designer",

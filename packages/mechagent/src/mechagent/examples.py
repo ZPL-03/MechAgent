@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-23"
+DEFAULT_SHOWCASE_EXAMPLE_ID = "SC-27"
 
 
 @dataclass(frozen=True)
@@ -345,6 +345,34 @@ SIMULATION_EXAMPLES: tuple[SimulationExample, ...] = (
         load_type="pressure",
         model_case_id="STATIC-PERFORATED-PLATE",
         tags=("plate", "multi_hole", "parametric_geometry", "pressure"),
+    ),
+    SimulationExample(
+        case_id="SC-27",
+        title="长圆槽孔薄板 · 均布压力",
+        request=(
+            "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，"
+            "槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，"
+            "四边简支，承受0.003MPa向下均布压力的静力响应"
+        ),
+        capability_id="structural_static",
+        geometry_type="plate",
+        load_type="pressure",
+        model_case_id="STATIC-PERFORATED-PLATE",
+        tags=("板", "槽孔", "参数化建模", "压力"),
+    ),
+    SimulationExample(
+        case_id="SC-28",
+        title="Slotted Plate · Uniform Pressure",
+        request=(
+            "slotted steel plate length 480mm width 280mm thickness 6mm, "
+            "slot center x 240mm slot center y 140mm slot length 160mm slot width 40mm, "
+            "simply supported, downward uniform pressure 0.003MPa static analysis"
+        ),
+        capability_id="structural_static",
+        geometry_type="plate",
+        load_type="pressure",
+        model_case_id="STATIC-PERFORATED-PLATE",
+        tags=("plate", "slot", "parametric_geometry", "pressure"),
     ),
 )
 

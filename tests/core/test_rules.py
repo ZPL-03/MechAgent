@@ -211,6 +211,32 @@ def test_static_execution_contract_rejects_overlapping_plate_holes() -> None:
     assert any("圆孔与第 2 个圆孔" in item.message for item in violations)
 
 
+def test_static_execution_contract_rejects_plate_slot_outside_boundary() -> None:
+    base = tc02_model_params()
+    params = base.model_copy(
+        update={
+            "geometry": GeometrySpec(
+                type=GeometryType.PLATE,
+                dimensions={
+                    "length": 300.0,
+                    "width": 200.0,
+                    "thickness": 5.0,
+                    "slot_count": 1.0,
+                    "slot_length": 160.0,
+                    "slot_width": 40.0,
+                    "slot_center_x": 260.0,
+                    "slot_center_y": 100.0,
+                },
+            )
+        }
+    )
+
+    violations = check_static_execution_contract(params)
+
+    assert any(item.field == "geometry.dimensions.slot_1" for item in violations)
+    assert any("槽孔必须完整位于板内" in item.message for item in violations)
+
+
 def test_ensure_static_execution_contract_raises_readable_error() -> None:
     base = tc01_model_params()
     params = base.model_copy(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import gmsh
@@ -10,6 +11,21 @@ import gmsh
 from mechagent.core.mesher import AbstractMesher, MeshResult
 from mechagent.core.models import GeometryType, ModelParams
 from mechagent.core.paths import safe_file_stem
+
+
+@dataclass(frozen=True)
+class _CircularOpening:
+    radius: float
+    center_x: float
+    center_y: float
+
+
+@dataclass(frozen=True)
+class _SlotOpening:
+    length: float
+    width: float
+    center_x: float
+    center_y: float
 
 
 class CalculiXInpMesher(AbstractMesher):
@@ -128,7 +144,7 @@ class CalculiXInpMesher(AbstractMesher):
         dimensions = model_params.geometry.dimensions
         length = dimensions["length"]
         width = dimensions["width"]
-        if _has_plate_holes(dimensions):
+        if _has_plate_openings(dimensions):
             return self._generate_perforated_plate_mesh(model_params)
         nx = max(4, int(round(length / self.config.seed_size)))
         ny = max(4, int(round(width / self.config.seed_size)))
@@ -190,14 +206,22 @@ class CalculiXInpMesher(AbstractMesher):
         length = dimensions["length"]
         width = dimensions["width"]
         holes = _plate_holes_from_dimensions(dimensions, length, width)
-        if not holes:
-            if _has_plate_holes(dimensions):
-                return MeshResult(success=False, error_message="开孔薄板缺少完整的圆孔参数。")
-            return MeshResult(success=False, error_message="开孔薄板缺少可用的圆孔参数。")
+        slots = _plate_slots_from_dimensions(dimensions, length, width)
+        if not holes and not slots:
+            if _has_plate_openings(dimensions):
+                return MeshResult(success=False, error_message="开孔薄板缺少完整的开孔参数。")
+            return MeshResult(success=False, error_message="开孔薄板缺少可用的开孔参数。")
         validation_error = _validate_circular_holes(length, width, holes)
         if validation_error is not None:
             return MeshResult(success=False, error_message=validation_error)
-        min_hole_radius = min(radius for radius, _, _ in holes)
+        validation_error = _validate_slots(length, width, slots)
+        if validation_error is not None:
+            return MeshResult(success=False, error_message=validation_error)
+        validation_error = _validate_circle_slot_intersections(holes, slots)
+        if validation_error is not None:
+            return MeshResult(success=False, error_message=validation_error)
+        feature_sizes = [hole.radius for hole in holes] + [slot.width / 2.0 for slot in slots]
+        min_feature_radius = min(feature_sizes)
 
         nodes: dict[int, tuple[float, float, float]] = {}
         elements: list[tuple[str, tuple[int, ...]]] = []
@@ -205,18 +229,24 @@ class CalculiXInpMesher(AbstractMesher):
         gmsh.initialize(interruptible=False)
         try:
             gmsh.option.setNumber("General.Terminal", 0)
-            gmsh.option.setNumber("Mesh.MeshSizeMin", max(min_hole_radius / 5.0, 0.5))
+            gmsh.option.setNumber("Mesh.MeshSizeMin", max(min_feature_radius / 5.0, 0.5))
             gmsh.option.setNumber("Mesh.MeshSizeMax", self.config.seed_size)
             gmsh.option.setNumber("Mesh.Algorithm", 8)
             gmsh.option.setNumber("Mesh.RecombineAll", 1)
             gmsh.model.add(case_id)
             rectangle = gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, length, width)
             hole_tools = [
-                (2, gmsh.model.occ.addDisk(center_x, center_y, 0.0, radius, radius))
-                for radius, center_x, center_y in holes
+                (
+                    2,
+                    gmsh.model.occ.addDisk(
+                        hole.center_x, hole.center_y, 0.0, hole.radius, hole.radius
+                    ),
+                )
+                for hole in holes
             ]
+            slot_tools = [tool for slot in slots for tool in _add_slot_opening_tools(slot)]
             cut_surfaces, _ = gmsh.model.occ.cut(
-                [(2, rectangle)], hole_tools, removeObject=True, removeTool=True
+                [(2, rectangle)], [*hole_tools, *slot_tools], removeObject=True, removeTool=True
             )
             gmsh.model.occ.synchronize()
             if cut_surfaces:
@@ -240,17 +270,11 @@ class CalculiXInpMesher(AbstractMesher):
 
         triangles = sum(1 for element_type, _ in elements if element_type == "S3")
         quads = sum(1 for element_type, _ in elements if element_type == "S4")
-        first_radius, first_center_x, first_center_y = holes[0]
-        hole_metadata = {
-            "hole_count": len(holes),
-            "hole_radius_mm": first_radius,
-            "hole_center_x_mm": first_center_x,
-            "hole_center_y_mm": first_center_y,
+        opening_metadata: dict[str, float | int] = {
+            "opening_count": len(holes) + len(slots),
+            **_hole_metadata(holes),
+            **_slot_metadata(slots),
         }
-        for index, (radius, center_x, center_y) in enumerate(holes, start=1):
-            hole_metadata[f"hole_{index}_radius_mm"] = radius
-            hole_metadata[f"hole_{index}_center_x_mm"] = center_x
-            hole_metadata[f"hole_{index}_center_y_mm"] = center_y
         return MeshResult(
             success=True,
             mesh_file=mesh_file,
@@ -265,7 +289,7 @@ class CalculiXInpMesher(AbstractMesher):
                 "element_count": len(elements),
                 "tri_element_count": triangles,
                 "quad_element_count": quads,
-                **hole_metadata,
+                **opening_metadata,
             },
         )
 
@@ -285,14 +309,22 @@ def _has_plate_holes(dimensions: dict[str, float]) -> bool:
     return "hole_radius" in dimensions or dimensions.get("hole_count", 0.0) >= 1.0
 
 
+def _has_plate_slots(dimensions: dict[str, float]) -> bool:
+    return "slot_length" in dimensions or dimensions.get("slot_count", 0.0) >= 1.0
+
+
+def _has_plate_openings(dimensions: dict[str, float]) -> bool:
+    return _has_plate_holes(dimensions) or _has_plate_slots(dimensions)
+
+
 def _plate_holes_from_dimensions(
     dimensions: dict[str, float],
     length: float,
     width: float,
-) -> tuple[tuple[float, float, float], ...]:
+) -> tuple[_CircularOpening, ...]:
     hole_count = int(dimensions.get("hole_count", 0.0))
     if hole_count >= 1:
-        holes: list[tuple[float, float, float]] = []
+        holes: list[_CircularOpening] = []
         for index in range(1, hole_count + 1):
             radius = dimensions.get(f"hole_{index}_radius")
             center_x = dimensions.get(f"hole_{index}_center_x")
@@ -311,19 +343,126 @@ def _plate_holes_from_dimensions(
                 )
             if radius is None or center_x is None or center_y is None:
                 return ()
-            holes.append((radius, center_x, center_y))
+            holes.append(_CircularOpening(radius, center_x, center_y))
         return tuple(holes)
 
     radius = dimensions.get("hole_radius")
     if radius is None:
         return ()
     return (
-        (
+        _CircularOpening(
             radius,
             dimensions.get("hole_center_x", length / 2.0),
             dimensions.get("hole_center_y", width / 2.0),
         ),
     )
+
+
+def _plate_slots_from_dimensions(
+    dimensions: dict[str, float],
+    length: float,
+    width: float,
+) -> tuple[_SlotOpening, ...]:
+    slot_count = int(dimensions.get("slot_count", 0.0))
+    if slot_count >= 1:
+        slots: list[_SlotOpening] = []
+        for index in range(1, slot_count + 1):
+            slot_length = dimensions.get(f"slot_{index}_length")
+            slot_width = dimensions.get(f"slot_{index}_width")
+            center_x = dimensions.get(f"slot_{index}_center_x")
+            center_y = dimensions.get(f"slot_{index}_center_y")
+            if slot_count == 1:
+                slot_length = (
+                    slot_length if slot_length is not None else dimensions.get("slot_length")
+                )
+                slot_width = slot_width if slot_width is not None else dimensions.get("slot_width")
+                center_x = (
+                    center_x
+                    if center_x is not None
+                    else dimensions.get("slot_center_x", length / 2.0)
+                )
+                center_y = (
+                    center_y
+                    if center_y is not None
+                    else dimensions.get("slot_center_y", width / 2.0)
+                )
+            if slot_length is None or slot_width is None or center_x is None or center_y is None:
+                return ()
+            slots.append(_SlotOpening(slot_length, slot_width, center_x, center_y))
+        return tuple(slots)
+
+    if "slot_length" not in dimensions or "slot_width" not in dimensions:
+        return ()
+    return (
+        _SlotOpening(
+            dimensions["slot_length"],
+            dimensions["slot_width"],
+            dimensions.get("slot_center_x", length / 2.0),
+            dimensions.get("slot_center_y", width / 2.0),
+        ),
+    )
+
+
+def _add_slot_opening_tools(slot: _SlotOpening) -> list[tuple[int, int]]:
+    radius = slot.width / 2.0
+    straight_length = slot.length - slot.width
+    if straight_length <= 1.0e-9:
+        return [(2, gmsh.model.occ.addDisk(slot.center_x, slot.center_y, 0.0, radius, radius))]
+
+    left_center_x = slot.center_x - straight_length / 2.0
+    right_center_x = slot.center_x + straight_length / 2.0
+    rectangle = gmsh.model.occ.addRectangle(
+        left_center_x,
+        slot.center_y - radius,
+        0.0,
+        straight_length,
+        slot.width,
+    )
+    left_disk = gmsh.model.occ.addDisk(left_center_x, slot.center_y, 0.0, radius, radius)
+    right_disk = gmsh.model.occ.addDisk(right_center_x, slot.center_y, 0.0, radius, radius)
+    fused, _ = gmsh.model.occ.fuse(
+        [(2, rectangle)],
+        [(2, left_disk), (2, right_disk)],
+        removeObject=True,
+        removeTool=True,
+    )
+    return [(dim, tag) for dim, tag in fused if dim == 2]
+
+
+def _hole_metadata(holes: tuple[_CircularOpening, ...]) -> dict[str, float | int]:
+    if not holes:
+        return {"hole_count": 0}
+    first = holes[0]
+    metadata: dict[str, float | int] = {
+        "hole_count": len(holes),
+        "hole_radius_mm": first.radius,
+        "hole_center_x_mm": first.center_x,
+        "hole_center_y_mm": first.center_y,
+    }
+    for index, hole in enumerate(holes, start=1):
+        metadata[f"hole_{index}_radius_mm"] = hole.radius
+        metadata[f"hole_{index}_center_x_mm"] = hole.center_x
+        metadata[f"hole_{index}_center_y_mm"] = hole.center_y
+    return metadata
+
+
+def _slot_metadata(slots: tuple[_SlotOpening, ...]) -> dict[str, float | int]:
+    if not slots:
+        return {"slot_count": 0}
+    first = slots[0]
+    metadata: dict[str, float | int] = {
+        "slot_count": len(slots),
+        "slot_length_mm": first.length,
+        "slot_width_mm": first.width,
+        "slot_center_x_mm": first.center_x,
+        "slot_center_y_mm": first.center_y,
+    }
+    for index, slot in enumerate(slots, start=1):
+        metadata[f"slot_{index}_length_mm"] = slot.length
+        metadata[f"slot_{index}_width_mm"] = slot.width
+        metadata[f"slot_{index}_center_x_mm"] = slot.center_x
+        metadata[f"slot_{index}_center_y_mm"] = slot.center_y
+    return metadata
 
 
 def _gmsh_nodes() -> dict[int, tuple[float, float, float]]:
@@ -341,7 +480,7 @@ def _gmsh_nodes() -> dict[int, tuple[float, float, float]]:
 def _gmsh_quad_elements() -> list[tuple[int, int, int, int]]:
     element_types, _, element_node_tags = gmsh.model.mesh.getElements(2)
     quads: list[tuple[int, int, int, int]] = []
-    for element_type, node_tags in zip(element_types, element_node_tags):
+    for element_type, node_tags in zip(element_types, element_node_tags, strict=False):
         if int(element_type) != 3:
             continue
         for index in range(0, len(node_tags), 4):
@@ -359,7 +498,7 @@ def _gmsh_quad_elements() -> list[tuple[int, int, int, int]]:
 def _gmsh_shell_elements() -> list[tuple[str, tuple[int, ...]]]:
     element_types, _, element_node_tags = gmsh.model.mesh.getElements(2)
     elements: list[tuple[str, tuple[int, ...]]] = []
-    for element_type, node_tags in zip(element_types, element_node_tags):
+    for element_type, node_tags in zip(element_types, element_node_tags, strict=False):
         if int(element_type) == 2:
             for index in range(0, len(node_tags), 3):
                 elements.append(
@@ -470,20 +609,78 @@ def _validate_circular_hole(
 def _validate_circular_holes(
     length: float,
     width: float,
-    holes: tuple[tuple[float, float, float], ...],
+    holes: tuple[_CircularOpening, ...],
 ) -> str | None:
-    for index, (radius, center_x, center_y) in enumerate(holes, start=1):
-        validation_error = _validate_circular_hole(length, width, radius, center_x, center_y)
+    for index, hole in enumerate(holes, start=1):
+        validation_error = _validate_circular_hole(
+            length,
+            width,
+            hole.radius,
+            hole.center_x,
+            hole.center_y,
+        )
         if validation_error is not None:
             return f"第 {index} 个圆孔参数无效: {validation_error}"
     for left_index, left in enumerate(holes):
-        left_radius, left_x, left_y = left
         for right_index, right in enumerate(holes[left_index + 1 :], start=left_index + 2):
-            right_radius, right_x, right_y = right
-            distance = ((left_x - right_x) ** 2 + (left_y - right_y) ** 2) ** 0.5
-            if distance <= left_radius + right_radius:
+            distance = (
+                (left.center_x - right.center_x) ** 2 + (left.center_y - right.center_y) ** 2
+            ) ** 0.5
+            if distance <= left.radius + right.radius:
                 return f"第 {left_index + 1} 个圆孔与第 {right_index} 个圆孔相交。"
     return None
+
+
+def _validate_slots(
+    length: float,
+    width: float,
+    slots: tuple[_SlotOpening, ...],
+) -> str | None:
+    for index, slot in enumerate(slots, start=1):
+        if slot.width <= 0 or slot.length <= slot.width:
+            return f"第 {index} 个槽孔参数无效: 槽孔长度需要大于槽孔宽度，且槽孔宽度必须为正数。"
+        if (
+            slot.center_x - slot.length / 2.0 <= 0
+            or slot.center_x + slot.length / 2.0 >= length
+            or slot.center_y - slot.width / 2.0 <= 0
+            or slot.center_y + slot.width / 2.0 >= width
+        ):
+            return f"第 {index} 个槽孔参数无效: 槽孔必须完整位于板内。"
+    return None
+
+
+def _validate_circle_slot_intersections(
+    holes: tuple[_CircularOpening, ...],
+    slots: tuple[_SlotOpening, ...],
+) -> str | None:
+    for hole_index, hole in enumerate(holes, start=1):
+        for slot_index, slot in enumerate(slots, start=1):
+            distance = _point_to_horizontal_slot_distance(
+                hole.center_x,
+                hole.center_y,
+                slot.length,
+                slot.width,
+                slot.center_x,
+                slot.center_y,
+            )
+            if distance <= hole.radius + slot.width / 2.0:
+                return f"第 {hole_index} 个圆孔与第 {slot_index} 个槽孔相交。"
+    return None
+
+
+def _point_to_horizontal_slot_distance(
+    point_x: float,
+    point_y: float,
+    slot_length: float,
+    slot_width: float,
+    slot_center_x: float,
+    slot_center_y: float,
+) -> float:
+    straight_length = max(slot_length - slot_width, 0.0)
+    left = slot_center_x - straight_length / 2.0
+    right = slot_center_x + straight_length / 2.0
+    closest_x = min(max(point_x, left), right)
+    return math.hypot(point_x - closest_x, point_y - slot_center_y)
 
 
 def _regular_solid_mesh(

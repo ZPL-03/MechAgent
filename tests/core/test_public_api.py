@@ -38,10 +38,10 @@ def test_public_api_exports_version_and_sdk() -> None:
 def test_public_api_exposes_showcase_example() -> None:
     example = mechagent.showcase_example()
 
-    assert DEFAULT_SHOWCASE_EXAMPLE_ID == "SC-23"
+    assert DEFAULT_SHOWCASE_EXAMPLE_ID == "SC-27"
     assert example.case_id == DEFAULT_SHOWCASE_EXAMPLE_ID
     assert example.model_case_id == "STATIC-PERFORATED-PLATE"
-    assert "偏心圆孔" in example.title
+    assert "长圆槽孔" in example.title
     assert mechagent.example_by_id("sc-25").case_id == "SC-25"
 
 

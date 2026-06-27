@@ -131,13 +131,14 @@ def test_studio_examples_endpoint_exposes_full_catalog(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     examples = payload["examples"]
-    assert len(examples) == 26
+    assert len(examples) == 28
     assert examples[0]["example_id"] == "SC-01"
     assert examples[0]["capability_id"] == "structural_static"
     assert examples[0]["model_case_id"] == "STATIC-BEAM"
     assert any(item["model_case_id"] == "STATIC-SOLID" for item in examples)
     assert any("偏心圆孔" in item["title"] for item in examples)
     assert any("多孔" in item["title"] for item in examples)
+    assert any("长圆槽孔" in item["title"] for item in examples)
 
 
 def test_studio_inspect_endpoint_returns_preflight(tmp_path: Path) -> None:

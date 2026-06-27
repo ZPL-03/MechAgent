@@ -15,6 +15,13 @@ import mechagent.core.adapters.calculix_mesh as calculix_mesh
 from mechagent.core.adapters import CalculiXAdapter, CalculiXInpMesher
 from mechagent.core.adapters.calculix import _parse_frd_data_line
 from mechagent.core.exceptions import SolverError
+from mechagent.core.executor import (
+    AbstractJobExecutor,
+    ExecutorConfig,
+    JobResult,
+    JobSpec,
+    JobStatus,
+)
 from mechagent.core.mesher import MeshConfig
 from mechagent.core.models import (
     AnalysisSpec,
@@ -87,6 +94,46 @@ def test_calculix_adapter_sets_openmp_thread_count(
 
     assert result.success is True
     assert captured["OMP_NUM_THREADS"] == "7"
+
+
+def test_calculix_adapter_runs_through_injected_executor(tmp_path: Path) -> None:
+    input_file = tmp_path / "exec_case.inp"
+    input_file.write_text("*HEADING\n", encoding="utf-8")
+
+    class _RecordingExecutor(AbstractJobExecutor):
+        def __init__(self, config: ExecutorConfig) -> None:
+            super().__init__(config)
+            self.received: JobSpec | None = None
+
+        def submit(self, spec: JobSpec) -> str:
+            self.received = spec
+            return "job"
+
+        def status(self, job_id: str) -> JobStatus:
+            _ = job_id
+            return JobStatus.SUCCEEDED
+
+        def result(self, job_id: str) -> JobResult:
+            return JobResult(
+                job_id=job_id, status=JobStatus.SUCCEEDED, return_code=0, wall_time=0.0
+            )
+
+        def cancel(self, job_id: str) -> None:
+            _ = job_id
+
+    executor = _RecordingExecutor(ExecutorConfig(work_dir=tmp_path))
+    adapter = CalculiXAdapter(
+        SolverConfig(solver_path=sys.executable, work_dir=tmp_path, num_cpus=3),
+        executor=executor,
+    )
+
+    result = adapter.solve(input_file)
+
+    assert result.success is True
+    assert executor.received is not None
+    assert executor.received.command[-1] == "exec_case"
+    assert executor.received.env["OMP_NUM_THREADS"] == "3"
+    assert executor.received.work_dir == input_file.parent
 
 
 def test_calculix_result_aliases_use_input_node_coordinates(tmp_path: Path) -> None:
@@ -257,6 +304,71 @@ def test_calculix_inp_mesher_generates_eccentric_perforated_plate_mesh(
     assert result.metadata["hole_center_y_mm"] == pytest.approx(105.0)
     assert result.metadata["node_count"] > 0
     assert result.metadata["element_count"] > 0
+
+
+def test_static_parser_extracts_slotted_plate_params() -> None:
+    params = parse_static_model_params(
+        "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，"
+        "槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，"
+        "四边简支，承受0.003MPa向下均布压力的静力响应"
+    )
+
+    assert params.geometry.type is GeometryType.PLATE
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.load_case == "perforated_plate_pressure"
+    assert params.geometry.dimensions["slot_count"] == pytest.approx(1.0)
+    assert params.geometry.dimensions["slot_length"] == pytest.approx(160.0)
+    assert params.geometry.dimensions["slot_width"] == pytest.approx(40.0)
+    assert params.geometry.dimensions["slot_center_x"] == pytest.approx(240.0)
+    assert params.geometry.dimensions["slot_center_y"] == pytest.approx(140.0)
+    assert params.mesh.seed_size == pytest.approx(20.0 / 3.0)
+
+
+def test_static_parser_extracts_natural_slotted_plate_size_phrase() -> None:
+    params = parse_static_model_params(
+        "求解长420mm、宽260mm、厚6mm、中心长圆槽孔长160mm、宽40mm、"
+        "槽孔中心x=210mm、槽孔中心y=130mm、材料钢的薄板，四边简支，"
+        "承受0.003MPa向下均布压力的静力响应"
+    )
+
+    assert params.case_id == "STATIC-PERFORATED-PLATE"
+    assert params.geometry.dimensions["slot_length"] == pytest.approx(160.0)
+    assert params.geometry.dimensions["slot_width"] == pytest.approx(40.0)
+    assert params.geometry.dimensions["slot_center_x"] == pytest.approx(210.0)
+    assert params.geometry.dimensions["slot_center_y"] == pytest.approx(130.0)
+
+
+def test_static_parser_reports_missing_slotted_plate_dimensions() -> None:
+    with pytest.raises(ValueError, match="槽孔长度和宽度"):
+        parse_static_model_params(
+            "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，"
+            "槽孔中心x=240mm、槽孔中心y=140mm，四边简支，"
+            "承受0.003MPa向下均布压力的静力响应"
+        )
+
+
+def test_calculix_inp_mesher_generates_slotted_plate_mesh(tmp_path: Path) -> None:
+    params = parse_static_model_params(
+        "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，"
+        "槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，"
+        "四边简支，承受0.003MPa向下均布压力的静力响应"
+    )
+    mesher = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=params.mesh.seed_size))
+
+    result = mesher.generate(params)
+
+    assert result.success is True
+    assert result.mesh_file is not None
+    assert result.metadata["source"] == "gmsh_perforated_plate"
+    assert result.metadata["opening_count"] == 1
+    assert result.metadata["slot_count"] == 1
+    assert result.metadata["slot_length_mm"] == pytest.approx(160.0)
+    assert result.metadata["slot_width_mm"] == pytest.approx(40.0)
+    assert result.metadata["slot_center_x_mm"] == pytest.approx(240.0)
+    assert result.metadata["slot_center_y_mm"] == pytest.approx(140.0)
+    assert result.metadata["node_count"] > 0
+    assert result.metadata["element_count"] > 0
+    assert "*ELEMENT, TYPE=S4, ELSET=EALL" in result.mesh_file.read_text(encoding="utf-8")
 
 
 def test_static_parser_extracts_multi_hole_plate_params() -> None:

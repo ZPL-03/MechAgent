@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from mechagent.core.models import (
@@ -348,7 +349,7 @@ def _check_plate_hole_dimensions(
     dimensions = model_params.geometry.dimensions
     expected_count = int(dimensions.get("hole_count", 0.0))
     holes = _plate_holes_from_dimensions(dimensions)
-    if not holes:
+    if not holes:  # noqa: SIM102
         if expected_count >= 1 or any(key.startswith("hole_") for key in dimensions):
             violations.append(
                 RuleViolation(
@@ -357,7 +358,19 @@ def _check_plate_hole_dimensions(
                     message="圆孔参数需要同时包含半径和孔心 x/y 坐标。",
                 )
             )
-        return
+    slots = _plate_slots_from_dimensions(dimensions)
+    expected_slot_count = int(dimensions.get("slot_count", 0.0))
+    if not slots:
+        if expected_slot_count >= 1 or any(key.startswith("slot_") for key in dimensions):
+            violations.append(
+                RuleViolation(
+                    field="geometry.dimensions.slot",
+                    value=0.0,
+                    message="槽孔参数需要同时包含长度、宽度和中心 x/y 坐标。",
+                )
+            )
+        if not holes:
+            return
     if "length" not in dimensions or "width" not in dimensions:
         return
     length = dimensions["length"]
@@ -377,6 +390,32 @@ def _check_plate_hole_dimensions(
                     message="圆孔半径需要小于孔心到外边界的最小距离。",
                 )
             )
+    for index, (slot_length, slot_width, center_x, center_y) in enumerate(slots, start=1):
+        field = (
+            "geometry.dimensions.slot_1" if len(slots) == 1 else f"geometry.dimensions.slot_{index}"
+        )
+        if slot_width <= 0 or slot_length <= slot_width:
+            violations.append(
+                RuleViolation(
+                    field=field,
+                    value=slot_length,
+                    message="槽孔长度需要大于槽孔宽度，且槽孔宽度必须为正数。",
+                )
+            )
+            continue
+        if (
+            center_x - slot_length / 2.0 <= 0
+            or center_x + slot_length / 2.0 >= length
+            or center_y - slot_width / 2.0 <= 0
+            or center_y + slot_width / 2.0 >= width
+        ):
+            violations.append(
+                RuleViolation(
+                    field=field,
+                    value=slot_length,
+                    message="槽孔必须完整位于板内，并与外边界保持有限间距。",
+                )
+            )
     for left_index, left in enumerate(holes):
         left_radius, left_x, left_y = left
         for right_index, right in enumerate(holes[left_index + 1 :], start=left_index + 2):
@@ -392,6 +431,26 @@ def _check_plate_hole_dimensions(
                         f"第 {left_index + 1} 个圆孔与第 {right_index} 个圆孔"
                         "中心距需要大于两个孔半径之和。"
                     ),
+                )
+            )
+    for hole_index, (radius, center_x, center_y) in enumerate(holes, start=1):
+        for slot_index, slot in enumerate(slots, start=1):
+            slot_length, slot_width, slot_center_x, slot_center_y = slot
+            distance = _point_to_horizontal_slot_distance(
+                center_x,
+                center_y,
+                slot_length,
+                slot_width,
+                slot_center_x,
+                slot_center_y,
+            )
+            if distance > radius + slot_width / 2.0:
+                continue
+            violations.append(
+                RuleViolation(
+                    field=f"geometry.dimensions.slot_{slot_index}",
+                    value=distance,
+                    message=f"第 {hole_index} 个圆孔与第 {slot_index} 个槽孔不能相交。",
                 )
             )
 
@@ -424,6 +483,59 @@ def _plate_holes_from_dimensions(
             ),
         )
     return ()
+
+
+def _plate_slots_from_dimensions(
+    dimensions: dict[str, float],
+) -> tuple[tuple[float, float, float, float], ...]:
+    slot_count = int(dimensions.get("slot_count", 0.0))
+    if slot_count >= 1:
+        slots: list[tuple[float, float, float, float]] = []
+        for index in range(1, slot_count + 1):
+            slot_length = dimensions.get(f"slot_{index}_length")
+            slot_width = dimensions.get(f"slot_{index}_width")
+            center_x = dimensions.get(f"slot_{index}_center_x")
+            center_y = dimensions.get(f"slot_{index}_center_y")
+            if slot_count == 1:
+                slot_length = (
+                    slot_length if slot_length is not None else dimensions.get("slot_length")
+                )
+                slot_width = slot_width if slot_width is not None else dimensions.get("slot_width")
+                center_x = center_x if center_x is not None else dimensions.get("slot_center_x")
+                center_y = center_y if center_y is not None else dimensions.get("slot_center_y")
+            if slot_length is None or slot_width is None or center_x is None or center_y is None:
+                return ()
+            slots.append((slot_length, slot_width, center_x, center_y))
+        return tuple(slots)
+
+    if all(
+        name in dimensions
+        for name in ("slot_length", "slot_width", "slot_center_x", "slot_center_y")
+    ):
+        return (
+            (
+                dimensions["slot_length"],
+                dimensions["slot_width"],
+                dimensions["slot_center_x"],
+                dimensions["slot_center_y"],
+            ),
+        )
+    return ()
+
+
+def _point_to_horizontal_slot_distance(
+    point_x: float,
+    point_y: float,
+    slot_length: float,
+    slot_width: float,
+    slot_center_x: float,
+    slot_center_y: float,
+) -> float:
+    straight_length = max(slot_length - slot_width, 0.0)
+    left = slot_center_x - straight_length / 2.0
+    right = slot_center_x + straight_length / 2.0
+    closest_x = min(max(point_x, left), right)
+    return math.hypot(point_x - closest_x, point_y - slot_center_y)
 
 
 def _check_solid_contract(

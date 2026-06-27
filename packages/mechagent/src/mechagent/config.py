@@ -9,7 +9,12 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mechagent.core.defaults import DEFAULT_CALCULIX_PATH
-from mechagent.core.factory import registered_meshers, registered_solvers
+from mechagent.core.factory import (
+    registered_cad_kernels,
+    registered_executors,
+    registered_meshers,
+    registered_solvers,
+)
 
 
 class LLMSettings(BaseModel):
@@ -147,6 +152,74 @@ class MesherSettings(BaseModel):
     def _min_quality_must_be_finite(cls, value: float) -> float:
         if not math.isfinite(value):
             msg = "mesher.min_quality 必须是有限数值。"
+            raise ValueError(msg)
+        return value
+
+
+class ExecutorSettings(BaseModel):
+    """作业执行器配置。
+
+    Args:
+        default: 默认执行器名称。
+
+    Returns:
+        ExecutorSettings: 经过校验的执行器配置。
+
+    Raises:
+        pydantic.ValidationError: 当默认执行器未注册时抛出。
+
+    Example:
+        >>> ExecutorSettings()
+        ExecutorSettings(default='local')
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: str = "local"
+
+    @field_validator("default")
+    @classmethod
+    def _default_executor_must_be_supported(cls, value: str) -> str:
+        return _registered_config_name(value, registered_executors(), "executor.default", "执行器")
+
+
+class CADSettings(BaseModel):
+    """CAD 内核配置。
+
+    Args:
+        default: 默认 CAD 内核名称；为空时不启用 CAD 导入能力。
+        linear_deflection: 离散化线性弦高，单位为 mm。
+        healing: 是否在导入后执行几何修复。
+
+    Returns:
+        CADSettings: 经过校验的 CAD 内核配置。
+
+    Raises:
+        pydantic.ValidationError: 当指定的 CAD 内核未注册时抛出。
+
+    Example:
+        >>> CADSettings()
+        CADSettings(default=None, linear_deflection=0.1, healing=True)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: Optional[str] = None
+    linear_deflection: float = Field(default=0.1, gt=0.0)
+    healing: bool = True
+
+    @field_validator("default")
+    @classmethod
+    def _default_cad_kernel_must_be_supported(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _registered_config_name(value, registered_cad_kernels(), "cad.default", "CAD 内核")
+
+    @field_validator("linear_deflection")
+    @classmethod
+    def _linear_deflection_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            msg = "cad.linear_deflection 必须是有限数值。"
             raise ValueError(msg)
         return value
 
@@ -293,6 +366,8 @@ class MechAgentConfig(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     solver: SolverSettings = Field(default_factory=SolverSettings)
     mesher: MesherSettings = Field(default_factory=MesherSettings)
+    cad: CADSettings = Field(default_factory=CADSettings)
+    executor: ExecutorSettings = Field(default_factory=ExecutorSettings)
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     orchestrator: OrchestratorSettings = Field(default_factory=OrchestratorSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)

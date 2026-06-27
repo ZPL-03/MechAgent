@@ -1,0 +1,69 @@
+/*
+ * 设计令牌（非颜色）：排版、间距、圆角、阴影、层级、动效。
+ * 颜色语义令牌见 themes.css。规范见 docs/design_system.md。
+ */
+
+:root {
+  /* 字体栈 */
+  --font-ui:
+    "Segoe UI Variable Text", "Segoe UI", "Inter", "SF Pro Text", "Roboto",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono:
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "SFMono-Regular",
+    Consolas, "Microsoft YaHei UI", monospace;
+
+  /* 字号阶梯 */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  /* 行高 */
+  --leading-tight: 1.25;
+  --leading-normal: 1.55;
+
+  /* 字重 */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* 间距阶梯（4px 基准） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* 层级 */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-overlay: 900;
+  --z-toast: 1000;
+
+  /* 动效 */
+  --dur-fast: 120ms;
+  --dur-normal: 180ms;
+  --dur-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* 布局 */
+  --layout-gutter: 16px;
+  --layout-gap: 14px;
+  --rail-left: 320px;
+  --rail-right: 360px;
+  --topbar-height: 56px;
+  --content-max: 1840px;
+}

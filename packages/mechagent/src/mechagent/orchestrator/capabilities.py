@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from typing import Callable, Optional
+from typing import Optional
 
 from mechagent.core.factory import registered_meshers, registered_solvers
 from mechagent.core.models import GeometryType, LoadType, ModelParams
@@ -264,6 +265,8 @@ def _normalize_structural_static_model_params(
         if (
             "hole_radius" in params.geometry.dimensions
             or params.geometry.dimensions.get("hole_count", 0.0) >= 1.0
+            or "slot_length" in params.geometry.dimensions
+            or params.geometry.dimensions.get("slot_count", 0.0) >= 1.0
         ):
             case_id = "STATIC-PERFORATED-PLATE"
             load_case = "perforated_plate_pressure"
@@ -305,7 +308,7 @@ register_capability(
         mesher_name="calculix-inp",
         request_splitter=split_static_simulation_requests,
         planner_description=(
-            "结构线弹性静力分析，覆盖梁、矩形板、单孔与多孔薄板和矩形实体块的几何建模、网格、求解、后处理和报告。"
+            "结构线弹性静力分析，覆盖梁、矩形板、圆孔/槽孔开孔薄板和矩形实体块的几何建模、网格、求解、后处理和报告。"
         ),
         planner_keywords=(
             "static",
@@ -314,6 +317,7 @@ register_capability(
             "plate",
             "solid",
             "hole",
+            "slot",
             "perforated",
             "静力",
             "结构",
@@ -322,6 +326,8 @@ register_capability(
             "开孔",
             "圆孔",
             "多孔",
+            "槽孔",
+            "长圆孔",
             "实体",
             "挠度",
             "位移",
@@ -334,6 +340,7 @@ register_capability(
             "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应",
             "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应",
             "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应",
+            "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，四边简支，承受0.003MPa向下均布压力的静力响应",
             "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析",
         ),
         missing_field_detector=detect_static_missing_fields,
@@ -346,6 +353,7 @@ register_capability(
             "带圆孔薄板在 plate 尺寸中提供 hole_radius、hole_center_x 和 hole_center_y；"
             "多孔薄板提供 hole_count 以及 hole_1_radius、hole_1_center_x、"
             "hole_1_center_y 等编号字段；"
+            "槽孔薄板提供 slot_length、slot_width、slot_center_x 和 slot_center_y；"
             "实体使用 dimensions.length/width/height、C3D8R 单元、root 固定，"
             "载荷为 end_face 轴向压力或端面合力。"
         ),

@@ -63,6 +63,11 @@ _PERFORATED_PLATE_REQUEST = (
     "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，"
     "四边简支，承受0.004MPa向下均布压力的静力响应"
 )
+_SLOTTED_PLATE_REQUEST = (
+    "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，"
+    "槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，"
+    "四边简支，承受0.003MPa向下均布压力的静力响应"
+)
 _COMPOUND_STATIC_REQUEST = (
     "求解梁长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，"
     "沿梁竖向向下1kN/m均布线载荷的静力响应；"
@@ -245,6 +250,36 @@ def test_sequential_workflow_runs_natural_language_perforated_plate(
     assert record.solver_result.success is True
     assert record.solver_result.model_case_id == "STATIC-PERFORATED-PLATE"
     assert record.solver_result.quantity == "max_displacement"
+    assert record.solver_result.predicted is not None
+    assert record.solver_result.predicted > 0.0
+    assert record.solver_result.verification_status == "unverified"
+    assert "STATIC-PERFORATED-PLATE" in result.report
+
+
+@pytest.mark.real_solver
+def test_sequential_workflow_runs_natural_language_slotted_plate(
+    tmp_path: Path,
+) -> None:
+    config = MechAgentConfig(
+        orchestrator=OrchestratorSettings(mode="sequential"),
+        solver=_configured_solver_settings(),
+        output=OutputSettings(output_dir=tmp_path),
+    )
+    workflow = SequentialWorkflow(config)
+
+    result = workflow.run(_SLOTTED_PLATE_REQUEST)
+
+    assert result.success is True
+    record = result.tasks[0]
+    assert record.model_params is not None
+    assert record.model_params.case_id == "STATIC-PERFORATED-PLATE"
+    assert record.model_params.geometry.dimensions["slot_length"] == pytest.approx(160.0)
+    assert record.model_params.geometry.dimensions["slot_width"] == pytest.approx(40.0)
+    assert record.mesh_result is not None
+    assert record.mesh_result.metadata["source"] == "gmsh_perforated_plate"
+    assert record.mesh_result.metadata["slot_count"] == 1
+    assert record.solver_result.success is True
+    assert record.solver_result.model_case_id == "STATIC-PERFORATED-PLATE"
     assert record.solver_result.predicted is not None
     assert record.solver_result.predicted > 0.0
     assert record.solver_result.verification_status == "unverified"

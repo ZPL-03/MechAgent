@@ -173,11 +173,12 @@ def test_cli_examples_json_supports_model_and_geometry_filters() -> None:
     assert result.exit_code == 0
     payload = json.loads(result.output)
     examples = payload["examples"]
-    assert len(examples) == 6
+    assert len(examples) == 8
     assert {item["model_case_id"] for item in examples} == {"STATIC-PERFORATED-PLATE"}
     assert {item["geometry_type"] for item in examples} == {"plate"}
     assert any("孔中心x=180mm" in item["request"] for item in examples)
     assert any("孔1中心x=130mm" in item["request"] for item in examples)
+    assert any("槽孔中心x=240mm" in item["request"] for item in examples)
 
 
 def test_cli_examples_table_can_limit_rows() -> None:

@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-EXPECTED_PYTHON = Path("D:/anaconda3/envs/GPT/python.exe")
+EXPECTED_PYTHON = Path("D:/anaconda3/envs/AGENT/python.exe")
 CONFIG_PATH = Path("config/mechagent.yaml")
 _ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
 
@@ -80,10 +80,10 @@ def _parse_args(argv: Sequence[str] | None) -> Namespace:
 
 def _check_python(profile: str = "local") -> dict[str, Any]:
     if profile == "portable":
-        version_ok = sys.version_info >= (3, 9)
+        version_ok = sys.version_info >= (3, 10)
         executable_ok = True
     else:
-        version_ok = sys.version_info[:2] == (3, 9)
+        version_ok = sys.version_info >= (3, 10)
         executable_ok = _same_path(Path(sys.executable), EXPECTED_PYTHON)
     return {
         "ok": version_ok and executable_ok,

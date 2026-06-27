@@ -46,6 +46,11 @@ export function ThreeViewport({ scene, mode }: Props) {
   const axisHostRef = useRef<HTMLDivElement | null>(null);
   const fieldSelectId = useId();
   const [selectedFieldKey, setSelectedFieldKey] = useState("");
+  // 让尺寸变化回调读取当前场景与模式，以便重新适配相机距离。
+  const sceneRef = useRef(scene);
+  const modeRef = useRef(mode);
+  sceneRef.current = scene;
+  modeRef.current = mode;
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     threeScene: THREE.Scene;
@@ -74,7 +79,7 @@ export function ThreeViewport({ scene, mode }: Props) {
       preserveDrawingBuffer: true
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0xf7faff, 1);
+    renderer.setClearColor(viewportClearColor(), 1);
     renderer.domElement.className = "three-canvas";
     host.appendChild(renderer.domElement);
 
@@ -139,6 +144,8 @@ export function ThreeViewport({ scene, mode }: Props) {
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      // 宽高比变化后重新适配相机距离，保证模型完整居中。
+      refitCameraDistance(camera, controls, sceneRef.current, modeRef.current);
 
       const axisRect = axisHost.getBoundingClientRect();
       axisRenderer.setSize(Math.max(axisRect.width, 1), Math.max(axisRect.height, 1), false);
@@ -194,6 +201,26 @@ export function ThreeViewport({ scene, mode }: Props) {
     rebuildScene(state.root, state.camera, state.controls, scene, mode, activeField);
     state.render();
   }, [scene, mode, selectedFieldKey]);
+
+  // 主题切换时更新 3D 画布背景色（读取 --color-viewport-bg 令牌）。
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new MutationObserver(() => {
+      const state = stateRef.current;
+      if (!state) {
+        return;
+      }
+      state.renderer.setClearColor(viewportClearColor(), 1);
+      state.render();
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"]
+    });
+    return () => observer.disconnect();
+  }, []);
 
   const fields = useMemo(() => resultFields(scene), [scene]);
   const activeField = fieldByKey(scene, selectedFieldKey);
@@ -270,6 +297,22 @@ export function ThreeViewport({ scene, mode }: Props) {
       )}
     </div>
   );
+}
+
+function viewportClearColor(): THREE.Color {
+  if (typeof window !== "undefined") {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue("--color-viewport-bg")
+      .trim();
+    if (value) {
+      try {
+        return new THREE.Color(value);
+      } catch {
+        // 回退到默认浅色背景。
+      }
+    }
+  }
+  return new THREE.Color("#f7faff");
 }
 
 function buildAxisGizmoRoot() {
@@ -395,17 +438,7 @@ function rebuildScene(
     root.add(buildBoundaryLoadOverlay(scene, bounds, span));
   }
 
-  const offset = cameraOffset(scene.geometry_type, mode);
-  camera.position.set(
-    center[0] + span * offset[0],
-    center[1] + span * offset[1],
-    center[2] + span * offset[2]
-  );
-  camera.near = Math.max(span / 1000, 0.1);
-  camera.far = span * 60;
-  camera.updateProjectionMatrix();
-  controls.target.set(center[0], center[1], center[2]);
-  controls.update();
+  orientCamera(camera, controls, scene, mode, "iso");
 }
 
 function buildReferenceGrid(bounds: {
@@ -460,12 +493,13 @@ function buildGeometryActor(
   const thickness = positive(dims.thickness, Math.max(Math.min(length, width) * 0.08, 1));
   const geometryType = scene.geometry_type.toLowerCase();
   const holes = plateHoles(dims, length, width);
+  const slots = plateSlots(dims, length, width);
 
   let geometry: THREE.BufferGeometry;
   if (geometryType === "beam") {
     geometry = new THREE.BoxGeometry(length, width, height);
-  } else if (geometryType === "plate" && holes.length > 0) {
-    geometry = buildPerforatedPlateGeometry(length, width, thickness, holes);
+  } else if (geometryType === "plate" && (holes.length > 0 || slots.length > 0)) {
+    geometry = buildPerforatedPlateGeometry(length, width, thickness, holes, slots);
   } else if (geometryType === "plate") {
     geometry = new THREE.BoxGeometry(length, thickness, width);
   } else {
@@ -1073,11 +1107,19 @@ type PlateHole = {
   centerY: number;
 };
 
+type PlateSlot = {
+  length: number;
+  width: number;
+  centerX: number;
+  centerY: number;
+};
+
 function buildPerforatedPlateGeometry(
   length: number,
   width: number,
   thickness: number,
-  holes: PlateHole[]
+  holes: PlateHole[],
+  slots: PlateSlot[]
 ) {
   const shape = new THREE.Shape();
   shape.moveTo(-length / 2, -width / 2);
@@ -1097,6 +1139,25 @@ function buildPerforatedPlateGeometry(
       true
     );
     shape.holes.push(hole);
+  }
+  for (const item of slots) {
+    const slot = new THREE.Path();
+    const radius = item.width / 2;
+    const straight = Math.max(item.length - item.width, 0);
+    const centerX = item.centerX - length / 2;
+    const centerY = item.centerY - width / 2;
+    if (straight <= 1e-9) {
+      slot.absarc(centerX, centerY, radius, 0, Math.PI * 2, true);
+    } else {
+      const left = centerX - straight / 2;
+      const right = centerX + straight / 2;
+      slot.moveTo(left, centerY - radius);
+      slot.lineTo(right, centerY - radius);
+      slot.absarc(right, centerY, radius, -Math.PI / 2, Math.PI / 2, false);
+      slot.lineTo(left, centerY + radius);
+      slot.absarc(left, centerY, radius, Math.PI / 2, -Math.PI / 2, false);
+    }
+    shape.holes.push(slot);
   }
 
   const geometry = new THREE.ExtrudeGeometry(shape, {
@@ -1140,6 +1201,49 @@ function plateHoles(
       radius,
       centerX: positive(dims.hole_center_x, length / 2),
       centerY: positive(dims.hole_center_y, width / 2)
+    }
+  ];
+}
+
+function plateSlots(
+  dims: Record<string, number | undefined>,
+  length: number,
+  width: number
+): PlateSlot[] {
+  const count = Math.max(0, Math.round(positive(dims.slot_count, 0)));
+  if (count > 0) {
+    const slots: PlateSlot[] = [];
+    for (let index = 1; index <= count; index += 1) {
+      const slotLength = positive(dims[`slot_${index}_length`], 0);
+      const slotWidth = positive(dims[`slot_${index}_width`], 0);
+      const centerX = positive(dims[`slot_${index}_center_x`], NaN);
+      const centerY = positive(dims[`slot_${index}_center_y`], NaN);
+      if (
+        slotLength > slotWidth &&
+        slotWidth > 0 &&
+        Number.isFinite(centerX) &&
+        Number.isFinite(centerY)
+      ) {
+        slots.push({ length: slotLength, width: slotWidth, centerX, centerY });
+      }
+    }
+    if (slots.length === count) {
+      return slots;
+    }
+    return [];
+  }
+
+  const slotLength = positive(dims.slot_length, 0);
+  const slotWidth = positive(dims.slot_width, 0);
+  if (slotLength <= slotWidth || slotWidth <= 0) {
+    return [];
+  }
+  return [
+    {
+      length: slotLength,
+      width: slotWidth,
+      centerX: positive(dims.slot_center_x, length / 2),
+      centerY: positive(dims.slot_center_y, width / 2)
     }
   ];
 }
@@ -1549,31 +1653,76 @@ function orientCamera(
   mode: RenderMode,
   view: ViewPreset
 ) {
+  const directions: Record<ViewPreset, [number, number, number]> = {
+    iso: cameraOffset(scene.geometry_type, mode),
+    top: [0.0, 1.0, 0.0001],
+    front: [0.0, 0.0001, 1.0],
+    right: [1.0, 0.0001, 0.0]
+  };
+  applyCameraFit(camera, controls, scene, mode, normalizeDirection(directions[view]));
+}
+
+// 调整相机距离以完整框住模型，保留当前视角方向（用于尺寸变化时重新适配）。
+function refitCameraDistance(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  scene: VisualizationScene,
+  mode: RenderMode
+) {
+  const direction = normalizeDirection([
+    camera.position.x - controls.target.x,
+    camera.position.y - controls.target.y,
+    camera.position.z - controls.target.z
+  ]);
+  applyCameraFit(camera, controls, scene, mode, direction);
+}
+
+// 按当前视口宽高比与垂直 FOV 计算包围球完整可见的距离，使模型完整居中。
+function applyCameraFit(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  scene: VisualizationScene,
+  mode: RenderMode,
+  direction: [number, number, number]
+) {
   const bounds = viewBounds(scene, mode);
   const center = midpoint(bounds.min, bounds.max);
-  const span = Math.max(
-    bounds.max[0] - bounds.min[0],
-    bounds.max[1] - bounds.min[1],
-    bounds.max[2] - bounds.min[2],
-    1.0
-  );
-  const offsets: Record<ViewPreset, [number, number, number]> = {
-    iso: cameraOffset(scene.geometry_type, mode),
-    top: [0.0, 2.2, 0.001],
-    front: [0.0, 0.001, 2.2],
-    right: [2.2, 0.001, 0.0]
-  };
-  const offset = offsets[view];
+  const radius = boundingRadius(bounds);
+  const distance = fitDistance(camera, radius);
   camera.position.set(
-    center[0] + span * offset[0],
-    center[1] + span * offset[1],
-    center[2] + span * offset[2]
+    center[0] + direction[0] * distance,
+    center[1] + direction[1] * distance,
+    center[2] + direction[2] * distance
   );
-  camera.near = Math.max(span / 1000, 0.1);
-  camera.far = span * 60;
+  camera.near = Math.max(distance / 200, 0.05);
+  camera.far = (distance + radius) * 6;
   camera.updateProjectionMatrix();
   controls.target.set(center[0], center[1], center[2]);
   controls.update();
+}
+
+function fitDistance(camera: THREE.PerspectiveCamera, radius: number) {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const aspect = Math.max(camera.aspect, 1e-4);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
+  const limitingFov = Math.min(verticalFov, horizontalFov);
+  return (radius / Math.sin(limitingFov / 2)) * 1.15;
+}
+
+function boundingRadius(bounds: { min: [number, number, number]; max: [number, number, number] }) {
+  const dx = bounds.max[0] - bounds.min[0];
+  const dy = bounds.max[1] - bounds.min[1];
+  const dz = bounds.max[2] - bounds.min[2];
+  return Math.max(0.5 * Math.hypot(dx, dy, dz), 0.5);
+}
+
+function normalizeDirection(direction: [number, number, number]): [number, number, number] {
+  const length = Math.hypot(direction[0], direction[1], direction[2]);
+  if (length < 1e-9) {
+    const fallback = Math.hypot(1, 0.8, 0.8);
+    return [1 / fallback, 0.8 / fallback, 0.8 / fallback];
+  }
+  return [direction[0] / length, direction[1] / length, direction[2] / length];
 }
 
 function sceneSummary(scene: VisualizationScene, mode: RenderMode, field: SceneField) {

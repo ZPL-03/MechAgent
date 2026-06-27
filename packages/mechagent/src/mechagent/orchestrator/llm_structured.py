@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from pydantic import ValidationError
 
@@ -273,6 +274,13 @@ def _merge_plate_feature_dimensions(
         "hole",
         "opening",
         "circular_hole",
+        "slots",
+        "slot_specs",
+        "slotted_holes",
+        "obround_slots",
+        "slot",
+        "slotted_hole",
+        "obround_slot",
     ):
         if key in geometry and key not in merged:
             merged[key] = geometry[key]
@@ -599,6 +607,7 @@ def _normalized_dimensions(dimensions: dict[str, Any], geometry_type: str) -> di
             "thickness": _quantity_value(dimensions, _thickness_names(), "length"),
         }
         normalized.update(_normalized_plate_hole_dimensions(dimensions))
+        normalized.update(_normalized_plate_slot_dimensions(dimensions))
         return normalized
     if geometry_type == "solid":
         return {
@@ -630,6 +639,29 @@ def _normalized_plate_hole_dimensions(dimensions: dict[str, Any]) -> dict[str, A
     return normalized
 
 
+def _normalized_plate_slot_dimensions(dimensions: dict[str, Any]) -> dict[str, Any]:
+    slots = _plate_slot_specs(dimensions)
+    if not slots:
+        return {}
+
+    normalized: dict[str, Any] = {"slot_count": float(len(slots))}
+    first_length, first_width, first_center_x, first_center_y = slots[0]
+    normalized.update(
+        {
+            "slot_length": first_length,
+            "slot_width": first_width,
+            "slot_center_x": first_center_x,
+            "slot_center_y": first_center_y,
+        }
+    )
+    for index, (slot_length, slot_width, center_x, center_y) in enumerate(slots, start=1):
+        normalized[f"slot_{index}_length"] = slot_length
+        normalized[f"slot_{index}_width"] = slot_width
+        normalized[f"slot_{index}_center_x"] = center_x
+        normalized[f"slot_{index}_center_y"] = center_y
+    return normalized
+
+
 def _plate_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float]]:
     holes_raw = _first_present_raw(
         dimensions,
@@ -640,6 +672,8 @@ def _plate_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, fl
         for item in holes_raw:
             if not isinstance(item, dict):
                 raise ValueError("LLM 多孔薄板 holes 数组元素必须是对象。")
+            if _looks_like_slot_spec(item):
+                continue
             hole = _coerce_hole_spec(item)
             if hole is None:
                 raise ValueError("LLM 多孔薄板 holes 数组元素缺少半径或孔心坐标。")
@@ -663,6 +697,49 @@ def _plate_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, fl
     if radius is None or center_x is None or center_y is None:
         return []
     return [(radius, center_x, center_y)]
+
+
+def _plate_slot_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float, float]]:
+    slots_raw = _first_present_raw(
+        dimensions,
+        ("slots", "slot_specs", "slotted_holes", "obround_slots"),
+    )
+    if isinstance(slots_raw, list):
+        slots: list[tuple[float, float, float, float]] = []
+        for item in slots_raw:
+            if not isinstance(item, dict):
+                raise ValueError("LLM 槽孔薄板 slots 数组元素必须是对象。")
+            slot = _coerce_slot_spec(item)
+            if slot is None:
+                raise ValueError("LLM 槽孔薄板 slots 数组元素缺少长度、宽度或中心坐标。")
+            slots.append(slot)
+        return slots
+
+    openings_raw = _first_present_raw(dimensions, ("openings",))
+    if isinstance(openings_raw, list):
+        slots = []
+        for item in openings_raw:
+            if isinstance(item, dict) and _looks_like_slot_spec(item):
+                slot = _coerce_slot_spec(item)
+                if slot is None:
+                    raise ValueError("LLM 槽孔薄板 openings 槽孔元素缺少长度、宽度或中心坐标。")
+                slots.append(slot)
+        if slots:
+            return slots
+
+    single_slot = _first_present_raw(dimensions, ("slot", "slotted_hole", "obround_slot"))
+    if isinstance(single_slot, dict):
+        slot = _coerce_slot_spec(single_slot)
+        if slot is not None:
+            return [slot]
+        raise ValueError("LLM 槽孔薄板 slot 对象缺少长度、宽度或中心坐标。")
+
+    indexed_slots = _indexed_slot_specs(dimensions)
+    if indexed_slots:
+        return indexed_slots
+
+    slot = _coerce_slot_spec_from_prefixed_dimensions(dimensions, "slot")
+    return [slot] if slot is not None else []
 
 
 def _indexed_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float]]:
@@ -704,6 +781,35 @@ def _indexed_hole_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, 
     return holes
 
 
+def _indexed_slot_specs(dimensions: dict[str, Any]) -> list[tuple[float, float, float, float]]:
+    count_value = _numeric_value(dimensions.get("slot_count"))
+    count = int(count_value) if count_value is not None and count_value >= 1 else 0
+    if count == 0:
+        indexes = sorted(
+            {
+                int(match.group(1))
+                for key in dimensions
+                if (
+                    match := re.match(
+                        r"slot_(\d+)_(?:length|width|center_x|center_y)",
+                        str(key),
+                    )
+                )
+            }
+        )
+    else:
+        indexes = list(range(1, count + 1))
+
+    slots: list[tuple[float, float, float, float]] = []
+    for index in indexes:
+        prefix = f"slot_{index}"
+        slot = _coerce_slot_spec_from_prefixed_dimensions(dimensions, prefix)
+        if slot is None:
+            raise ValueError(f"LLM 槽孔薄板 {prefix} 缺少长度、宽度或中心坐标。")
+        slots.append(slot)
+    return slots
+
+
 def _coerce_hole_spec(hole: dict[str, Any]) -> tuple[float, float, float] | None:
     radius = _hole_radius_value(hole, "hole")
     center = _dict_value(hole.get("center") or hole.get("centre"))
@@ -718,6 +824,97 @@ def _coerce_hole_spec(hole: dict[str, Any]) -> tuple[float, float, float] | None
     if radius is None or center_x is None or center_y is None:
         return None
     return (radius, center_x, center_y)
+
+
+def _coerce_slot_spec(slot: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    slot_length = _slot_length_value(slot, "slot")
+    slot_width = _slot_width_value(slot, "slot")
+    center = _dict_value(slot.get("center") or slot.get("centre"))
+    center_x = _first_present_number(
+        _hole_center_value(slot, "x", ("center_x", "cx", "x", "槽孔中心x")),
+        _hole_center_value(center, "x", ("x", "center_x", "cx")),
+    )
+    center_y = _first_present_number(
+        _hole_center_value(slot, "y", ("center_y", "cy", "y", "槽孔中心y")),
+        _hole_center_value(center, "y", ("y", "center_y", "cy")),
+    )
+    if slot_length is None or slot_width is None or center_x is None or center_y is None:
+        return None
+    return (slot_length, slot_width, center_x, center_y)
+
+
+def _coerce_slot_spec_from_prefixed_dimensions(
+    dimensions: dict[str, Any],
+    prefix: str,
+) -> tuple[float, float, float, float] | None:
+    slot_length = _slot_length_value(dimensions, prefix)
+    slot_width = _slot_width_value(dimensions, prefix)
+    center_x = _hole_center_value(
+        dimensions,
+        "x",
+        (f"{prefix}_center_x", f"{prefix}_x", f"{prefix}_cx", "slot_center_x"),
+    )
+    center_y = _hole_center_value(
+        dimensions,
+        "y",
+        (f"{prefix}_center_y", f"{prefix}_y", f"{prefix}_cy", "slot_center_y"),
+    )
+    if slot_length is None or slot_width is None or center_x is None or center_y is None:
+        return None
+    return (slot_length, slot_width, center_x, center_y)
+
+
+def _looks_like_slot_spec(value: dict[str, Any]) -> bool:
+    kind = _normalized_token(value.get("type") or value.get("kind") or value.get("shape"))
+    if kind in {"slot", "slotted_hole", "obround", "obround_slot", "长圆孔", "槽孔", "腰型孔"}:
+        return True
+    return any(
+        key in value
+        for key in (
+            "slot_length",
+            "slot_width",
+            "槽长",
+            "槽宽",
+        )
+    ) or (
+        "length" in value
+        and "width" in value
+        and not any(key in value for key in ("radius", "diameter", "hole_radius", "hole_diameter"))
+    )
+
+
+def _slot_length_value(mapping: dict[str, Any], prefix: str) -> float | None:
+    return _quantity_value(
+        mapping,
+        (
+            f"{prefix}_length",
+            "slot_length",
+            "length",
+            "long_axis",
+            "major_axis",
+            "槽孔长度",
+            "槽长",
+            "长圆孔长度",
+        ),
+        "length",
+    )
+
+
+def _slot_width_value(mapping: dict[str, Any], prefix: str) -> float | None:
+    return _quantity_value(
+        mapping,
+        (
+            f"{prefix}_width",
+            "slot_width",
+            "width",
+            "short_axis",
+            "minor_axis",
+            "槽孔宽度",
+            "槽宽",
+            "长圆孔宽度",
+        ),
+        "length",
+    )
 
 
 def _hole_radius_value(mapping: dict[str, Any], prefix: str) -> float | None:

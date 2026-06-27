@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
-import subprocess
-import time
 from collections.abc import Sequence
 from math import sqrt
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from mechagent.core.exceptions import SolverError
+from mechagent.core.executor import (
+    AbstractJobExecutor,
+    ExecutorConfig,
+    JobSpec,
+    JobStatus,
+    LocalCommandExecutor,
+)
 from mechagent.core.models import (
     AnalysisType,
     BCType,
@@ -24,7 +28,7 @@ from mechagent.core.models import (
     ModelParams,
 )
 from mechagent.core.paths import safe_file_stem
-from mechagent.core.solver import AbstractSolver, SolverResult
+from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
 
 _FRD_FLOAT_PATTERN = re.compile(r"[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[Ee][+-]\d{2,3})?")
 
@@ -46,6 +50,28 @@ class CalculiXAdapter(AbstractSolver):
         >>> CalculiXAdapter(SolverConfig(solver_path="ccx"))
         <mechagent.core.adapters.calculix.CalculiXAdapter object at ...>
     """
+
+    def __init__(
+        self, config: SolverConfig, executor: Optional[AbstractJobExecutor] = None
+    ) -> None:
+        """构造 CalculiX 适配器。
+
+        Args:
+            config: 求解器配置。
+            executor: 作业执行器；为空时使用同步本地命令执行器。注入远程/HPC/容器执行器
+                可在不改求解逻辑的前提下切换执行后端。
+
+        Returns:
+            无。
+
+        Raises:
+            OSError: 当工作目录无法创建时抛出。
+        """
+
+        super().__init__(config)
+        self.executor: AbstractJobExecutor = executor or LocalCommandExecutor(
+            ExecutorConfig(work_dir=config.work_dir, default_timeout=config.timeout)
+        )
 
     def generate_input(self, model_params: ModelParams) -> Path:
         """生成 CalculiX `.inp` 输入文件。
@@ -116,50 +142,31 @@ class CalculiXAdapter(AbstractSolver):
                 error_message=f"未找到 CalculiX 可执行文件: {self.config.solver_path}",
             )
 
-        start = time.perf_counter()
         job_name = input_file.stem
-        env = dict(os.environ)
-        env["OMP_NUM_THREADS"] = str(self.config.num_cpus)
-        try:
-            completed = subprocess.run(
-                [executable, job_name],
-                cwd=input_file.parent,
-                capture_output=True,
-                text=True,
-                timeout=self.config.timeout,
-                env=env,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            wall_time = time.perf_counter() - start
-            output_files = sorted(input_file.parent.glob(f"{job_name}.*"))
-            return SolverResult(
-                success=False,
-                wall_time=wall_time,
-                output_files=output_files,
-                error_message=f"CalculiX 求解超时: {self.config.timeout}s。",
-            )
-        except OSError as exc:
-            wall_time = time.perf_counter() - start
-            return SolverResult(
-                success=False,
-                wall_time=wall_time,
-                error_message=f"CalculiX 进程启动失败: {exc}",
-            )
-        wall_time = time.perf_counter() - start
+        spec = JobSpec(
+            command=[executable, job_name],
+            work_dir=input_file.parent,
+            env={"OMP_NUM_THREADS": str(self.config.num_cpus)},
+            timeout=self.config.timeout,
+        )
+        job_result = self.executor.run(spec)
         output_files = sorted(input_file.parent.glob(f"{job_name}.*"))
-        if completed.returncode != 0:
+        if job_result.status is JobStatus.SUCCEEDED:
             return SolverResult(
-                success=False,
-                wall_time=wall_time,
+                success=True,
+                wall_time=job_result.wall_time,
                 output_files=output_files,
-                error_message=completed.stderr.strip() or completed.stdout.strip(),
+                summary={"job_name": job_name, "returncode": job_result.return_code},
             )
+        if job_result.return_code is not None and job_result.return_code != 0:
+            error_message = job_result.stderr.strip() or job_result.stdout.strip()
+        else:
+            error_message = job_result.error_message or "CalculiX 求解失败。"
         return SolverResult(
-            success=True,
-            wall_time=wall_time,
+            success=False,
+            wall_time=job_result.wall_time,
             output_files=output_files,
-            summary={"job_name": job_name, "returncode": completed.returncode},
+            error_message=error_message,
         )
 
     def extract_results(self, result: SolverResult) -> dict[str, Any]:

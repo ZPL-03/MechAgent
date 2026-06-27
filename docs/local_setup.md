@@ -2,12 +2,12 @@
 
 ## Python
 
-MechAgent 支持 Python 3.9 及以上版本。开发和运行建议使用独立虚拟环境。
+MechAgent 支持 Python 3.10 及以上版本。开发和运行建议使用独立虚拟环境。
 
 Windows `venv`：
 
 ```powershell
-py -3.9 -m venv .venv
+py -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 ```
@@ -15,8 +15,8 @@ python -m pip install --upgrade pip
 Conda：
 
 ```powershell
-conda create -n mechagent python=3.9 -y
-conda activate mechagent
+conda create -n AGENT python=3.10 -y
+conda activate AGENT
 python -m pip install --upgrade pip
 ```
 
@@ -113,19 +113,20 @@ python -m mechagent.cli doctor --llm
 ```powershell
 python -m mechagent.cli demo --llm-agents
 python -m mechagent.cli studio --open-browser
-python -m mechagent.cli studio --open-browser --request "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry --auto-run
+python -m mechagent.cli studio --open-browser --request "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，四边简支，承受0.003MPa向下均布压力的静力响应" --llm-agents --view geometry --auto-run
 python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析"
 python -m mechagent.cli run "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，沿梁竖向向下1kN/m均布线载荷的静力响应"
 python -m mechagent.cli run "求解长300mm、宽200mm、厚5mm、材料铝的矩形板，四边简支，承受0.01MPa均布压力的静力响应"
 python -m mechagent.cli run "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
 python -m mechagent.cli run "求解长420mm、宽260mm、厚6mm、孔中心x=180mm、孔中心y=105mm、孔径50mm、材料钢的偏心圆孔薄板，四边简支，承受0.003MPa向下均布压力的静力响应"
 python -m mechagent.cli run "求解长520mm、宽320mm、厚8mm、材料钢的多孔薄板，孔1中心x=130mm、中心y=110mm、孔径44mm，孔2中心x=260mm、中心y=210mm、孔径54mm，孔3中心x=410mm、中心y=120mm、孔径40mm，四边简支，承受0.0025MPa向下均布压力的静力响应"
+python -m mechagent.cli run "求解长480mm、宽280mm、厚6mm、材料钢的长圆槽孔薄板，槽孔中心x=240mm、槽孔中心y=140mm、槽长160mm、槽宽40mm，四边简支，承受0.003MPa向下均布压力的静力响应"
 python -m mechagent.cli run "长方体实体200mmx20mmx20mm，材料钢，左端固定，右端承受10MPa轴向拉伸静力分析"
 python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40mm, cantilever fixed at one end, downward 1000N tip force static analysis" --llm-agents --json
 python scripts/run_llm_smoke.py
 ```
 
-Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库默认工况 `SC-23`，打开 Studio 并自动提交偏心圆孔薄板静力请求；`--example SC-25` 切换为多孔薄板工况。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始视图的可复现工作台入口。`--auto-run` 与 `--request` 同时使用时，工作台页面加载后自动提交当前请求。
+Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库默认工况 `SC-27`，打开 Studio 并自动提交长圆槽孔薄板静力请求；`--example SC-25` 切换为多孔薄板工况。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始视图的可复现工作台入口。`--auto-run` 与 `--request` 同时使用时，工作台页面加载后自动提交当前请求。
 
 ## 验证命令
 
