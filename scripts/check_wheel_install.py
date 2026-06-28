@@ -148,12 +148,22 @@ if "Requires-Dist: gmsh>=4.13" not in core_metadata:
 
 studio_index = target / "mechagent" / "ui" / "static" / "index.html"
 studio_assets = target / "mechagent" / "ui" / "static" / "assets"
+studio_brand = target / "mechagent" / "ui" / "static" / "brand"
 if not studio_index.exists():
     raise AssertionError(f"缺少 Studio HTML: {studio_index}")
 if not any(studio_assets.glob("*.js")):
     raise AssertionError(f"缺少 Studio JS 资源: {studio_assets}")
 if not any(studio_assets.glob("*.css")):
     raise AssertionError(f"缺少 Studio CSS 资源: {studio_assets}")
+for brand_name in (
+    "favicon-32.png",
+    "mechagent-logo-64.png",
+    "mechagent-logo-192.png",
+    "mechagent-logo.png",
+):
+    brand_path = studio_brand / brand_name
+    if not brand_path.exists():
+        raise AssertionError(f"缺少 Studio 品牌资源: {brand_path}")
 
 params = tc01_model_params()
 print(json.dumps({
@@ -175,6 +185,7 @@ print(json.dumps({
     "app_entry_points": str(app_dist / "entry_points.txt"),
     "studio_index": str(studio_index),
     "studio_asset_count": len(list(studio_assets.iterdir())),
+    "studio_brand_count": len(list(studio_brand.iterdir())),
 }, ensure_ascii=False))
 """
 

@@ -46,7 +46,7 @@ apps/mechagent-studio/src/
     useInspection.ts       # 防抖运行前预检
     useToast.ts            # 提示条（aria-live）
   components/
-    common.tsx             # PanelTitle / EmptyState / CompactEmpty / Skeleton / Collapsible
+    common.tsx             # PanelTitle / EmptyState / CompactEmpty / Skeleton
     Topbar.tsx             # Topbar / ThemeToggle / StatusPill / RuntimeDiagnosticsMenu
     Composer.tsx           # 请求输入 / 预检卡片 / 操作按钮
     Sidebar.tsx            # SidePanel / 工况库 / 历史 / 摘要

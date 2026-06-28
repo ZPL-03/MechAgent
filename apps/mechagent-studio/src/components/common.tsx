@@ -66,35 +66,3 @@ export function Skeleton({ lines = 3, className }: { lines?: number; className?:
     </div>
   );
 }
-
-export function Collapsible({
-  icon,
-  title,
-  badge,
-  defaultOpen = true,
-  children
-}: {
-  icon?: ReactNode;
-  title: string;
-  badge?: ReactNode;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <details className="collapsible" open={defaultOpen}>
-      <summary className="collapsible-summary">
-        <span className="collapsible-head">
-          {icon ? (
-            <span className="panel-title-icon" aria-hidden="true">
-              {icon}
-            </span>
-          ) : null}
-          <span className="collapsible-title">{title}</span>
-        </span>
-        {badge ? <span className="collapsible-badge">{badge}</span> : null}
-        <span className="collapsible-chevron" aria-hidden="true" />
-      </summary>
-      <div className="collapsible-body">{children}</div>
-    </details>
-  );
-}

@@ -41,7 +41,7 @@ export function Topbar({
     <header className="topbar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true">
-          MA
+          <img src="/brand/mechagent-logo-64.png" alt="" />
         </div>
         <div className="brand-copy">
           <h1 translate="no">MechAgent Studio</h1>

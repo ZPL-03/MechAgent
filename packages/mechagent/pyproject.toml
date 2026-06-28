@@ -59,4 +59,4 @@ Issues = "https://github.com/ZPL-03/MechAgent/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mechagent = ["py.typed", "ui/static/*", "ui/static/assets/*"]
+mechagent = ["py.typed", "ui/static/*", "ui/static/assets/*", "ui/static/brand/*"]

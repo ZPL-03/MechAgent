@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Workflow
 } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { agentChainToneLabel, agentTraceDetails } from "../lib/agentChain";
 import { formatEventTime } from "../lib/format";
 import { jobElapsedLabel, jobStatusLabel, shortJobId } from "../lib/job";
@@ -28,7 +29,7 @@ import type {
   StudioRunResponse,
   TaskSummary
 } from "../types";
-import { Collapsible, CompactEmpty } from "./common";
+import { CompactEmpty } from "./common";
 
 export function InspectorRail({
   monitorTick,
@@ -63,6 +64,81 @@ export function InspectorRail({
   onDownloadJson: () => void;
   onCopyJson: () => void;
 }) {
+  const [activeInspectorTab, setActiveInspectorTab] = useState("workflow");
+  const inspectorTabs: Array<{
+    key: string;
+    label: string;
+    title: string;
+    icon: ReactNode;
+    actions?: ReactNode;
+    content: ReactNode;
+  }> = [
+    {
+      key: "workflow",
+      label: "流程",
+      title: "求解流程",
+      icon: <Workflow aria-hidden="true" size={16} />,
+      content: <WorkflowSteps stages={stages} />
+    },
+    {
+      key: "agents",
+      label: "Agent",
+      title: "Agent 链路",
+      icon: <Network aria-hidden="true" size={16} />,
+      content: <AgentChainPanel items={agentChain} />
+    },
+    {
+      key: "artifacts",
+      label: "产物",
+      title: "阶段产物",
+      icon: <Database aria-hidden="true" size={16} />,
+      content:
+        artifacts.length > 0 ? (
+          <ArtifactList artifacts={artifacts} onCopy={onCopyArtifact} />
+        ) : (
+          <CompactEmpty text="运行后显示报告、网格和求解器输出路径。" />
+        )
+    },
+    {
+      key: "json",
+      label: "JSON",
+      title: "摘要 JSON",
+      icon: <FileJson aria-hidden="true" size={16} />,
+      actions: (
+        <span className="json-actions">
+          <button
+            className="icon-button"
+            title="下载 JSON"
+            type="button"
+            aria-label="下载摘要 JSON"
+            disabled={!result}
+            onClick={onDownloadJson}
+          >
+            <Download aria-hidden="true" size={16} />
+          </button>
+          <button
+            className="icon-button"
+            title="复制 JSON"
+            type="button"
+            aria-label="复制摘要 JSON"
+            disabled={!result}
+            onClick={onCopyJson}
+          >
+            <Copy aria-hidden="true" size={16} />
+          </button>
+        </span>
+      ),
+      content: (
+        <>
+          <EventLog events={eventLog} />
+          <pre className="json-view">{summaryJson}</pre>
+        </>
+      )
+    }
+  ];
+  const activeTab =
+    inspectorTabs.find((tab) => tab.key === activeInspectorTab) ?? inspectorTabs[0];
+
   return (
     <aside className={`right-rail ${result ? "has-result" : ""}`} aria-label="仿真检查器">
       <section className={`panel verification-panel ${result ? "has-result" : ""}`}>
@@ -101,67 +177,34 @@ export function InspectorRail({
         )}
       </section>
 
-      <section className="panel inspector-group">
-        <Collapsible icon={<Workflow size={18} />} title="求解流程">
-          <WorkflowSteps stages={stages} />
-        </Collapsible>
-      </section>
-
-      <section className="panel inspector-group">
-        <Collapsible icon={<Network size={18} />} title="Agent 链路">
-          <AgentChainPanel items={agentChain} />
-        </Collapsible>
-      </section>
-
-      <section className="panel inspector-group">
-        <Collapsible icon={<Database size={18} />} title="阶段产物" defaultOpen={false}>
-          {artifacts.length > 0 ? (
-            <ArtifactList artifacts={artifacts} onCopy={onCopyArtifact} />
-          ) : (
-            <CompactEmpty text="运行后显示报告、网格和求解器输出路径。" />
-          )}
-        </Collapsible>
-      </section>
-
-      <section className="panel inspector-group json-panel">
-        <Collapsible
-          icon={<FileJson size={18} />}
-          title="摘要 JSON"
-          defaultOpen={false}
-          badge={
-            <span className="json-actions">
-              <button
-                className="icon-button"
-                title="下载 JSON"
-                type="button"
-                aria-label="下载摘要 JSON"
-                disabled={!result}
-                onClick={(event) => {
-                  event.preventDefault();
-                  onDownloadJson();
-                }}
-              >
-                <Download aria-hidden="true" size={16} />
-              </button>
-              <button
-                className="icon-button"
-                title="复制 JSON"
-                type="button"
-                aria-label="复制摘要 JSON"
-                disabled={!result}
-                onClick={(event) => {
-                  event.preventDefault();
-                  onCopyJson();
-                }}
-              >
-                <Copy aria-hidden="true" size={16} />
-              </button>
+      <section className="panel inspector-detail-panel">
+        <div className="inspector-tabs" role="tablist" aria-label="检查器视图">
+          {inspectorTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={tab.key === activeTab.key ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={tab.key === activeTab.key}
+              onClick={() => setActiveInspectorTab(tab.key)}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="inspector-tab-header">
+          <div className="panel-title-head">
+            <span className="panel-title-icon" aria-hidden="true">
+              {activeTab.icon}
             </span>
-          }
-        >
-          <EventLog events={eventLog} />
-          <pre className="json-view">{summaryJson}</pre>
-        </Collapsible>
+            <h2>{activeTab.title}</h2>
+          </div>
+          {activeTab.actions ? <div className="panel-actions">{activeTab.actions}</div> : null}
+        </div>
+        <div className="inspector-tab-body" role="tabpanel">
+          {activeTab.content}
+        </div>
       </section>
     </aside>
   );

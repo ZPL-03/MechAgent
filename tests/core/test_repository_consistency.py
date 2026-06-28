@@ -494,7 +494,10 @@ def test_packages_publish_pep561_type_markers() -> None:
 
     assert Path("packages/mechagent/src/mechagent/py.typed").exists()
     assert Path("packages/mechagent-core/src/mechagent/core/py.typed").exists()
-    assert 'mechagent = ["py.typed", "ui/static/*", "ui/static/assets/*"]' in app_pyproject
+    assert (
+        'mechagent = ["py.typed", "ui/static/*", "ui/static/assets/*", "ui/static/brand/*"]'
+        in app_pyproject
+    )
     assert '"mechagent.core" = ["py.typed"]' in core_pyproject
 
 
@@ -529,10 +532,14 @@ def test_public_docs_describe_studio_surface() -> None:
     assert "![MechAgent Studio 结果与报告](docs/assets/studio-workbench.png)" in readme
     assert "引导式工作流" in readme
     assert "明暗双主题" in readme
-    assert "可折叠检查器" in readme
+    assert "标签式检查器" in readme
     assert "界面以引导式工作流组织" in readme
     assert "工作台链接支持恢复请求、LLM 开关和视图模式" in readme
-    assert "当前验证范围不包含非线性材料、渐进损伤、接触、多物理场和任意 CAD 导入" in readme
+    assert (
+        "CAD 支持范围为 STEP/IGES/BREP 形体摘要、包围盒几何候选和自然语言补全到结构静力参数"
+        in readme
+    )
+    assert "当前验证范围不包含非线性材料、渐进损伤、接触和多物理场" in readme
     assert Path("docs/assets/studio-geometry.png").exists()
     assert Path("docs/assets/studio-workbench.png").exists()
 
@@ -551,7 +558,7 @@ def test_public_docs_describe_studio_surface() -> None:
     # 包 README 描述新版界面布局、主题与可视化。
     assert "引导式工作流" in package_readme
     assert "明暗双主题" in package_readme
-    assert "可折叠分组" in package_readme
+    assert "标签式详情面板" in package_readme
     assert "Three.js" in package_readme
     assert "3D 场景由 Python 后处理层" in package_readme
     assert "Three.js 画布在初始化、尺寸变化、视图切换和用户交互时按需渲染" in package_readme
@@ -649,11 +656,12 @@ def test_studio_frontend_uses_modular_themed_architecture() -> None:
     assert "WorkflowStepper" in workspace
     assert "ViewportPanel" in workspace
 
-    # 引导式工作流、可折叠、主题切换样式，令牌驱动与响应式。
+    # 引导式工作流、标签式检查器、主题切换样式，令牌驱动与响应式。
     assert "var(--color-" in styles
     assert ".workflow-stepper" in styles
     assert ".theme-toggle" in styles
-    assert ".collapsible" in styles
+    assert ".inspector-tabs" in styles
+    assert ".inspector-detail-panel" in styles
     assert "@media (max-width: 1279px)" in styles
     assert "@media (max-width: 899px)" in styles
     assert "toast-region" in app

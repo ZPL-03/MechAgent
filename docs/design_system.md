@@ -12,6 +12,19 @@
 - **可访问**：正文对比度满足 WCAG AA；焦点可见；尊重 `prefers-reduced-motion`；图标按钮提供 `aria-label`。
 - **轻依赖**：原生 CSS 自定义属性 + Vite 原生 CSS Modules，不引入 UI 框架。
 
+## 品牌资产
+
+MechAgent Studio 使用统一的方形品牌图标。前端源资产位于 `apps/mechagent-studio/public/brand/`，构建时复制到后端静态目录；文档展示图位于 `docs/assets/mechagent-logo.png`。
+
+| 文件 | 用途 |
+| --- | --- |
+| `mechagent-logo.png` | 512px 主图标，用于文档、发布页和高分辨率展示 |
+| `mechagent-logo-192.png` | 浏览器与移动设备图标 |
+| `mechagent-logo-64.png` | Studio 顶栏品牌标识 |
+| `favicon-32.png` | 浏览器标签页图标 |
+
+图标表达有限元网格、结构构件和多智能体协同网络。界面内只使用图标本体，不在图标中嵌入文字；产品名称由相邻文本 `MechAgent Studio` 承载。
+
 ## 令牌分层
 
 令牌分两层，组件只引用第二层（语义层）：
@@ -118,7 +131,7 @@
 
 圆角（`--radius-*`）：`sm=6px md=10px lg=14px pill=999px`。
 
-阴影（`--shadow-*`）：`sm`（卡片）、`md`（浮层）、`lg`（弹窗/抽屉）。深色主题降低阴影、增强描边对比。
+阴影（`--shadow-*`）：`sm`（卡片）、`md`（浮层）、`lg`（弹窗）。深色主题降低阴影、增强描边对比。
 
 层级（`--z-*`）：`base=0 sticky=10 dropdown=100 overlay=900 toast=1000`。
 
@@ -140,7 +153,7 @@
 | `Toast` | 复制/操作反馈，`aria-live` | success / error / info |
 | `Legend` | 3D 颜色条 + 范围 + 单位 | 随场量同步 |
 | `Stepper` | 引导式工作流（输入→预检→运行→结果） | upcoming / current / done / failed |
-| `Collapsible` | 右栏可折叠分组 | expanded / collapsed |
+| `InspectorTabs` | 右栏流程、Agent、产物、JSON 详情切换 | active / inactive / focus |
 
 ## 状态规范
 
@@ -160,8 +173,8 @@
 
 | 断点 | 宽度 | 布局 |
 | --- | --- | --- |
-| `lg` 桌面宽屏 | ≥ 1280px | 左/中/右三栏，右栏整列滚动 |
+| `lg` 桌面宽屏 | ≥ 1280px | 左/中/右三栏，右栏验收摘要固定、详情面板内部滚动 |
 | `md` 笔记本 | 900–1279px | 左栏 + 主区两栏，检查区移至主区下方两列 |
-| `sm` 窄屏/移动 | < 900px | 单列堆叠，左右栏折叠为可展开抽屉/标签，输入与运行按钮 sticky |
+| `sm` 窄屏/移动 | < 900px | 单列堆叠，输入、工作区和检查器按流程纵向排列 |
 
 所有断点避免横向溢出；3D 画布、报告、检查区有最小/最大尺寸约束。
