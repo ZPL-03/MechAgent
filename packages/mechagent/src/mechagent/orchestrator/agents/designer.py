@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from mechagent.config import MechAgentConfig
-from mechagent.core.models import ModelParams
+from mechagent.core.models import MIN_EXECUTION_CONFIDENCE, ModelParams
 from mechagent.core.rules import ensure_parameter_ranges
 from mechagent.orchestrator.capabilities import SimulationCapability, get_capability
 from mechagent.orchestrator.llm_advisor import AgentLLMAdvisor, AgentLLMTrace
@@ -106,8 +106,16 @@ class DesignerAgent:
             _ensure_declared_model_case(capability, params)
             if capability.execution_validator is not None:
                 capability.execution_validator(params)
+            execution_confidence = _execution_confidence(task, params)
+            simulation_case = params.to_simulation_case(
+                raw_request=raw_request,
+                parser=task.intent.source,
+                provenance_confidence=execution_confidence,
+            )
+            simulation_case.ensure_execution_ready()
             return DesignAgentOutput(
                 model_params=params,
+                simulation_case=simulation_case,
                 designer_llm_trace=trace,
             )
 
@@ -121,6 +129,17 @@ class DesignerAgentError(ValueError):
     def __init__(self, message: str, llm_trace: AgentLLMTrace | None = None) -> None:
         super().__init__(message)
         self.llm_trace = llm_trace
+
+
+def _execution_confidence(task: TaskItem, params: ModelParams) -> float:
+    """区分缺项诊断置信度与已完成结构化模型的执行置信度。"""
+
+    if task.intent is None:
+        raise ValueError("DesignerAgent 需要 TaskItem.intent 提供标准化仿真意图。")
+    confidence = task.intent.confidence
+    if task.intent.missing_fields and params.metadata.get("source") == "llm_structured":
+        return max(confidence, MIN_EXECUTION_CONFIDENCE)
+    return confidence
 
 
 def _try_parse_model_params(parser: object, request: str) -> ModelParams | None:

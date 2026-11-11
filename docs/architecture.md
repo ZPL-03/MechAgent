@@ -92,6 +92,14 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 入口。当前结构静力工作流在 Designer 输出后生成案例摘要，求解器仍接收兼容的
 `ModelParams`；这保证旧工具接口稳定，同时让 API、报告和证据可以逐步迁移到统一案例契约。
 
+`SimulationCase.execution_readiness()` 检查六类必需字段来源及全部载荷/边界区域来源的
+`confidence`。默认执行门槛为 `0.80`；缺失置信度或低于门槛的案例可以被读取和迁移，
+但 `ensure_execution_ready()` 会拒绝其进入网格和求解。`ModelParams.to_simulation_case()`
+只有在调用方显式传入 `provenance_confidence` 时才写入置信度。Designer 将通过契约校验
+的结构化模型生成带执行置信度的案例；LangGraph 的 `TaskItem.execution_confidence`
+用于在后续节点和失败记录中保持相同证据。Planner 对缺项的诊断置信度不会覆盖已完成
+结构化模型的执行证据。
+
 Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_ranges()`，并调用当前 `SimulationCapability.execution_validator` 声明的能力执行契约。内置结构静力能力绑定 `mechagent.core.rules.ensure_static_execution_contract()`；该契约约束结构静力执行路径的分析类型、材料类型、几何必需尺寸、几何-单元组合、边界条件、载荷区域和载荷方向。参数范围以 `mechagent.core.rules` 作为运行时单点来源；执行契约由能力注册项显式绑定。网格尺寸范围按参与网格划分的代表长度判断：梁使用长度，板、壳和加筋板使用面内长宽，实体使用三维尺寸最小值。
 
 ### 求解摘要状态

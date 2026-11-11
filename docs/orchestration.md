@@ -66,6 +66,6 @@ ReporterAgent 不依赖远端 LLM 生成基础工程解释；报告固定包含�
 
 ## 错误记录模型
 
-顺序工作流中的任务级异常进入 `TaskRunRecord.error`，报告输出「错误诊断」章节。DAG 工作流使用同一错误记录模型。Planner 阶段失败生成请求级 `TaskRunRecord`；Designer 及后续节点失败保留已有阶段产物并写入对应 Agent 节点名。`ErrorRecord` 包含 `node`、`code`、`message` 和 `missing_fields`，错误码覆盖空请求、标准验证入口误用、能力范围外请求、复合请求歧义、必要仿真输入缺失、Designer 输入意图缺失以及 Mesh、Solver、PostProc、Analyst 节点失败。SDK 以 `success=false` 返回失败结果，CLI 输出报告后返回非零退出码。
+顺序工作流中的任务级异常进入 `TaskRunRecord.error`，报告输出「错误诊断」章节。DAG 工作流使用同一错误记录模型。Planner 阶段失败生成请求级 `TaskRunRecord`；Designer 及后续节点失败保留已有阶段产物并写入对应 Agent 节点名。`ErrorRecord` 包含 `node`、`code`、`message` 和 `missing_fields`，错误码覆盖空请求、标准验证入口误用、能力范围外请求、复合请求歧义、必要仿真输入缺失、执行前来源置信度不足、Designer 输入意图缺失以及 Mesh、Solver、PostProc、Analyst 节点失败。SDK 以 `success=false` 返回失败结果，CLI 输出报告后返回非零退出码。
 
 LLM 接入与脱敏规则、知识库见 [能力与自然语言解析](capabilities.md)。

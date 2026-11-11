@@ -170,7 +170,8 @@ def _designer_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, 
         task = _task_item(task_value)
         try:
             output = designer.design_with_trace(task)
-            next_tasks.append(task)
+            confidence = output.simulation_case.provenance["geometry"].confidence
+            next_tasks.append(task.model_copy(update={"execution_confidence": confidence}))
             params.append(output.model_params)
             traces.append(output.designer_llm_trace)
         except Exception as exc:

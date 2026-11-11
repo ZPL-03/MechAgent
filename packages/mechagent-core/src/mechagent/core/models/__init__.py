@@ -2,7 +2,9 @@
 
 from mechagent.core.models.case import (
     CASE_SCHEMA_VERSION,
+    MIN_EXECUTION_CONFIDENCE,
     CoordinateSystem,
+    ExecutionReadiness,
     Provenance,
     RegionSpec,
     RequestProvenance,
@@ -47,6 +49,8 @@ __all__ = [
     "ModelParams",
     "CASE_SCHEMA_VERSION",
     "CoordinateSystem",
+    "ExecutionReadiness",
+    "MIN_EXECUTION_CONFIDENCE",
     "Provenance",
     "RegionSpec",
     "RequestProvenance",

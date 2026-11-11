@@ -347,6 +347,7 @@ class ModelParams(BaseModel):
         raw_request: str | None = None,
         parser: str = "legacy",
         parser_version: str = "",
+        provenance_confidence: float | None = None,
     ) -> SimulationCase:
         """显式转换为版本化 `SimulationCase`，保持旧调用方兼容。"""
 
@@ -357,4 +358,5 @@ class ModelParams(BaseModel):
             raw_request=raw_request,
             parser=parser,
             parser_version=parser_version,
+            provenance_confidence=provenance_confidence,
         )

@@ -147,6 +147,39 @@ def test_simulation_case_wraps_legacy_model_with_explicit_provenance() -> None:
     assert restored.metadata["case_schema_version"] == 1
 
 
+def test_simulation_case_requires_explicit_provenance_confidence_for_execution() -> None:
+    params = tc01_model_params()
+    legacy_case = SimulationCase.from_model_params(params)
+
+    assert legacy_case.execution_ready is False
+    readiness = legacy_case.execution_readiness()
+    assert readiness.ready is False
+    assert readiness.lowest_confidence is None
+    assert any("provenance.geometry.confidence 缺失" in item for item in readiness.blockers)
+    with pytest.raises(ValueError, match="执行前检查失败"):
+        legacy_case.ensure_execution_ready()
+
+    low_confidence_case = SimulationCase.from_model_params(
+        params,
+        provenance_confidence=0.79,
+    )
+    assert low_confidence_case.execution_readiness().lowest_confidence == pytest.approx(0.79)
+    with pytest.raises(ValueError, match="低于 0.800"):
+        low_confidence_case.ensure_execution_ready()
+
+    executable_case = SimulationCase.from_model_params(
+        params,
+        provenance_confidence=0.8,
+    )
+    assert executable_case.execution_ready is True
+    assert executable_case.ensure_execution_ready() is executable_case
+
+
+def test_simulation_case_rejects_invalid_execution_confidence() -> None:
+    with pytest.raises(ValueError, match="provenance_confidence"):
+        SimulationCase.from_model_params(tc01_model_params(), provenance_confidence=1.1)
+
+
 def test_simulation_case_rejects_future_schema_and_unknown_units() -> None:
     params = tc01_model_params()
     payload = SimulationCase.from_model_params(params).model_dump(mode="json")

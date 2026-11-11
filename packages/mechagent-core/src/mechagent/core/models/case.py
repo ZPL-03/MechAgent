@@ -16,6 +16,8 @@ from mechagent.core.models.geometry import LoadType
 from mechagent.core.models.params import CompositeSpec, ModelParams
 
 CASE_SCHEMA_VERSION = 1
+MIN_EXECUTION_CONFIDENCE = 0.8
+REQUIRED_PROVENANCE_FIELDS = frozenset({"geometry", "material", "loads", "bcs", "mesh", "analysis"})
 
 
 class UnitSystem(BaseModel):
@@ -163,6 +165,21 @@ class Provenance(BaseModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class ExecutionReadiness(BaseModel):
+    """案例进入网格和求解前的可执行性检查结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    minimum_confidence: float = Field(
+        default=MIN_EXECUTION_CONFIDENCE,
+        ge=0.0,
+        le=1.0,
+    )
+    lowest_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    blockers: list[str] = Field(default_factory=list)
+
+
 class RegionSpec(BaseModel):
     """载荷或边界区域的可追踪描述。"""
 
@@ -235,10 +252,74 @@ class SimulationCase(BaseModel):
         missing_regions = sorted(referenced - self.regions.keys())
         if missing_regions:
             raise ValueError("案例缺少区域来源：" + ", ".join(missing_regions))
-        required_provenance = {"geometry", "material", "loads", "bcs", "mesh", "analysis"}
-        missing_provenance = sorted(required_provenance - self.provenance.keys())
+        missing_provenance = sorted(REQUIRED_PROVENANCE_FIELDS - self.provenance.keys())
         if missing_provenance:
             raise ValueError("案例缺少字段来源：" + ", ".join(missing_provenance))
+        return self
+
+    def execution_readiness(
+        self,
+        *,
+        minimum_confidence: float = MIN_EXECUTION_CONFIDENCE,
+    ) -> ExecutionReadiness:
+        """检查案例是否具备进入网格和求解阶段的来源证据。
+
+        缺失来源或置信度只能在读取兼容案例时保留；执行前必须显式补齐，
+        且所有字段和区域的置信度不得低于门槛。
+        """
+
+        if not 0.0 <= minimum_confidence <= 1.0:
+            raise ValueError("minimum_confidence 必须位于 0 到 1 之间。")
+
+        blockers: list[str] = []
+        confidences: list[float] = []
+        for field_name in sorted(REQUIRED_PROVENANCE_FIELDS):
+            provenance = self.provenance.get(field_name)
+            if provenance is None:
+                blockers.append(f"provenance.{field_name} 缺少来源")
+                continue
+            _collect_confidence_blocker(
+                blockers,
+                confidences,
+                f"provenance.{field_name}",
+                provenance.confidence,
+                minimum_confidence,
+            )
+        for region_name in sorted(self.regions):
+            _collect_confidence_blocker(
+                blockers,
+                confidences,
+                f"regions.{region_name}.provenance",
+                self.regions[region_name].provenance.confidence,
+                minimum_confidence,
+            )
+        return ExecutionReadiness(
+            ready=not blockers,
+            minimum_confidence=minimum_confidence,
+            lowest_confidence=min(confidences) if confidences else None,
+            blockers=blockers,
+        )
+
+    @property
+    def execution_ready(self) -> bool:
+        """返回默认执行置信度门槛下的结果。"""
+
+        return self.execution_readiness().ready
+
+    def ensure_execution_ready(
+        self,
+        *,
+        minimum_confidence: float = MIN_EXECUTION_CONFIDENCE,
+    ) -> "SimulationCase":
+        """在执行前强制检查来源完整性和置信度。"""
+
+        readiness = self.execution_readiness(minimum_confidence=minimum_confidence)
+        if not readiness.ready:
+            details = "；".join(readiness.blockers)
+            raise ValueError(
+                "执行前检查失败：案例来源置信度不足或缺失。"
+                f"最低要求 {minimum_confidence:.2f}。{details}"
+            )
         return self
 
     @classmethod
@@ -250,8 +331,12 @@ class SimulationCase(BaseModel):
         parser: str = "legacy",
         parser_version: str = "",
         request_source: Literal["user", "import", "retry"] = "user",
+        provenance_confidence: float | None = None,
     ) -> "SimulationCase":
         """把兼容 `ModelParams` 显式提升为案例契约。"""
+
+        if provenance_confidence is not None and not 0.0 <= provenance_confidence <= 1.0:
+            raise ValueError("provenance_confidence 必须位于 0 到 1 之间。")
 
         source_name = str(model.metadata.get("source", "legacy"))
         provenance_source: Literal[
@@ -268,7 +353,11 @@ class SimulationCase(BaseModel):
             if region not in regions:
                 regions[region] = RegionSpec(
                     name=region,
-                    provenance=Provenance(source=provenance_source, reference="ModelParams.region"),
+                    provenance=Provenance(
+                        source=provenance_source,
+                        reference="ModelParams.region",
+                        confidence=provenance_confidence,
+                    ),
                 )
         request = (
             RequestProvenance(
@@ -286,12 +375,36 @@ class SimulationCase(BaseModel):
             regions=regions,
             request=request,
             provenance={
-                "geometry": Provenance(source=provenance_source, reference="ModelParams.geometry"),
-                "material": Provenance(source=provenance_source, reference="ModelParams.material"),
-                "loads": Provenance(source=provenance_source, reference="ModelParams.loads"),
-                "bcs": Provenance(source=provenance_source, reference="ModelParams.bcs"),
-                "mesh": Provenance(source=provenance_source, reference="ModelParams.mesh"),
-                "analysis": Provenance(source=provenance_source, reference="ModelParams.analysis"),
+                "geometry": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.geometry",
+                    confidence=provenance_confidence,
+                ),
+                "material": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.material",
+                    confidence=provenance_confidence,
+                ),
+                "loads": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.loads",
+                    confidence=provenance_confidence,
+                ),
+                "bcs": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.bcs",
+                    confidence=provenance_confidence,
+                ),
+                "mesh": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.mesh",
+                    confidence=provenance_confidence,
+                ),
+                "analysis": Provenance(
+                    source=provenance_source,
+                    reference="ModelParams.analysis",
+                    confidence=provenance_confidence,
+                ),
             },
         )
 
@@ -320,3 +433,18 @@ class SimulationCase(BaseModel):
         if self.request is not None:
             metadata.setdefault("request_provenance", self.request.model_dump(mode="json"))
         return model.model_copy(update={"metadata": metadata})
+
+
+def _collect_confidence_blocker(
+    blockers: list[str],
+    confidences: list[float],
+    field_name: str,
+    confidence: float | None,
+    minimum_confidence: float,
+) -> None:
+    if confidence is None:
+        blockers.append(f"{field_name}.confidence 缺失")
+        return
+    confidences.append(confidence)
+    if confidence < minimum_confidence:
+        blockers.append(f"{field_name}.confidence={confidence:.3f} 低于 {minimum_confidence:.3f}")

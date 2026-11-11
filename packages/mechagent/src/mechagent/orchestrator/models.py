@@ -20,6 +20,7 @@ ErrorCode = Literal[
     "unsupported_request",
     "ambiguous_request",
     "missing_required_inputs",
+    "execution_not_ready",
     "missing_intent",
     "design_failed",
     "mesh_failed",
@@ -42,6 +43,7 @@ class TaskItem(BaseModel):
         title: 任务标题。
         analysis_type: 分析类型。
         intent: 标准化仿真意图。
+        execution_confidence: Designer 通过结构化模型校验后用于执行门禁的置信度。
         planner_llm_trace: PlannerAgent LLM 审计记录。
 
     Returns:
@@ -63,6 +65,7 @@ class TaskItem(BaseModel):
     title: str
     analysis_type: str = "static"
     intent: Optional[SimulationIntent] = None
+    execution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     planner_llm_trace: Optional[AgentLLMTrace] = None
 
 
@@ -415,6 +418,7 @@ class DesignAgentOutput(BaseModel):
 
     Args:
         model_params: 结构化仿真参数。
+        simulation_case: 通过执行前来源门禁的版本化仿真案例。
         designer_llm_trace: DesignerAgent LLM 审计记录。
 
     Returns:
@@ -427,6 +431,7 @@ class DesignAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     model_params: ModelParams
+    simulation_case: SimulationCase
     designer_llm_trace: AgentLLMTrace
 
 
@@ -497,6 +502,13 @@ class TaskRunRecord(BaseModel):
             self.simulation_case = self.model_params.to_simulation_case(
                 raw_request=raw_request,
                 parser=parser,
+                provenance_confidence=(
+                    self.task.execution_confidence
+                    if self.task.execution_confidence is not None
+                    else self.task.intent.confidence
+                    if self.task.intent
+                    else None
+                ),
             )
         return self
 
@@ -771,6 +783,9 @@ def _classify_error(node: str, message: str, missing_fields: list[str]) -> Error
 
     if missing_fields:
         return "missing_required_inputs"
+
+    if "执行前检查失败" in message:
+        return "execution_not_ready"
 
     if node == "designer":
         if "TaskItem.intent" in message:

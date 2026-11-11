@@ -500,6 +500,23 @@ def test_designer_runs_capability_execution_validator() -> None:
         unregister_capability("unit_test_validator")
 
 
+def test_designer_rejects_low_intent_confidence_before_execution() -> None:
+    task = TaskItem(
+        task_id="TASK_1",
+        case_id="STATIC-STRUCTURAL",
+        capability_id="structural_static",
+        title="结构静力分析",
+        intent=SimulationIntent(
+            raw_request="求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，向下1000N静力分析",
+            capability_id="structural_static",
+            confidence=0.79,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="执行前检查失败"):
+        DesignerAgent().design(task)
+
+
 def test_capability_missing_field_detector_is_independent_from_parser() -> None:
     capability = SimulationCapability(
         capability_id="unit_test_missing_detector",

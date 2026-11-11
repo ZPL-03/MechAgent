@@ -106,10 +106,7 @@ class SequentialWorkflow:
                 design_output = designer.design_with_trace(task)
                 model_params = design_output.model_params
                 record.model_params = model_params
-                record.simulation_case = model_params.to_simulation_case(
-                    raw_request=request,
-                    parser="planner-designer",
-                )
+                record.simulation_case = design_output.simulation_case
                 record.designer_llm_trace = design_output.designer_llm_trace
                 emit_progress("designer", "complete", _stage_message("designer", "complete"))
                 current_node = "mesh"

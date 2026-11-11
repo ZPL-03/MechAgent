@@ -17,7 +17,7 @@ TaskItem(case_id="STATIC-STRUCTURAL", capability_id="structural_static")
 
 Planner LLM 响应中的能力编号按注册表编号做大小写、空白和连字符归一化；缺参字段可由字符串数组或以中文顿号、逗号、分号、换行分隔的字符串表达；置信度可由数字或数字字符串表达，并限制在 0 到 1。
 
-Designer 按 `capability_id` 从注册表获取解析器，先尝试生成本地结构化草案，并在启用 LLM Agent 时请求 LLM 生成 `ModelParams` JSON。本地结构化草案验证通过时优先进入求解参数，LLM 输出保留为审计记录；本地 parser 无法生成参数且 LLM 输出可通过校验时，Designer 采用 LLM 结构化参数。两条路径均不可用时，Designer 依据 `SimulationIntent.missing_fields` 返回缺参诊断。进入求解前的参数均需通过参数范围检查和能力执行契约。能力声明了 `model_case_ids` 时，`ModelParams.case_id` 必须属于声明集合。
+Designer 按 `capability_id` 从注册表获取解析器，先尝试生成本地结构化草案，并在启用 LLM Agent 时请求 LLM 生成 `ModelParams` JSON。本地结构化草案验证通过时优先进入求解参数，LLM 输出保留为审计记录；本地 parser 无法生成参数且 LLM 输出可通过校验时，Designer 采用 LLM 结构化参数。两条路径均不可用时，Designer 依据 `SimulationIntent.missing_fields` 返回缺参诊断。进入求解前的参数均需通过参数范围检查、能力执行契约和 `SimulationCase.execution_readiness()`；默认要求全部字段来源及载荷/边界区域来源的置信度不低于 `0.80`。缺失或低于门槛的来源只能保留为可迁移案例，不能进入网格和求解。能力声明了 `model_case_ids` 时，`ModelParams.case_id` 必须属于声明集合。
 
 ### 单位与别名归一化
 
