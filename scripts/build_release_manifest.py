@@ -35,6 +35,9 @@ def build_document(root: Path) -> dict[str, Any]:
     if not sbom.is_file():
         raise FileNotFoundError(f"缺少 SBOM：{sbom}")
     artifact_paths.append(sbom)
+    audit_report = root / "dist" / "mechagent-python-runtime-audit.json"
+    if audit_report.is_file():
+        artifact_paths.append(audit_report)
 
     artifacts = [_artifact_record(root, path) for path in artifact_paths]
     return {

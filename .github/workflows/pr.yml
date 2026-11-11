@@ -41,7 +41,7 @@ jobs:
           python scripts/index_knowledge.py
           python -m mechagent.cli config validate
           python -m pip check
-          python scripts/audit_python_dependencies.py --runtime-only --timeout 30
+          python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
           python -m build packages/mechagent-core --no-isolation
           python -m build packages/mechagent --no-isolation
           python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
@@ -53,6 +53,7 @@ jobs:
           path: |
             dist/mechagent-sbom.spdx.json
             dist/mechagent-release-manifest.json
+            dist/mechagent-python-runtime-audit.json
             packages/mechagent-core/dist/*.whl
             packages/mechagent-core/dist/*.tar.gz
             packages/mechagent/dist/*.whl

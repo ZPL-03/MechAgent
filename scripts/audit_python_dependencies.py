@@ -61,7 +61,7 @@ def collect_requirements(root: Path, *, include_optional: bool = True) -> list[s
     return sorted(requirements, key=lambda item: (_distribution_name(item), item))
 
 
-def audit(root: Path, *, include_optional: bool, timeout: int) -> int:
+def audit(root: Path, *, include_optional: bool, timeout: int, output: Path | None = None) -> int:
     """用临时 requirements 文件调用 pip-audit，并返回其退出码。"""
 
     requirements = collect_requirements(root, include_optional=include_optional)
@@ -82,6 +82,9 @@ def audit(root: Path, *, include_optional: bool, timeout: int) -> int:
             "--timeout",
             str(timeout),
         ]
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            command.extend(["--output", str(output)])
         completed = subprocess.run(command, check=False, text=True)
     return completed.returncode
 
@@ -92,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--timeout", type=int, default=30, help="每个漏洞服务请求的超时时间（秒）。"
     )
+    parser.add_argument("--output", type=Path, help="将 JSON 审计结果写入文件。")
     parser.add_argument(
         "--runtime-only",
         action="store_true",
@@ -101,8 +105,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout <= 0:
         parser.error("--timeout 必须为正整数。")
     try:
+        root = args.root.resolve()
+        output = args.output
+        if output is not None and not output.is_absolute():
+            output = root / output
         return audit(
-            args.root.resolve(), include_optional=not args.runtime_only, timeout=args.timeout
+            root, include_optional=not args.runtime_only, timeout=args.timeout, output=output
         )
     except FileNotFoundError as exc:
         print(f"依赖审计输入缺失：{exc}", file=sys.stderr)
