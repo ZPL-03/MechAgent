@@ -16,6 +16,7 @@ from mechagent.evidence import atomic_json, sha256
 
 ACTIVE = ("starting", "running", "cancelling")
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
+DATABASE_SCHEMA_VERSION = 2
 
 
 class QueueFullError(ValueError):
@@ -36,11 +37,42 @@ class JobStore:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
-            current = connection.execute("PRAGMA user_version").fetchone()[0]
-            if current not in (0, 1):
+            current = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if current > DATABASE_SCHEMA_VERSION:
                 raise ValueError(f"不支持的作业数据库版本：{current}")
-            connection.executescript("""
-                CREATE TABLE IF NOT EXISTS jobs (
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._migrate(connection)
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _migrate(connection: sqlite3.Connection) -> None:
+        """在一个事务中完成可重复执行的向前迁移。
+
+        v1 是早期队列表结构；v2 增加迁移记录并确保提交时保存配置哈希。
+        迁移只做可回滚的加法操作。缺少配置文件的历史作业保留空哈希，worker
+        会拒绝执行并要求显式重新提交，避免把未经确认的旧输入静默求解。
+        """
+
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at REAL NOT NULL
+            )"""
+        )
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "jobs" not in tables:
+            connection.execute(
+                """
+                CREATE TABLE jobs (
                     job_id TEXT PRIMARY KEY, request TEXT NOT NULL,
                     use_llm_agents INTEGER NOT NULL, config_path TEXT NOT NULL,
                     cwd TEXT NOT NULL, status TEXT NOT NULL,
@@ -49,15 +81,52 @@ class JobStore:
                     error TEXT, error_code TEXT, idempotency_key TEXT UNIQUE,
                     parent_job_id TEXT REFERENCES jobs(job_id), result_hash TEXT,
                     config_hash TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS events (
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id TEXT NOT NULL REFERENCES jobs(job_id), payload TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at);
-                CREATE INDEX IF NOT EXISTS events_job ON events(job_id, sequence);
-                PRAGMA user_version=1;
-            """)
+                )
+                """
+            )
+        else:
+            columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "config_hash" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN config_hash TEXT")
+                rows = connection.execute("SELECT job_id,config_path FROM jobs").fetchall()
+                for row in rows:
+                    config = Path(str(row[1]))
+                    value = sha256(config) if config.is_file() else None
+                    connection.execute(
+                        "UPDATE jobs SET config_hash=? WHERE job_id=?", (value, row[0])
+                    )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL REFERENCES jobs(job_id), payload TEXT NOT NULL
+                )"""
+            )
+        connection.execute("CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS events_job ON events(job_id, sequence)")
+        known = {
+            int(row[0])
+            for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
+        }
+        now = time.time()
+        if 1 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(1,?)", (now,)
+            )
+        if 2 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(2,?)", (now,)
+            )
+        connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

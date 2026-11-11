@@ -6,10 +6,10 @@ import math
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mechagent.core.mesher import MeshResult
-from mechagent.core.models import ModelParams
+from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.orchestrator.intent import SimulationIntent
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.redaction import redact_sensitive_text
@@ -456,6 +456,7 @@ class TaskRunRecord(BaseModel):
     Args:
         task: 任务描述。
         model_params: 结构化仿真参数。
+        simulation_case: 版本化仿真案例契约。
         mesh_result: 网格生成结果。
         solver_result: 求解摘要。
         analysis_text: 工程分析文本。
@@ -478,6 +479,7 @@ class TaskRunRecord(BaseModel):
 
     task: TaskItem
     model_params: Optional[ModelParams] = None
+    simulation_case: Optional[SimulationCase] = None
     mesh_result: Optional[MeshResult] = None
     solver_result: SolverRunSummary = Field(default_factory=SolverRunSummary)
     post_summary: PostProcessingSummary = Field(default_factory=PostProcessingSummary)
@@ -486,6 +488,17 @@ class TaskRunRecord(BaseModel):
     mesh_llm_trace: Optional[AgentLLMTrace] = None
     figures: list[Path] = Field(default_factory=list)
     error: Optional[ErrorRecord] = None
+
+    @model_validator(mode="after")
+    def _derive_case_contract(self) -> "TaskRunRecord":
+        if self.model_params is not None and self.simulation_case is None:
+            raw_request = self.task.intent.raw_request if self.task.intent else None
+            parser = self.task.intent.source if self.task.intent else "legacy"
+            self.simulation_case = self.model_params.to_simulation_case(
+                raw_request=raw_request,
+                parser=parser,
+            )
+        return self
 
 
 class WorkflowResult(BaseModel):
@@ -557,6 +570,9 @@ class WorkflowResult(BaseModel):
                     "designer_llm_trace": _public_llm_trace(record.designer_llm_trace),
                     "model_params": record.model_params.model_dump(mode="json")
                     if record.model_params
+                    else None,
+                    "simulation_case": record.simulation_case.model_dump(mode="json")
+                    if record.simulation_case
                     else None,
                     "mesh_llm_trace": _public_llm_trace(record.mesh_llm_trace),
                     "mesh_result": record.mesh_result.model_dump(mode="json")

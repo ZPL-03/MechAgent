@@ -1,5 +1,15 @@
 """MechAgent 核心 Pydantic 数据模型。"""
 
+from mechagent.core.models.case import (
+    CASE_SCHEMA_VERSION,
+    CoordinateSystem,
+    Provenance,
+    RegionSpec,
+    RequestProvenance,
+    SimulationCase,
+    SolverControl,
+    UnitSystem,
+)
 from mechagent.core.models.geometry import (
     AnalysisType,
     BCType,
@@ -35,5 +45,13 @@ __all__ = [
     "MaterialType",
     "MeshSpec",
     "ModelParams",
+    "CASE_SCHEMA_VERSION",
+    "CoordinateSystem",
+    "Provenance",
+    "RegionSpec",
+    "RequestProvenance",
+    "SimulationCase",
+    "SolverControl",
     "StiffenerType",
+    "UnitSystem",
 ]

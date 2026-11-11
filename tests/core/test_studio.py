@@ -42,6 +42,22 @@ def test_studio_health_endpoint_reports_config(tmp_path: Path) -> None:
     assert isinstance(payload["static_ready"], bool)
 
 
+def test_studio_v1_routes_are_stable_and_legacy_routes_are_deprecated(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    client = TestClient(create_studio_app(config_path))
+
+    stable = client.get("/api/v1/health")
+    legacy = client.get("/api/health")
+
+    assert stable.status_code == 200
+    assert stable.headers["X-MechAgent-API-Version"] == "v1"
+    assert legacy.status_code == 200
+    assert legacy.headers["Deprecation"] == "true"
+    assert legacy.headers["Sunset"] == "2027-06-30"
+    assert client.post("/api/v1/jobs", json={"request": "   "}).status_code == 400
+
+
 def test_studio_diagnostics_endpoint_reuses_environment_doctor(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

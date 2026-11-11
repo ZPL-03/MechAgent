@@ -48,21 +48,31 @@ python -m mechagent.cli demo --example SC-25
 
 Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 
+稳定客户端使用 `/api/v1` 前缀。旧 `/api` 路径在兼容期内继续可用，并在响应中返回
+`Deprecation: true`、`Sunset: 2027-06-30` 和 successor link；新集成不得依赖旧路径。
+
 | 接口 | 输入与输出职责 |
 | --- | --- |
-| `GET /api/health` | 服务、配置与静态资源状态 |
-| `GET /api/diagnostics` | 脱敏环境检查；`llm=true` 触发远端连接检查 |
-| `GET /api/capabilities` | 已注册能力与工具绑定 |
-| `GET /api/examples` | 自然语言案例目录 |
-| `POST /api/inspect` | 请求与 `use_llm_agents`；任务、缺项和可执行状态 |
-| `POST /api/jobs` | 创建请求作业，返回作业标识 |
-| `GET /api/jobs/{job_id}` | 作业状态、事件与终态结果 |
-| `GET /api/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果 |
-| `POST /api/jobs/{job_id}/cancel` | 登记取消；终态请求保持终态 |
-| `POST /api/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
-| `GET /api/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
-| `POST /api/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
+| `GET /api/v1/health` | 服务、配置与静态资源状态 |
+| `GET /api/v1/diagnostics` | 脱敏环境检查；`llm=true` 触发远端连接检查 |
+| `GET /api/v1/capabilities` | 已注册能力与工具绑定 |
+| `GET /api/v1/examples` | 自然语言案例目录 |
+| `POST /api/v1/inspect` | 请求与 `use_llm_agents`；任务、缺项和可执行状态 |
+| `POST /api/v1/jobs` | 创建请求作业，返回作业标识 |
+| `GET /api/v1/jobs/{job_id}` | 作业状态、事件与终态结果 |
+| `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果 |
+| `POST /api/v1/jobs/{job_id}/cancel` | 登记取消；终态请求保持终态 |
+| `POST /api/v1/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
+| `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
+| `POST /api/v1/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
 
-`POST /api/jobs`、`POST /api/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。
+每个 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
+幂等语义与队列限制一致；认证、项目隔离和配额仍属于后续平台阶段，当前服务面向本机单用户。
+兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、
+`GET /api/examples`、`POST /api/inspect`、`POST /api/jobs`、`GET /api/jobs/{job_id}`、
+`GET /api/jobs`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
+`GET /api/jobs/{job_id}/evidence` 和 `POST /api/run`。
+
+`POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
 
 Studio 使用 SQLite WAL 本机持久队列，面向单机单用户，不提供多用户身份、权限管理、分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份、权限与网络边界设计。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。

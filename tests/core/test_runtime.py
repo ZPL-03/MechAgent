@@ -112,6 +112,44 @@ def test_future_database_version_is_rejected(tmp_path: Path) -> None:
         JobStore(database)
 
 
+def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) -> None:
+    database = tmp_path / "legacy.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE jobs (
+                job_id TEXT PRIMARY KEY, request TEXT NOT NULL,
+                use_llm_agents INTEGER NOT NULL, config_path TEXT NOT NULL,
+                cwd TEXT NOT NULL, status TEXT NOT NULL,
+                created_at REAL NOT NULL, started_at REAL, finished_at REAL,
+                heartbeat REAL, token TEXT, pid INTEGER, process_created REAL,
+                error TEXT, error_code TEXT, idempotency_key TEXT UNIQUE,
+                parent_job_id TEXT REFERENCES jobs(job_id), result_hash TEXT
+            );
+            CREATE TABLE events (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL REFERENCES jobs(job_id), payload TEXT NOT NULL
+            );
+            PRAGMA user_version=1;
+            """
+        )
+        connection.execute(
+            """INSERT INTO jobs(job_id,request,use_llm_agents,config_path,cwd,status,created_at)
+            VALUES('legacy-job','请求',0,?,?, 'queued',?)""",
+            (str(config), str(tmp_path), time.time()),
+        )
+
+    store = JobStore(database)
+    with store.connect() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
+    migrated = store.get("legacy-job")
+    assert migrated["config_hash"]
+    assert store.submit("新请求", False, config, max_queued=2)["status"] == "queued"
+
+
 def test_startup_failure_is_interrupted_without_reexecution(store: JobStore) -> None:
     submit(store)
     job = store.claim(1)

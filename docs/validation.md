@@ -38,6 +38,11 @@ Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190
 
 ## 质量门禁
 
+输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查
+`ModelParams` 与案例契约之间的兼容转换，以及未知未来 schema 的拒绝行为。运行层门禁
+检查 v1 数据库迁移、迁移记录、旧作业读取和未来数据库版本拒绝；API 门禁检查 `/api/v1`
+路由与旧 `/api` 兼容入口的弃用响应头。
+
 以下命令记录本机维护者完整验证所用解释器。公开用户和 CI 在激活独立 Python 环境后使用等价 `python` 命令执行同一组门禁。
 
 ```powershell
@@ -70,7 +75,7 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-本机 v0.2.0 的运行记录包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 完整测试为 507 passed，便携测试以最终门禁输出为准；两者均有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。完整门禁结果随 GitHub Release 的脱敏验证摘要提供。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 511 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
 
 ## 作业故障与证据校验
 

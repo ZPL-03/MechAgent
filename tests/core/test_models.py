@@ -20,6 +20,7 @@ from mechagent.core.models import (
     MaterialSpec,
     MeshSpec,
     ModelParams,
+    SimulationCase,
 )
 from mechagent.core.solver import SolverResult
 from mechagent.core.validation import tc01_model_params
@@ -123,6 +124,37 @@ def test_model_params_requires_loads_and_boundary_conditions() -> None:
 
     with pytest.raises(ValidationError):
         ModelParams.model_validate(params.model_copy(update={"bcs": []}).model_dump())
+
+
+def test_simulation_case_wraps_legacy_model_with_explicit_provenance() -> None:
+    params = tc01_model_params()
+    case = SimulationCase.from_model_params(
+        params,
+        raw_request="长1000mm钢悬臂梁静力分析",
+        parser="test-parser",
+        parser_version="1",
+    )
+
+    assert case.schema_version == 1
+    assert case.units.length == "mm"
+    assert case.coordinate_system.handedness == "right"
+    assert set(case.regions) == {"root", "tip"}
+    assert case.request is not None and case.request.parser == "test-parser"
+    restored = case.to_model_params()
+    assert restored.geometry == params.geometry
+    assert restored.metadata["case_schema_version"] == 1
+
+
+def test_simulation_case_rejects_future_schema_and_non_canonical_units() -> None:
+    params = tc01_model_params()
+    payload = SimulationCase.from_model_params(params).model_dump(mode="json")
+    payload["schema_version"] = 99
+    with pytest.raises(ValidationError):
+        SimulationCase.model_validate(payload)
+    payload = SimulationCase.from_model_params(params).model_dump(mode="json")
+    payload["units"]["length"] = "m"
+    with pytest.raises(ValidationError):
+        SimulationCase.model_validate(payload)
 
 
 def test_solver_run_summary_keeps_structured_and_extended_fields() -> None:

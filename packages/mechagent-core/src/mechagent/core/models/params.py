@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -16,6 +16,9 @@ from mechagent.core.models.geometry import (
     LoadType,
     MaterialType,
 )
+
+if TYPE_CHECKING:
+    from mechagent.core.models.case import SimulationCase
 
 
 class CompositeSpec(BaseModel):
@@ -337,3 +340,21 @@ class ModelParams(BaseModel):
     load_case: str = ""
     mesh_file: Optional[Path] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def to_simulation_case(
+        self,
+        *,
+        raw_request: str | None = None,
+        parser: str = "legacy",
+        parser_version: str = "",
+    ) -> SimulationCase:
+        """显式转换为版本化 `SimulationCase`，保持旧调用方兼容。"""
+
+        from mechagent.core.models.case import SimulationCase
+
+        return SimulationCase.from_model_params(
+            self,
+            raw_request=raw_request,
+            parser=parser,
+            parser_version=parser_version,
+        )

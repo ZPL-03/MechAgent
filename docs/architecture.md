@@ -77,6 +77,21 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `mesh_file`：网格阶段生成并传递给求解器的 `.inp` 文件路径。
 - `metadata`：输入来源和扩展诊断信息，不作为求解控制字段。
 
+跨 API、编排和工具边界使用 `SimulationCase` 作为版本化封装。它复用同一个
+`ModelParams` 实例，不复制几何、材料、载荷或边界字段，并额外包含：
+
+- `schema_version`：当前案例契约版本为 `1`；未知未来版本拒绝校验。
+- `units`：显式的 N-mm-MPa-tonne/mm³-°C 基线单位系统。
+- `coordinate_system`：右手坐标系名称、原点和轴名称。
+- `regions`：载荷和边界区域的命名、区域类型、稳定标识及来源。
+- `request`：原始用户请求、解析器名称和解析版本。
+- `provenance`：几何、材料、载荷、边界、网格和分析设置的来源与置信度。
+- `solver_control`：可选迭代、容差和时间步字段；具体后端未声明支持时不得自行解释。
+
+`ModelParams.to_simulation_case()` 和 `SimulationCase.to_model_params()` 是兼容转换
+入口。当前结构静力工作流在 Designer 输出后生成案例摘要，求解器仍接收兼容的
+`ModelParams`；这保证旧工具接口稳定，同时让 API、报告和证据可以逐步迁移到统一案例契约。
+
 Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_ranges()`，并调用当前 `SimulationCapability.execution_validator` 声明的能力执行契约。内置结构静力能力绑定 `mechagent.core.rules.ensure_static_execution_contract()`；该契约约束结构静力执行路径的分析类型、材料类型、几何必需尺寸、几何-单元组合、边界条件、载荷区域和载荷方向。参数范围以 `mechagent.core.rules` 作为运行时单点来源；执行契约由能力注册项显式绑定。网格尺寸范围按参与网格划分的代表长度判断：梁使用长度，板、壳和加筋板使用面内长宽，实体使用三维尺寸最小值。
 
 ### 求解摘要状态
@@ -110,7 +125,7 @@ Studio 的运行层位于应用包 `runtime/`，不替代 core 的工具执行�
 
 状态依次为 `queued → starting → running → succeeded/failed`，取消经过 `cancelling → cancelled`；未登记或失联的执行进程为 `interrupted`。取消先于结果提交时，worker 不得覆盖取消状态。进程身份使用 PID 与创建时间核验；Windows worker 先加入带 `KILL_ON_JOB_CLOSE` 的 Job Object，再登记身份和执行工作，隔离失败不开始求解。Windows 下 worker 异常退出会终止其后代。POSIX 使用独立进程组处理主动取消；worker 被外部单独强杀后的孤儿回收尚无平台验证，不作完整进程树恢复承诺。
 
-`studio` 配置定义数据库路径、并发、排队、启动登记、心跳和总执行时限。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 1，不支持的版本拒绝打开。队列和结果没有自动删除策略；归档由维护者管理。
+`studio` 配置定义数据库路径、并发、排队、启动登记、心跳和总执行时限。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 2。v1 队列结构可在事务内迁移到 v2；v2 使用 `schema_migrations` 记录已应用版本，并为历史作业补充配置哈希字段。缺少原配置文件的历史作业保留未验证哈希，worker 会拒绝执行并要求显式重新提交。未知未来版本拒绝打开。队列和结果没有自动删除策略；归档由维护者管理。
 
 每个 Studio 作业使用数据库同目录下的 `jobs/<job_id>/`，其中 `runs/` 保存 SDK 运行、`result.json` 保存公开响应、`manifest.json` 保存清单。原始 `worker.log` 仅作本地故障诊断，不通过 API 公开，也不纳入清单；日志目录仍应按工程数据管理。队列保存请求、配置路径及其源文件哈希，不保存展开后的密钥。worker 执行前校验配置文件哈希，配置变化导致显式失败；`.env` 与进程环境在 worker 启动时解析，环境变更不在源文件哈希覆盖范围内。
 

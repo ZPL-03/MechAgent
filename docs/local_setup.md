@@ -160,3 +160,7 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 每个 worker 的求解器 CPU 配置仍由工具配置控制；并发数与每个求解器的核数共同决定资源占用。SDK/CLI 直接运行不受 Studio 并发限制。
 
 worker 使用当前 Python 环境重新导入内置能力和工具。父进程中临时调用注册函数的插件不会自动传播到独立 worker；此类插件可使用 SDK，Studio 插件发现与打包入口尚无发布契约。配置文件在提交后变化会阻止该任务执行，显式重试读取当前配置。运行目录、状态语义与备份要求见[架构](architecture.md)。
+
+SQLite 数据库由 `JobStore` 在启动时执行事务迁移。当前 schema 为 2，迁移记录保存在
+`schema_migrations` 表；启动时发现高于当前版本的数据库会拒绝打开。备份数据库时须在
+服务停止且所有作业处于终态后复制数据库文件、WAL 文件和同目录 `jobs/` 产物。

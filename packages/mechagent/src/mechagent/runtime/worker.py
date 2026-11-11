@@ -37,6 +37,8 @@ def execute(store: JobStore, job_id: str, token: str) -> None:
     thread = Thread(target=heartbeat, name="job-heartbeat", daemon=True)
     thread.start()
     try:
+        if not job["config_hash"]:
+            raise ValueError("历史作业缺少配置文件哈希；请显式重新提交该作业。")
         if sha256(Path(job["config_path"])) != job["config_hash"]:
             raise ValueError("配置文件与提交时的哈希不一致；请使用当前配置显式重试。")
         agent = MechAgent.from_config(job["config_path"])

@@ -9,23 +9,23 @@ import type {
 } from "../types";
 
 export async function fetchHealth(): Promise<StudioHealth> {
-  const response = await fetch("/api/health");
+  const response = await fetch("/api/v1/health");
   return (await response.json()) as StudioHealth;
 }
 
 export async function fetchDiagnostics() {
-  const response = await fetch("/api/diagnostics");
+  const response = await fetch("/api/v1/diagnostics");
   return await response.json();
 }
 
 export async function fetchCapabilities(): Promise<StudioCapability[]> {
-  const response = await fetch("/api/capabilities");
+  const response = await fetch("/api/v1/capabilities");
   const data = (await response.json()) as StudioCapabilitiesResponse;
   return Array.isArray(data.capabilities) ? data.capabilities : [];
 }
 
 export async function fetchExamples(): Promise<StudioExample[]> {
-  const response = await fetch("/api/examples");
+  const response = await fetch("/api/v1/examples");
   const data = (await response.json()) as StudioExamplesResponse;
   return Array.isArray(data.examples) ? data.examples : [];
 }
@@ -34,7 +34,7 @@ export async function inspectRequest(
   request: string,
   signal: AbortSignal
 ): Promise<StudioInspectionResponse> {
-  const response = await fetch("/api/inspect", {
+  const response = await fetch("/api/v1/inspect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ request, use_llm_agents: false }),
@@ -48,7 +48,7 @@ export async function createJob(
   useLlmAgents: boolean,
   idempotencyKey: string = crypto.randomUUID()
 ): Promise<StudioJobResponse> {
-  const response = await fetch("/api/jobs", {
+  const response = await fetch("/api/v1/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ request, use_llm_agents: useLlmAgents })
@@ -73,7 +73,7 @@ export async function retryJob(jobId: string): Promise<StudioJobResponse> {
 }
 
 async function jobAction(jobId: string, action: string): Promise<StudioJobResponse> {
-  const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/${action}`, {
+  const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/${action}`, {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }
   });
   const payload = await response.json();
@@ -82,21 +82,21 @@ async function jobAction(jobId: string, action: string): Promise<StudioJobRespon
 }
 
 export async function fetchJobs(): Promise<StudioJobResponse[]> {
-  const response = await fetch("/api/jobs?limit=10");
+  const response = await fetch("/api/v1/jobs?limit=10");
   const payload = await response.json();
   if (!response.ok) throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
   return payload.jobs;
 }
 
 export async function fetchEvidence(jobId: string): Promise<{ valid: boolean; errors: string[] }> {
-  const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/evidence`);
+  const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/evidence`);
   const payload = await response.json();
   if (!response.ok) throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
   return payload;
 }
 
 export async function fetchJob(jobId: string): Promise<StudioJobResponse> {
-  const response = await fetch(`/api/jobs/${jobId}`);
+  const response = await fetch(`/api/v1/jobs/${jobId}`);
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(String(payload.detail ?? "作业状态读取失败。"));

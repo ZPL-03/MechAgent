@@ -6,14 +6,14 @@ import json
 import sys
 import time
 import webbrowser
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlencode
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +68,20 @@ def create_studio_app(
         redoc_url=None,
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def api_compatibility_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/v1/"):
+            response.headers["X-MechAgent-API-Version"] = "v1"
+        elif path.startswith("/api/") and path not in {"/api/docs", "/api/openapi.json"}:
+            response.headers["Deprecation"] = "true"
+            response.headers["Sunset"] = "2027-06-30"
+            response.headers["Link"] = '</api/v1>; rel="successor-version"'
+        return response
 
     def runtime() -> JobManager:
         if manager is None:
@@ -244,6 +258,24 @@ def create_studio_app(
             "errors": errors,
             "manifest": json.loads(path.read_text(encoding="utf-8")),
         }
+
+    # v1 是稳定客户端边界；旧 /api 路径保留兼容期并通过响应头声明迁移终点。
+    _versioned_routes = (
+        ("/api/v1/health", health, ["GET"]),
+        ("/api/v1/diagnostics", diagnostics, ["GET"]),
+        ("/api/v1/capabilities", capabilities, ["GET"]),
+        ("/api/v1/examples", examples, ["GET"]),
+        ("/api/v1/run", run_simulation, ["POST"]),
+        ("/api/v1/inspect", inspect_simulation, ["POST"]),
+        ("/api/v1/jobs", create_job, ["POST"]),
+        ("/api/v1/jobs/{job_id}", read_job, ["GET"]),
+        ("/api/v1/jobs", list_jobs, ["GET"]),
+        ("/api/v1/jobs/{job_id}/cancel", cancel_job, ["POST"]),
+        ("/api/v1/jobs/{job_id}/retry", retry_job, ["POST"]),
+        ("/api/v1/jobs/{job_id}/evidence", job_evidence, ["GET"]),
+    )
+    for path, endpoint, methods in _versioned_routes:
+        app.add_api_route(path, endpoint, methods=methods, include_in_schema=True)
 
     @app.get("/{full_path:path}")
     def serve_studio(full_path: str) -> Response:

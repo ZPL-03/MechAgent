@@ -17,6 +17,7 @@ describe("durable job lifecycle", () => {
     vi.stubGlobal("fetch", fetch);
     await createJob("beam", false, "submission-1");
     await createJob("beam", false, "submission-1");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/jobs");
     for (const call of fetch.mock.calls) expect(call[1].headers["Idempotency-Key"]).toBe("submission-1");
   });
   it("exposes a missing persisted job instead of inventing a result", async () => {
