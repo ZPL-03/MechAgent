@@ -338,6 +338,9 @@ def test_build_release_manifest_records_hashes_and_versions(tmp_path: Path) -> N
     assert document["version"] == "1.2.3"
     assert len(document["artifacts"]) == 5
     assert all(len(item["sha256"]) == 64 for item in document["artifacts"])
+    assert document["provenance"]["schemaVersion"] == "mechagent.build-provenance.v1"
+    assert document["provenance"]["source"]["gitCommit"] == document["gitCommit"]
+    assert document["provenance"]["builder"]["pythonVersion"]
 
 
 def test_build_release_manifest_rejects_missing_artifacts(tmp_path: Path) -> None:

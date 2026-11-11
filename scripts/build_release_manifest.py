@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -42,6 +43,7 @@ def build_document(root: Path) -> dict[str, Any]:
         "version": versions["mechagent"],
         "gitCommit": _git_commit(root),
         "created": _created_at(),
+        "provenance": _provenance(root),
         "artifacts": artifacts,
     }
 
@@ -113,6 +115,54 @@ def _git_commit(root: Path) -> str:
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
     return completed.stdout.strip() or "unknown"
+
+
+def _git_dirty(root: Path) -> bool | str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return bool(completed.stdout.strip())
+
+
+def _command_version(command: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            [*command, "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unavailable"
+    output = (completed.stdout or completed.stderr).strip().splitlines()
+    return output[0] if output else "unknown"
+
+
+def _provenance(root: Path) -> dict[str, Any]:
+    """记录可复核的构建上下文，不宣称签名或可信构建者身份。"""
+
+    return {
+        "schemaVersion": "mechagent.build-provenance.v1",
+        "source": {
+            "gitCommit": _git_commit(root),
+            "gitDirty": _git_dirty(root),
+        },
+        "builder": {
+            "pythonVersion": platform.python_version(),
+            "pythonImplementation": platform.python_implementation(),
+            "platform": platform.platform(),
+            "nodeVersion": _command_version(["node"]),
+        },
+        "reproducibility": {
+            "sourceDateEpoch": os.environ.get("SOURCE_DATE_EPOCH") or None,
+        },
+    }
 
 
 def _created_at() -> str:
