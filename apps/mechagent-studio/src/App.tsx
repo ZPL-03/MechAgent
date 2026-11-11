@@ -225,6 +225,7 @@ export function App() {
   const runtimeStatusInfo = runtimeStatus(diagnostics, health);
 
   async function runSimulation(requestOverride?: string) {
+    if (running) return;
     const requestText = (requestOverride ?? request).trim();
     if (!requestText) {
       setResult(runError("请输入结构、材料、边界和载荷信息。"));
@@ -234,6 +235,8 @@ export function App() {
       setRequest(requestText);
     }
     setRunning(true);
+    setResult(null);
+    setActiveHistoryId(null);
     setActiveJob(null);
     setMonitorTick(0);
     setSelectedTaskIndex(0);
@@ -283,6 +286,7 @@ export function App() {
   }
 
   function selectHistoryItem(item: RunHistoryItem) {
+    if (running) return;
     setRequest(item.request);
     setResult(item.result);
     setActiveJob(null);
