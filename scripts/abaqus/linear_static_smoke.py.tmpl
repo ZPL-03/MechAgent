@@ -1,0 +1,75 @@
+# -*- coding: utf-8 -*-
+"""Abaqus/CAE runtime: geometry, mesh, static solve and ODB extraction."""
+from __future__ import print_function
+
+import json
+import os
+from abaqus import mdb
+from abaqusConstants import (THREE_D, DEFORMABLE_BODY, ON, OFF, C3D8R,
+                             STANDARD, HEX, STRUCTURED, UNSET)
+import mesh
+from odbAccess import openOdb
+
+model = mdb.Model(name="MechAgentSmoke")
+sketch = model.ConstrainedSketch(name="profile", sheetSize=250.0)
+sketch.rectangle(point1=(0.0, 0.0), point2=(100.0, 10.0))
+part = model.Part(name="Block", dimensionality=THREE_D, type=DEFORMABLE_BODY)
+part.BaseSolidExtrude(sketch=sketch, depth=10.0)
+material = model.Material(name="Steel")
+material.Elastic(table=((210000.0, 0.3),))
+model.HomogeneousSolidSection(name="Section", material="Steel")
+part.Set(name="Body", cells=part.cells[:])
+part.SectionAssignment(region=part.sets["Body"], sectionName="Section")
+part.setMeshControls(regions=part.cells[:], elemShape=HEX, technique=STRUCTURED)
+part.setElementType(regions=(part.cells[:],), elemTypes=(mesh.ElemType(
+    elemCode=C3D8R, elemLibrary=STANDARD),))
+part.seedPart(size=5.0)
+part.generateMesh()
+assembly = model.rootAssembly
+instance = assembly.Instance(name="Block-1", part=part, dependent=ON)
+assembly.Set(name="Left", faces=instance.faces.findAt(((0.0, 5.0, 5.0),)))
+assembly.Set(name="Origin", vertices=instance.vertices.findAt(((0.0, 0.0, 0.0),)))
+assembly.Set(name="Roll", vertices=instance.vertices.findAt(((0.0, 10.0, 0.0),)))
+assembly.Surface(name="Right", side1Faces=instance.faces.findAt(((100.0, 5.0, 5.0),)))
+# Restrain rigid motion while allowing the exact Poisson contraction.
+model.DisplacementBC(name="Axial", createStepName="Initial", region=assembly.sets["Left"],
+                     u1=0.0, u2=UNSET, u3=UNSET)
+model.DisplacementBC(name="Pin", createStepName="Initial", region=assembly.sets["Origin"],
+                     u1=UNSET, u2=0.0, u3=0.0)
+model.DisplacementBC(name="Rotation", createStepName="Initial", region=assembly.sets["Roll"],
+                     u1=UNSET, u2=UNSET, u3=0.0)
+model.StaticStep(name="Load", previous="Initial", nlgeom=OFF)
+model.Pressure(name="Tension", createStepName="Load", region=assembly.surfaces["Right"],
+               magnitude=-1.0)
+job = mdb.Job(name="mechagent_abaqus_smoke", model=model.name, numCpus=1)
+job.writeInput(consistencyChecking=ON)
+job.submit(consistencyChecking=ON)
+job.waitForCompletion()
+with open("mechagent_abaqus_smoke.sta", "r") as stream:
+    status_text = stream.read()
+if "THE ANALYSIS HAS COMPLETED SUCCESSFULLY" not in status_text:
+    raise RuntimeError("Abaqus status file does not confirm completion")
+if os.path.exists("mechagent_abaqus_smoke.lck"):
+    raise RuntimeError("Abaqus output database is still locked")
+odb = openOdb(path="mechagent_abaqus_smoke.odb", readOnly=True)
+try:
+    frame = odb.steps["Load"].frames[-1]
+    end_labels = set(node.label for node in odb.rootAssembly.instances["BLOCK-1"].nodes
+                     if abs(node.coordinates[0] - 100.0) < 1.0e-5)
+    end_u = [float(value.data[0]) for value in frame.fieldOutputs["U"].values
+             if value.nodeLabel in end_labels]
+    stresses = [float(value.data[0]) for value in frame.fieldOutputs["S"].values]
+    result = {
+        "solver": "Abaqus/Standard", "analysis": "linear_static",
+        "model": "100 x 10 x 10 mm block, uniaxial tension",
+        "element_type": "C3D8R", "node_count": len(part.nodes),
+        "element_count": len(part.elements), "volume_mm3": part.getVolume(part.cells[:]),
+        "end_ux_mm": sum(end_u) / len(end_u), "reference_ux_mm": 100.0 / 210000.0,
+        "mean_s11_mpa": sum(stresses) / len(stresses), "reference_s11_mpa": 1.0,
+        "job_status": "COMPLETED", "completion_source": "solver_sta",
+        "cae_job_status": str(job.status)
+    }
+finally:
+    odb.close()
+with open("result.json", "w") as stream:
+    json.dump(result, stream, indent=2, sort_keys=True)

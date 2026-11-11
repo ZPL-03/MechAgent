@@ -128,40 +128,18 @@ python scripts/run_llm_smoke.py
 
 Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库默认工况 `SC-27`，打开 Studio 并自动提交长圆槽孔薄板静力请求；`--example SC-25` 切换为多孔薄板工况。`--open-browser` 打开浏览器入口；监听地址为 `0.0.0.0` 或 `::` 时，浏览器入口使用 `127.0.0.1`。`--request`、`--llm-agents` 和 `--view geometry|mesh|result` 生成带自然语言请求、参数补全状态和初始视图的可复现工作台入口。`--auto-run` 与 `--request` 同时使用时，工作台页面加载后自动提交当前请求。
 
-## 验证命令
+## 验证与清理
+
+环境检查使用 `python scripts/check_env.py`；便携环境使用 `--profile portable`。质量门禁、`scripts/run_llm_smoke.py`、标准验证与包检查统一见[验证与质量门禁](validation.md)。
+
+`scripts/clean_artifacts.py` 删除再生成输出、知识索引、node_modules 与构建缓存。执行前将需保留的运行证据和发布包存放到仓库外；`.env`、配置、公开知识源和正式源代码不属于再生成产物。
+
+## Abaqus 本机检查
+
+安装 Abaqus/CAE 与 Standard 并具备可用许可后执行：
 
 ```powershell
-python scripts/check_env.py
-python scripts/check_env.py --help
-npm --prefix apps/mechagent-studio ci --no-audit --no-fund
-npm --prefix apps/mechagent-studio run build
-python -m ruff format packages tests scripts
-python -m ruff check packages tests scripts
-python -m mypy packages scripts tests
-python -m pytest
-python scripts/run_benchmarks.py
-python scripts/run_natural_language_cases.py
-python scripts/run_llm_smoke.py
-python scripts/build_knowledge.py
-python scripts/index_knowledge.py
-python -m mechagent.cli config validate
-python -m mechagent.cli benchmark --json
-python -m pip check
-python -m build packages/mechagent-core --no-isolation
-python -m build packages/mechagent --no-isolation
-python scripts/check_wheel_install.py
-python -m mkdocs build --strict
-python scripts/clean_artifacts.py
+python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 ```
 
-配置默认工具和能力默认工具均使用工厂注册名称校验；能力默认工具在注册时规范化为工厂注册名。
-
-## 标准算例结果
-
-| 编号 | 物理量 | CalculiX | 解析参考 | 相对误差 | 阈值 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| TC-01 | `tip_deflection` | 14.896 mm | 14.880952 mm | 0.101120% | 1% |
-| TC-02 | `center_deflection` | 0.155959 mm | 0.154233 mm | 1.118913% | 2% |
-| TC-03 | `axial_displacement` | 0.00949132 mm | 0.00952381 mm | 0.341140% | 8% |
-| TC-04 | `tip_deflection` | 5.58805 mm | 5.580357 mm | 0.137856% | 2% |
-| TC-05 | `axial_displacement` | 0.00949132 mm | 0.00952381 mm | 0.341140% | 8% |
+启动器路径由 `--abaqus` 指定，不写入项目默认求解配置。检查使用 Abaqus 自带 Python 运行几何、网格、求解与 ODB 提取；外层脚本使用项目 Python。该检查不将 Abaqus 注册为 Studio、CLI run 或 SDK run 的生产后端，范围见[工具说明](solver_mesh.md)。

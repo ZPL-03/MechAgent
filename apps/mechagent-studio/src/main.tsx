@@ -6,11 +6,14 @@ import "./theme/base.css";
 import "./styles.css";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { App } from "./App";
+import { LocaleProvider } from "./i18n/LocaleProvider";
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <ThemeProvider>
-      <App />
+      <LocaleProvider>
+        <App />
+      </LocaleProvider>
     </ThemeProvider>
-  </StrictMode>
+  </StrictMode>,
 );

@@ -4,6 +4,8 @@
  */
 
 :root {
+  --viewport-overlay-top: 100px;
+  --report-table-min: 580px;
   /* 字体栈 */
   --font-ui:
     "Segoe UI Variable Text", "Segoe UI", "Inter", "SF Pro Text", "Roboto",
@@ -41,9 +43,9 @@
   --space-8: 32px;
 
   /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
   --radius-pill: 999px;
 
   /* 层级 */
@@ -60,10 +62,17 @@
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* 布局 */
-  --layout-gutter: 16px;
-  --layout-gap: 14px;
-  --rail-left: 320px;
-  --rail-right: 360px;
-  --topbar-height: 56px;
-  --content-max: 1840px;
+  --layout-gutter: 20px;
+  --layout-gap: 0px;
+  --rail-left: 308px;
+  --rail-right: 300px;
+  --topbar-height: 64px;
+  --content-max: 2400px;
+  --control-height: 34px;
+  --control-touch: 44px;
+  --request-height: 184px;
+  --viewport-height: 420px;
+  --border-width: 1px;
+  --axis-size: 92px;
+  --inspector-max: 420px;
 }

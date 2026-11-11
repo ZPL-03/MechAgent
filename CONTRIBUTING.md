@@ -1,68 +1,20 @@
 # 贡献指南
 
-MechAgent 采用 monorepo 结构。贡献者先创建并激活独立 Python 环境，再安装项目依赖：
+贡献应围绕可运行代码、明确的能力边界和可复现证据。安装与本机配置见[本地开发配置](docs/local_setup.md)，完整门禁命令见[验证与质量门禁](docs/validation.md)。
 
-```powershell
-py -3.10 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e packages/mechagent-core
-python -m pip install -e "packages/mechagent[dev,docs]"
-```
+## 实现规则
 
-Conda 环境可使用：
+- core 管理工程数据与工具契约；应用包管理编排、SDK、CLI、LLM、知识和 Studio 服务。
+- 能力通过 `SimulationCapability` 绑定解析、执行检查和评价；工具沿用已存在的注册 API。没有注册接口的工具族先明确契约，文档不得宣称已接入。
+- Pydantic 模型、枚举、工程范围和单位保持单点定义。错误保留来源与诊断，任务失败不覆盖其他任务的产物。
+- 前端保持 `theme/`、`i18n/`、`lib/`、`hooks/`、`components/` 边界；所有 HTTP 请求集中在 `lib/api.ts`，样式消费语义令牌。
+- 文档描述当前职责、输入、输出、约束和失败行为。开发计划与实现事实分开，变更日志独立记录版本内容。注释只解释意图、不变量和不明显的边界。
+- 不提交 `.env`、凭据、模型私密数据、求解缓存或本机安装目录。许可证与外部程序安装由使用者管理。
 
-```powershell
-conda create -n AGENT python=3.10 -y
-conda activate AGENT
-python -m pip install --upgrade pip
-python -m pip install -e packages/mechagent-core
-python -m pip install -e "packages/mechagent[dev,docs]"
-```
+## 提交与验收
 
-本机 `.env` 提供 `URL`、`API_KEY`、`MODEL_NAME` 和 `CALCULIX_CCX`。
-公开配置中的求解器路径为 `${CALCULIX_CCX:-ccx}`，外部环境可直接使用 PATH 中的 `ccx`
-或通过环境变量指定 CalculiX 可执行文件。
-`.env.example` 保留公开模板值。
+公开 PR 便携门禁使用 Python 3.10、Node.js 22 和 `pytest -m "not real_solver"`，不依赖本机 D 盘路径、CalculiX 可执行文件或远端 LLM 凭证。维护者发布前运行本地完整门禁，包括真实求解和远端 LLM smoke。
 
-Studio 前端源码使用 Node.js 构建。构建产物写入 Python 包的静态资源目录。前端目录结构、模块边界与样式约定见 [docs/frontend_architecture.md](docs/frontend_architecture.md)，设计令牌与主题规范见 [docs/design_system.md](docs/design_system.md)：
+求解相关变更提供输入、实际输出、参考依据、误差和阈值；能力扩展还需自然语言案例、报告字段与失败测试。前端变更执行 `npm --prefix apps/mechagent-studio run build`，提交静态产物，并验证双语、主题、响应式与键盘操作。界面截图须对应最终代码。
 
-```powershell
-npm --prefix apps/mechagent-studio ci --no-audit --no-fund
-npm --prefix apps/mechagent-studio run build
-```
-
-公开 PR 便携门禁由 GitHub Actions 执行，使用 Python 3.10、Node.js 22、
-`scripts/check_env.py --profile portable`、Studio 前端构建和
-`pytest -m "not real_solver"`，不依赖本机 D 盘路径、CalculiX 可执行文件或远端 LLM 凭证。
-维护者发布前运行本地完整门禁：
-
-```powershell
-python scripts/check_env.py
-npm --prefix apps/mechagent-studio ci --no-audit --no-fund
-npm --prefix apps/mechagent-studio run build
-python -m ruff format packages tests scripts
-python -m ruff check packages tests scripts
-python -m mypy packages scripts tests
-python -m pytest
-python scripts/run_benchmarks.py
-python scripts/run_natural_language_cases.py
-python scripts/run_llm_smoke.py
-python scripts/build_knowledge.py
-python scripts/index_knowledge.py
-python -m mechagent.cli config validate
-python -m pip check
-python -m build packages/mechagent-core --no-isolation
-python -m build packages/mechagent --no-isolation
-python scripts/check_wheel_install.py
-python -m mkdocs build --strict
-python scripts/clean_artifacts.py
-```
-
-真实 CalculiX 求解验证和远端 LLM Agent smoke 验证由本地完整门禁执行。
-
-自然语言验证示例：
-
-```powershell
-python -m mechagent.cli run "求解长400mm、宽240mm、厚6mm、中心圆孔孔径60mm、材料钢的开孔薄板，四边简支，承受0.004MPa向下均布压力的静力响应"
-```
+提交说明描述最终行为和验证范围；未执行的检查或尚无参考的能力明确标注。清理只能针对已确认的再生成产物，清理命令和保护范围见[验证说明](docs/validation.md)。

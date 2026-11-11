@@ -1,3 +1,4 @@
+import { useI18n } from "./i18n/LocaleProvider";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, LoaderCircle } from "lucide-react";
 import type { ExampleFilter, RunHistoryItem, SideTab } from "./lib/uiTypes";
@@ -7,13 +8,17 @@ import {
   JOB_POLL_INTERVAL_MS,
   MAX_HISTORY_ITEMS,
   RENDER_MODES,
-  URL_SYNC_DEBOUNCE_MS
+  URL_SYNC_DEBOUNCE_MS,
 } from "./lib/constants";
 import { createJob, fetchJob } from "./lib/api";
 import { writeClipboardText } from "./lib/clipboard";
 import { reproducibleCliCommand } from "./lib/cli";
 import { runtimeStatus } from "./lib/diagnostics";
-import { downloadReport, downloadSummaryJson, downloadVisualization } from "./lib/download";
+import {
+  downloadReport,
+  downloadSummaryJson,
+  downloadVisualization,
+} from "./lib/download";
 import { displayExamples, filterExamples } from "./lib/examples";
 import { isActiveJob, recentJobEvents, runError, sleep } from "./lib/job";
 import {
@@ -21,11 +26,15 @@ import {
   metricItems,
   runOutcome,
   studyFacts,
-  verificationItems
+  verificationItems,
 } from "./lib/results";
 import { buildAgentChain } from "./lib/agentChain";
 import { buildStageRows } from "./lib/stages";
-import { createHistoryItem, loadRunHistory, saveRunHistory } from "./lib/storage";
+import {
+  createHistoryItem,
+  loadRunHistory,
+  saveRunHistory,
+} from "./lib/storage";
 import {
   initialAutoRunFromUrl,
   initialParameterCompletionFromUrl,
@@ -33,9 +42,12 @@ import {
   initialRequestFromUrl,
   removeAutoRunQuery,
   replaceStudioUrl,
-  studioWorkspaceLink
+  studioWorkspaceLink,
 } from "./lib/url";
-import { defaultRenderModeIndex, visualizationsForTask } from "./lib/visualization";
+import {
+  defaultRenderModeIndex,
+  visualizationsForTask,
+} from "./lib/visualization";
 import { useInspection } from "./hooks/useInspection";
 import { useStudioBootstrap } from "./hooks/useStudioBootstrap";
 import { useToast } from "./hooks/useToast";
@@ -44,46 +56,59 @@ import { EmptyState } from "./components/common";
 import { InspectorRail } from "./components/Inspector";
 import { SidePanel } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
-import { ReportPanel, ViewportPanel, WorkflowStepper } from "./components/Workspace";
+import {
+  ReportPanel,
+  ViewportPanel,
+  WorkflowStepper,
+} from "./components/Workspace";
 
 const ThreeViewport = lazy(() =>
-  import("./ThreeViewport").then((module) => ({ default: module.ThreeViewport }))
+  import("./ThreeViewport").then((module) => ({
+    default: module.ThreeViewport,
+  })),
 );
 
 export function App() {
+  const { t } = useI18n();
   const autoRunRequested = useRef(initialAutoRunFromUrl());
   const autoRunStarted = useRef(false);
   const [request, setRequest] = useState(() => initialRequestFromUrl());
   const [useParameterCompletion, setUseParameterCompletion] = useState(() =>
-    initialParameterCompletionFromUrl()
+    initialParameterCompletionFromUrl(),
   );
   const [running, setRunning] = useState(false);
-  const [activeJob, setActiveJob] = useState<Awaited<ReturnType<typeof createJob>> | null>(null);
+  const [activeJob, setActiveJob] = useState<Awaited<
+    ReturnType<typeof createJob>
+  > | null>(null);
   const [monitorTick, setMonitorTick] = useState(0);
   const [result, setResult] = useState<StudioRunResponse | null>(null);
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [selectedVisualIndex, setSelectedVisualIndex] = useState(0);
   const [selectedRenderModeIndex, setSelectedRenderModeIndex] = useState(() =>
-    initialRenderModeIndexFromUrl()
+    initialRenderModeIndexFromUrl(),
   );
   const [selectedSideTab, setSelectedSideTab] = useState<SideTab>("examples");
   const [exampleFilter, setExampleFilter] = useState<ExampleFilter>("all");
   const [exampleQuery, setExampleQuery] = useState("");
-  const [history, setHistory] = useState<RunHistoryItem[]>(() => loadRunHistory());
-  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
-  const [recentlyClearedHistory, setRecentlyClearedHistory] = useState<RunHistoryItem[] | null>(
-    null
+  const [history, setHistory] = useState<RunHistoryItem[]>(() =>
+    loadRunHistory(),
   );
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [recentlyClearedHistory, setRecentlyClearedHistory] = useState<
+    RunHistoryItem[] | null
+  >(null);
 
-  const { health, diagnostics, capabilities, catalogExamples } = useStudioBootstrap();
+  const { health, diagnostics, capabilities, catalogExamples } =
+    useStudioBootstrap();
   const { inspection, inspectionRunning } = useInspection(request);
   const { notice, showNotice } = useToast();
 
   const activeHistoryItem = useMemo(
     () => history.find((item) => item.id === activeHistoryId) ?? null,
-    [activeHistoryId, history]
+    [activeHistoryId, history],
   );
-  const selectedRenderMode = RENDER_MODES[selectedRenderModeIndex] ?? RENDER_MODES[0];
+  const selectedRenderMode =
+    RENDER_MODES[selectedRenderModeIndex] ?? RENDER_MODES[0];
 
   useEffect(() => {
     if (!recentlyClearedHistory) {
@@ -131,49 +156,72 @@ export function App() {
   const tasks = result?.summary.tasks ?? [];
   const examples = useMemo(
     () => displayExamples(catalogExamples, capabilities),
-    [catalogExamples, capabilities]
+    [catalogExamples, capabilities],
   );
   const filteredExamples = useMemo(
     () => filterExamples(examples, exampleFilter, exampleQuery),
-    [exampleFilter, exampleQuery, examples]
+    [exampleFilter, exampleQuery, examples],
   );
 
   const selectedTask = tasks[selectedTaskIndex] ?? tasks[0] ?? null;
-  const taskVisualizations = visualizationsForTask(result?.visualizations ?? [], selectedTask);
-  const activeVisualization = taskVisualizations[selectedVisualIndex] ?? taskVisualizations[0];
+  const taskVisualizations = visualizationsForTask(
+    result?.visualizations ?? [],
+    selectedTask,
+  );
+  const activeVisualization =
+    taskVisualizations[selectedVisualIndex] ?? taskVisualizations[0];
   const downloadTitle = activeVisualization
     ? activeVisualization.scene
-      ? "下载当前 3D PNG"
-      : "下载当前 SVG"
-    : "下载当前可视化";
+      ? t("下载当前 3D PNG")
+      : t("下载当前 SVG")
+    : t("下载当前可视化");
   const stages = useMemo(
     () => buildStageRows(result, running, activeJob),
-    [activeJob, result, running]
+    [activeJob, result, running],
   );
-  const agentChain = useMemo(() => buildAgentChain(result, selectedTask), [result, selectedTask]);
+  const agentChain = useMemo(
+    () => buildAgentChain(result, selectedTask),
+    [result, selectedTask],
+  );
   const eventLog = recentJobEvents(activeJob);
   const summaryJson = useMemo(
     () => (result ? JSON.stringify(result.summary, null, 2) : "{}"),
-    [result]
+    [result],
   );
-  const metrics = metricItems(result, selectedTask, running, activeJob, monitorTick);
+  const metrics = metricItems(
+    result,
+    selectedTask,
+    running,
+    activeJob,
+    monitorTick,
+  );
   const verification = verificationItems(selectedTask);
   const facts = studyFacts(selectedTask);
   const artifacts = artifactPaths(result?.summary, selectedTask);
   const outcome = result ? runOutcome(result, selectedTask) : null;
   const cliCommand = useMemo(
-    () => reproducibleCliCommand(request, useParameterCompletion, health?.python_executable),
-    [health?.python_executable, request, useParameterCompletion]
+    () =>
+      reproducibleCliCommand(
+        request,
+        useParameterCompletion,
+        health?.python_executable,
+      ),
+    [health?.python_executable, request, useParameterCompletion],
   );
   const workspaceLink = useMemo(
-    () => studioWorkspaceLink(request, useParameterCompletion, selectedRenderMode.key),
-    [request, selectedRenderMode.key, useParameterCompletion]
+    () =>
+      studioWorkspaceLink(
+        request,
+        useParameterCompletion,
+        selectedRenderMode.key,
+      ),
+    [request, selectedRenderMode.key, useParameterCompletion],
   );
   const statusMessage = running
-    ? "仿真运行中…"
+    ? t("仿真运行中…")
     : outcome
-      ? `仿真${outcome.label}`
-      : "等待仿真";
+      ? t("仿真{0}", outcome.label)
+      : t("等待仿真");
   const runtimeStatusInfo = runtimeStatus(diagnostics, health);
 
   async function runSimulation(requestOverride?: string) {
@@ -207,7 +255,9 @@ export function App() {
       setSelectedRenderModeIndex(defaultRenderModeIndex(runResult));
       recordRun(requestText, runResult);
     } catch (error) {
-      const failedResult = runError(error instanceof Error ? error.message : String(error));
+      const failedResult = runError(
+        error instanceof Error ? error.message : String(error),
+      );
       setResult(failedResult);
       setSelectedRenderModeIndex(0);
       recordRun(requestText, failedResult);
@@ -219,13 +269,17 @@ export function App() {
   function recordRun(requestText: string, runResult: StudioRunResponse) {
     const item = createHistoryItem(requestText, runResult);
     setActiveHistoryId(item.id);
-    setHistory((current) => saveRunHistory([item, ...current].slice(0, MAX_HISTORY_ITEMS)));
+    setHistory((current) =>
+      saveRunHistory([item, ...current].slice(0, MAX_HISTORY_ITEMS)),
+    );
   }
 
   function selectTask(index: number) {
     setSelectedTaskIndex(index);
     setSelectedVisualIndex(0);
-    setSelectedRenderModeIndex(defaultRenderModeIndex(result, tasks[index] ?? null));
+    setSelectedRenderModeIndex(
+      defaultRenderModeIndex(result, tasks[index] ?? null),
+    );
   }
 
   function selectHistoryItem(item: RunHistoryItem) {
@@ -275,7 +329,7 @@ export function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-workbench">
-        跳转到工作台
+        {t("跳转到工作台")}
       </a>
 
       <Topbar
@@ -304,7 +358,7 @@ export function App() {
       />
 
       <div className="studio-layout">
-        <aside className="left-rail" aria-label="仿真输入">
+        <aside className="left-rail" aria-label={t("仿真输入")}>
           <Composer
             request={request}
             onRequestChange={setRequest}
@@ -348,42 +402,64 @@ export function App() {
             onSelectRenderMode={setSelectedRenderModeIndex}
             downloadDisabled={!activeVisualization}
             downloadTitle={downloadTitle}
-            onDownload={() => downloadVisualization(activeVisualization, selectedRenderMode.key)}
+            onDownload={() =>
+              downloadVisualization(activeVisualization, selectedRenderMode.key)
+            }
           >
             {activeVisualization ? (
               <>
                 {activeVisualization.scene ? (
                   <Suspense
                     fallback={
-                      <div className="three-loading" aria-label="3D 视图加载中">
-                        <LoaderCircle aria-hidden="true" className="spin" size={18} />
+                      <div
+                        className="three-loading"
+                        aria-label={t("3D 视图加载中")}
+                      >
+                        <LoaderCircle
+                          aria-hidden="true"
+                          className="spin"
+                          size={18}
+                        />
                       </div>
                     }
                   >
-                    <ThreeViewport scene={activeVisualization.scene} mode={selectedRenderMode.key} />
+                    <ThreeViewport
+                      scene={activeVisualization.scene}
+                      mode={selectedRenderMode.key}
+                    />
                   </Suspense>
                 ) : (
                   <div
                     className="svg-stage"
                     role="img"
                     aria-label={`${activeVisualization.title}：${activeVisualization.caption}`}
-                    dangerouslySetInnerHTML={{ __html: activeVisualization.svg }}
+                    dangerouslySetInnerHTML={{
+                      __html: activeVisualization.svg,
+                    }}
                   />
                 )}
-                <p className="caption">{activeVisualization.caption}</p>
+                <p className="caption">{t(activeVisualization.caption)}</p>
               </>
             ) : (
               <EmptyState
                 icon={<Boxes size={30} />}
-                title={activeHistoryItem ? "历史结果已回看" : "等待结果场"}
+                title={
+                  activeHistoryItem ? t("历史结果已回看") : t("等待结果场")
+                }
                 text={
                   activeHistoryItem
-                    ? "当前历史仅保留摘要和报告。重跑此请求可恢复几何、网格和结果视图。"
-                    : "运行后展示由求解摘要、网格文件和位移场生成的工程视图。"
+                    ? t(
+                        "当前历史仅保留摘要和报告。重跑此请求可恢复几何、网格和结果视图。",
+                      )
+                    : t(
+                        "运行后展示由求解摘要、网格文件和位移场生成的工程视图。",
+                      )
                 }
-                actionLabel={activeHistoryItem ? "重跑此请求" : undefined}
+                actionLabel={activeHistoryItem ? t("重跑此请求") : undefined}
                 onAction={
-                  activeHistoryItem ? () => rerunHistoryItem(activeHistoryItem) : undefined
+                  activeHistoryItem
+                    ? () => rerunHistoryItem(activeHistoryItem)
+                    : undefined
                 }
               />
             )}
@@ -395,7 +471,12 @@ export function App() {
             selectedTaskIndex={selectedTaskIndex}
             onSelectTask={selectTask}
             onDownloadReport={() => downloadReport(result, selectedTask)}
-            onCopyReport={() => void copyTextToClipboard(result?.report ?? "", "Markdown 工程报告")}
+            onCopyReport={() =>
+              void copyTextToClipboard(
+                result?.report ?? "",
+                t("Markdown 工程报告"),
+              )
+            }
           />
         </main>
 
@@ -413,10 +494,14 @@ export function App() {
           summaryJson={summaryJson}
           eventLog={eventLog}
           onCopyArtifact={(artifact, label) =>
-            void copyTextToClipboard(artifact, `${label}产物路径`)
+            void copyTextToClipboard(artifact, t("{0}产物路径", label))
           }
-          onDownloadJson={() => downloadSummaryJson(result, selectedTask, summaryJson)}
-          onCopyJson={() => void copyTextToClipboard(summaryJson, "摘要 JSON")}
+          onDownloadJson={() =>
+            downloadSummaryJson(result, selectedTask, summaryJson)
+          }
+          onCopyJson={() =>
+            void copyTextToClipboard(summaryJson, t("摘要 JSON"))
+          }
         />
       </div>
     </div>

@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mechagent import MechAgent
+from mechagent import MechAgent, __version__
 from mechagent.diagnostics import run_environment_diagnostics
 from mechagent.examples import example_payloads
 from mechagent.orchestrator.capabilities import all_capabilities
@@ -63,7 +63,7 @@ def create_studio_app(config: Path = Path("config/mechagent.yaml")) -> FastAPI:
     jobs_lock = RLock()
     app = FastAPI(
         title="MechAgent Studio API",
-        version="0.1.0",
+        version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
     )

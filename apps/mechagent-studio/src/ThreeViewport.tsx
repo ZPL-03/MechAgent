@@ -1,3 +1,4 @@
+import { useI18n } from "./i18n/LocaleProvider";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -7,7 +8,9 @@ export type RenderMode = VisualizationScene["mode"];
 type SceneField = NonNullable<VisualizationScene["fields"]>[number];
 type SceneNode = VisualizationScene["nodes"][number];
 type SceneLoad = NonNullable<VisualizationScene["loads"]>[number];
-type SceneBoundaryCondition = NonNullable<VisualizationScene["boundary_conditions"]>[number];
+type SceneBoundaryCondition = NonNullable<
+  VisualizationScene["boundary_conditions"]
+>[number];
 type ViewPreset = "iso" | "top" | "front" | "right";
 type AxisName = "x" | "y" | "z";
 type SceneBounds = {
@@ -18,7 +21,7 @@ type SceneBounds = {
 const AXIS_INDEX: Record<AxisName, 0 | 1 | 2> = {
   x: 0,
   y: 1,
-  z: 2
+  z: 2,
 };
 
 type Props = {
@@ -31,17 +34,18 @@ const GEOMETRY_COLORS = {
   edge: new THREE.Color("#174c7d"),
   mesh: new THREE.Color("#5b6b7e"),
   result: new THREE.Color("#2563eb"),
-  point: new THREE.Color("#dc2626")
+  point: new THREE.Color("#dc2626"),
 };
 
 const VIEW_PRESETS: Array<{ key: ViewPreset; label: string; title: string }> = [
   { key: "iso", label: "ISO", title: "等轴视图" },
   { key: "top", label: "TOP", title: "俯视图" },
   { key: "front", label: "FRONT", title: "前视图" },
-  { key: "right", label: "RIGHT", title: "右视图" }
+  { key: "right", label: "RIGHT", title: "右视图" },
 ];
 
 export function ThreeViewport({ scene, mode }: Props) {
+  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const axisHostRef = useRef<HTMLDivElement | null>(null);
   const fieldSelectId = useId();
@@ -76,7 +80,7 @@ export function ThreeViewport({ scene, mode }: Props) {
       antialias: true,
       alpha: true,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true
+      preserveDrawingBuffer: true,
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(viewportClearColor(), 1);
@@ -86,7 +90,7 @@ export function ThreeViewport({ scene, mode }: Props) {
     const axisRenderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      powerPreference: "high-performance"
+      powerPreference: "high-performance",
     });
     axisRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     axisRenderer.setClearColor(0x000000, 0);
@@ -111,7 +115,14 @@ export function ThreeViewport({ scene, mode }: Props) {
     threeScene.add(fillLight);
 
     const axisScene = new THREE.Scene();
-    const axisCamera = new THREE.OrthographicCamera(-1.35, 1.35, 1.35, -1.35, 0.1, 10);
+    const axisCamera = new THREE.OrthographicCamera(
+      -1.35,
+      1.35,
+      1.35,
+      -1.35,
+      0.1,
+      10,
+    );
     axisCamera.position.set(0, 0, 4);
     axisCamera.lookAt(0, 0, 0);
     const axisRoot = buildAxisGizmoRoot();
@@ -148,7 +159,11 @@ export function ThreeViewport({ scene, mode }: Props) {
       refitCameraDistance(camera, controls, sceneRef.current, modeRef.current);
 
       const axisRect = axisHost.getBoundingClientRect();
-      axisRenderer.setSize(Math.max(axisRect.width, 1), Math.max(axisRect.height, 1), false);
+      axisRenderer.setSize(
+        Math.max(axisRect.width, 1),
+        Math.max(axisRect.height, 1),
+        false,
+      );
       scheduleRender();
     });
     resizeObserver.observe(host);
@@ -168,7 +183,7 @@ export function ThreeViewport({ scene, mode }: Props) {
       axisCamera,
       axisRoot,
       resizeObserver,
-      render: scheduleRender
+      render: scheduleRender,
     };
 
     return () => {
@@ -198,11 +213,18 @@ export function ThreeViewport({ scene, mode }: Props) {
       return;
     }
     const activeField = fieldByKey(scene, selectedFieldKey);
-    rebuildScene(state.root, state.camera, state.controls, scene, mode, activeField);
+    rebuildScene(
+      state.root,
+      state.camera,
+      state.controls,
+      scene,
+      mode,
+      activeField,
+    );
     state.render();
   }, [scene, mode, selectedFieldKey]);
 
-  // 主题切换时更新 3D 画布背景色（读取 --color-viewport-bg 令牌）。
+  // 只更新主题材质，保留用户设置的相机位置。
   useEffect(() => {
     if (typeof MutationObserver === "undefined") {
       return undefined;
@@ -213,11 +235,18 @@ export function ThreeViewport({ scene, mode }: Props) {
         return;
       }
       state.renderer.setClearColor(viewportClearColor(), 1);
+      const grid = state.root.getObjectByName("reference-grid");
+      if (
+        grid instanceof THREE.LineSegments &&
+        grid.material instanceof THREE.LineBasicMaterial
+      ) {
+        grid.material.color.copy(viewportGridColor());
+      }
       state.render();
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"]
+      attributeFilter: ["data-theme"],
     });
     return () => observer.disconnect();
   }, []);
@@ -225,7 +254,7 @@ export function ThreeViewport({ scene, mode }: Props) {
   const fields = useMemo(() => resultFields(scene), [scene]);
   const activeField = fieldByKey(scene, selectedFieldKey);
   const summaryField = mode === "result" ? activeField : defaultField(scene);
-  const summary = sceneSummary(scene, mode, summaryField);
+  const summary = sceneSummary(scene, mode, summaryField, t);
 
   useEffect(() => {
     setSelectedFieldKey(defaultField(scene).key);
@@ -241,22 +270,28 @@ export function ThreeViewport({ scene, mode }: Props) {
   }
 
   return (
-    <div className="three-viewport" aria-label={`${scene.geometry_type} ${summary.label} 3D 视图`}>
+    <div
+      className="three-viewport"
+      aria-label={t("{0} {1} 3D 视图", scene.geometry_type, summary.label)}
+    >
       <div ref={hostRef} className="three-stage" />
       <div
         ref={axisHostRef}
         className="axis-gizmo-stage"
-        aria-label="跟随视角的 XYZ 全局坐标系"
+        aria-label={t("跟随视角的 XYZ 全局坐标系")}
       />
       <div className="three-overlay" aria-hidden="true">
-        <span>{summary.label}</span>
-        <span>{summary.mesh}</span>
-        <span>{summary.result}</span>
+        <span>{t(summary.label)}</span>
+        <span>{t(summary.mesh)}</span>
+        <span>
+          {t(summary.scalarLabel)} · {formatScalar(activeField.min)} ~{" "}
+          {formatScalar(activeField.max)}
+        </span>
       </div>
-      <div className="three-controls" aria-label="3D 视图控制">
+      <div className="three-controls" aria-label={t("3D 视图控制")}>
         {mode === "result" && fields.length > 1 && (
-          <div className="field-switch" role="group" aria-label="结果场量">
-            <label htmlFor={fieldSelectId}>场量</label>
+          <div className="field-switch" role="group" aria-label={t("结果场量")}>
+            <label htmlFor={fieldSelectId}>{t("场量")}</label>
             <select
               id={fieldSelectId}
               value={activeField.key}
@@ -264,55 +299,62 @@ export function ThreeViewport({ scene, mode }: Props) {
             >
               {fields.map((field) => (
                 <option key={field.key} value={field.key}>
-                  {field.name}
+                  {t(field.name)}
                   {field.unit ? ` (${field.unit})` : ""}
                 </option>
               ))}
             </select>
           </div>
         )}
-        <div className="view-switch" role="group" aria-label="视角切换">
+        <div className="view-switch" role="group" aria-label={t("视角切换")}>
           {VIEW_PRESETS.map((preset) => (
             <button
               key={preset.key}
               type="button"
-              title={preset.title}
+              title={t(preset.title)}
               onClick={() => applyView(preset.key)}
             >
-              {preset.label}
+              {t(preset.label)}
             </button>
           ))}
         </div>
       </div>
       {mode === "result" && (
         <div className="three-legend" aria-hidden="true">
-          <span>{summary.scalarLabel}</span>
+          <span>{t(summary.scalarLabel)}</span>
           <i />
           <div>
             <small>{formatScalar(activeField.min)}</small>
             <small>{formatScalar(activeField.max)}</small>
           </div>
-          <small>变形 ×{formatScale(scene.deformation_scale)}</small>
+          <small>
+            {t("变形 ×")}
+            {formatScale(scene.deformation_scale)}
+          </small>
         </div>
       )}
     </div>
   );
 }
 
-function viewportClearColor(): THREE.Color {
+function viewportColor(token: string, fallback: string): THREE.Color {
   if (typeof window !== "undefined") {
     const value = getComputedStyle(document.documentElement)
-      .getPropertyValue("--color-viewport-bg")
+      .getPropertyValue(token)
       .trim();
     if (value) {
-      try {
-        return new THREE.Color(value);
-      } catch {
-        // 回退到默认浅色背景。
-      }
+      return new THREE.Color(value);
     }
   }
-  return new THREE.Color("#f7faff");
+  return new THREE.Color(fallback);
+}
+
+function viewportClearColor() {
+  return viewportColor("--color-viewport-bg", "#171c22");
+}
+
+function viewportGridColor() {
+  return viewportColor("--color-viewport-grid", "#2b333d");
 }
 
 function buildAxisGizmoRoot() {
@@ -325,25 +367,32 @@ function buildAxisGizmoRoot() {
     new THREE.MeshStandardMaterial({
       color: "#24364d",
       roughness: 0.42,
-      metalness: 0.02
-    })
+      metalness: 0.02,
+    }),
   );
   root.add(origin);
   return root;
 }
 
-function buildAxisArrow(direction: THREE.Vector3, color: string, label: string) {
+function buildAxisArrow(
+  direction: THREE.Vector3,
+  color: string,
+  label: string,
+) {
   const group = new THREE.Group();
   const axis = direction.clone().normalize();
-  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    axis,
+  );
 
   const shaft = new THREE.Mesh(
     new THREE.CylinderGeometry(0.034, 0.034, 0.74, 20),
     new THREE.MeshStandardMaterial({
       color,
       roughness: 0.4,
-      metalness: 0.03
-    })
+      metalness: 0.03,
+    }),
   );
   shaft.position.copy(axis.clone().multiplyScalar(0.36));
   shaft.quaternion.copy(quaternion);
@@ -354,8 +403,8 @@ function buildAxisArrow(direction: THREE.Vector3, color: string, label: string) 
     new THREE.MeshStandardMaterial({
       color,
       roughness: 0.4,
-      metalness: 0.03
-    })
+      metalness: 0.03,
+    }),
   );
   head.position.copy(axis.clone().multiplyScalar(0.86));
   head.quaternion.copy(quaternion);
@@ -395,8 +444,8 @@ function buildAxisLabel(text: string, color: string) {
       map: texture,
       transparent: true,
       depthTest: false,
-      depthWrite: false
-    })
+      depthWrite: false,
+    }),
   );
   sprite.scale.set(0.42, 0.42, 1);
   sprite.renderOrder = 20;
@@ -409,7 +458,7 @@ function rebuildScene(
   controls: OrbitControls,
   scene: VisualizationScene,
   mode: RenderMode,
-  field: SceneField
+  field: SceneField,
 ) {
   for (const child of [...root.children]) {
     root.remove(child);
@@ -422,7 +471,7 @@ function rebuildScene(
     bounds.max[0] - bounds.min[0],
     bounds.max[1] - bounds.min[1],
     bounds.max[2] - bounds.min[2],
-    1.0
+    1.0,
   );
 
   root.add(buildReferenceGrid(bounds, span));
@@ -441,10 +490,13 @@ function rebuildScene(
   orientCamera(camera, controls, scene, mode, "iso");
 }
 
-function buildReferenceGrid(bounds: {
-  min: [number, number, number];
-  max: [number, number, number];
-}, span: number) {
+function buildReferenceGrid(
+  bounds: {
+    min: [number, number, number];
+    max: [number, number, number];
+  },
+  span: number,
+) {
   const xSpan = Math.max(bounds.max[0] - bounds.min[0], span * 0.2, 1);
   const zSpan = Math.max(bounds.max[2] - bounds.min[2], span * 0.2, 1);
   const horizontalSpan = Math.max(xSpan, zSpan);
@@ -456,8 +508,14 @@ function buildReferenceGrid(bounds: {
   const maxZ = bounds.max[2] + margin;
   const y = bounds.min[1] - Math.max(span * 0.012, verticalSpan * 0.04, 0.01);
   const step = Math.max(horizontalSpan / 14, 1);
-  const xDivisions = Math.max(8, Math.min(48, Math.round((maxX - minX) / step)));
-  const zDivisions = Math.max(8, Math.min(48, Math.round((maxZ - minZ) / step)));
+  const xDivisions = Math.max(
+    8,
+    Math.min(48, Math.round((maxX - minX) / step)),
+  );
+  const zDivisions = Math.max(
+    8,
+    Math.min(48, Math.round((maxZ - minZ) / step)),
+  );
   const positions: number[] = [];
 
   for (let index = 0; index <= xDivisions; index += 1) {
@@ -470,27 +528,35 @@ function buildReferenceGrid(bounds: {
   }
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  return new THREE.LineSegments(
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  const grid = new THREE.LineSegments(
     geometry,
     new THREE.LineBasicMaterial({
-      color: 0xd8e3ef,
+      color: viewportGridColor(),
       transparent: true,
-      opacity: 0.92
-    })
+      opacity: 0.65,
+    }),
   );
+  grid.name = "reference-grid";
+  return grid;
 }
 
 function buildGeometryActor(
   scene: VisualizationScene,
   span: number,
-  center: [number, number, number]
+  center: [number, number, number],
 ): THREE.Object3D {
   const dims = scene.dimensions;
   const length = positive(dims.length, span);
   const width = positive(dims.width, Math.max(span * 0.2, 1));
   const height = positive(dims.height, Math.max(span * 0.15, 1));
-  const thickness = positive(dims.thickness, Math.max(Math.min(length, width) * 0.08, 1));
+  const thickness = positive(
+    dims.thickness,
+    Math.max(Math.min(length, width) * 0.08, 1),
+  );
   const geometryType = scene.geometry_type.toLowerCase();
   const holes = plateHoles(dims, length, width);
   const slots = plateSlots(dims, length, width);
@@ -498,8 +564,17 @@ function buildGeometryActor(
   let geometry: THREE.BufferGeometry;
   if (geometryType === "beam") {
     geometry = new THREE.BoxGeometry(length, width, height);
-  } else if (geometryType === "plate" && (holes.length > 0 || slots.length > 0)) {
-    geometry = buildPerforatedPlateGeometry(length, width, thickness, holes, slots);
+  } else if (
+    geometryType === "plate" &&
+    (holes.length > 0 || slots.length > 0)
+  ) {
+    geometry = buildPerforatedPlateGeometry(
+      length,
+      width,
+      thickness,
+      holes,
+      slots,
+    );
   } else if (geometryType === "plate") {
     geometry = new THREE.BoxGeometry(length, thickness, width);
   } else {
@@ -514,8 +589,8 @@ function buildGeometryActor(
       opacity: 0.35,
       roughness: 0.32,
       metalness: 0.04,
-      side: THREE.DoubleSide
-    })
+      side: THREE.DoubleSide,
+    }),
   );
 
   const edges = new THREE.LineSegments(
@@ -523,8 +598,8 @@ function buildGeometryActor(
     new THREE.LineBasicMaterial({
       color: GEOMETRY_COLORS.edge,
       transparent: true,
-      opacity: 0.95
-    })
+      opacity: 0.95,
+    }),
   );
 
   const group = new THREE.Group();
@@ -537,7 +612,7 @@ function buildGeometryActor(
 function buildBoundaryLoadOverlay(
   scene: VisualizationScene,
   bounds: SceneBounds,
-  span: number
+  span: number,
 ): THREE.Object3D {
   const group = new THREE.Group();
   for (const boundary of scene.boundary_conditions ?? []) {
@@ -548,7 +623,11 @@ function buildBoundaryLoadOverlay(
   }
   group.traverse((object) => {
     object.renderOrder = 30;
-    const material = (object as THREE.Object3D & { material?: THREE.Material | THREE.Material[] }).material;
+    const material = (
+      object as THREE.Object3D & {
+        material?: THREE.Material | THREE.Material[];
+      }
+    ).material;
     if (Array.isArray(material)) {
       material.forEach(markOverlayMaterial);
     } else if (material) {
@@ -566,16 +645,23 @@ function markOverlayMaterial(material: THREE.Material) {
 function buildBoundaryConditionMarker(
   boundary: SceneBoundaryCondition,
   bounds: SceneBounds,
-  span: number
+  span: number,
 ): THREE.Object3D {
   const region = normalizeToken(boundary.region);
   if (region.includes("edge")) {
     return buildEdgeSupportMarker(bounds, span);
   }
   const group = new THREE.Group();
-  const x = region.includes("right") || region.includes("end") ? bounds.max[0] : bounds.min[0];
+  const x =
+    region.includes("right") || region.includes("end")
+      ? bounds.max[0]
+      : bounds.min[0];
   const side = x <= midpoint(bounds.min, bounds.max)[0] ? -1 : 1;
-  const center = new THREE.Vector3(x, (bounds.min[1] + bounds.max[1]) / 2, (bounds.min[2] + bounds.max[2]) / 2);
+  const center = new THREE.Vector3(
+    x,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2,
+  );
   const width = Math.max(bounds.max[2] - bounds.min[2], span * 0.12);
   const height = Math.max(bounds.max[1] - bounds.min[1], span * 0.1);
   const thickness = Math.max(span * 0.012, 0.6);
@@ -586,33 +672,54 @@ function buildBoundaryConditionMarker(
       transparent: true,
       opacity: 0.72,
       roughness: 0.48,
-      metalness: 0.02
-    })
+      metalness: 0.02,
+    }),
   );
-  clamp.position.copy(center).add(new THREE.Vector3(side * thickness * 0.7, 0, 0));
+  clamp.position
+    .copy(center)
+    .add(new THREE.Vector3(side * thickness * 0.7, 0, 0));
   group.add(clamp);
 
   const hatchCount = 7;
   const hatchPositions: number[] = [];
   const hatchX = x + side * thickness * 1.6;
   for (let index = 0; index < hatchCount; index += 1) {
-    const z = bounds.min[2] + ((index + 0.5) / hatchCount) * (bounds.max[2] - bounds.min[2] || width);
+    const z =
+      bounds.min[2] +
+      ((index + 0.5) / hatchCount) * (bounds.max[2] - bounds.min[2] || width);
     const y0 = bounds.min[1] - span * 0.03;
     const y1 = bounds.max[1] + span * 0.08;
-    hatchPositions.push(hatchX, y0, z - span * 0.018, hatchX + side * span * 0.045, y1, z + span * 0.018);
+    hatchPositions.push(
+      hatchX,
+      y0,
+      z - span * 0.018,
+      hatchX + side * span * 0.045,
+      y1,
+      z + span * 0.018,
+    );
   }
   const hatchGeometry = new THREE.BufferGeometry();
-  hatchGeometry.setAttribute("position", new THREE.Float32BufferAttribute(hatchPositions, 3));
+  hatchGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(hatchPositions, 3),
+  );
   group.add(
     new THREE.LineSegments(
       hatchGeometry,
-      new THREE.LineBasicMaterial({ color: "#162033", transparent: true, opacity: 0.62 })
-    )
+      new THREE.LineBasicMaterial({
+        color: "#162033",
+        transparent: true,
+        opacity: 0.62,
+      }),
+    ),
   );
   return group;
 }
 
-function buildEdgeSupportMarker(bounds: SceneBounds, span: number): THREE.Object3D {
+function buildEdgeSupportMarker(
+  bounds: SceneBounds,
+  span: number,
+): THREE.Object3D {
   const group = new THREE.Group();
   const y = bounds.max[1] + Math.max(span * 0.002, 0.05);
   const radius = Math.max(span * 0.0025, 0.12);
@@ -621,10 +728,18 @@ function buildEdgeSupportMarker(bounds: SceneBounds, span: number): THREE.Object
     new THREE.Vector3(bounds.min[0], y, bounds.min[2]),
     new THREE.Vector3(bounds.max[0], y, bounds.min[2]),
     new THREE.Vector3(bounds.max[0], y, bounds.max[2]),
-    new THREE.Vector3(bounds.min[0], y, bounds.max[2])
+    new THREE.Vector3(bounds.min[0], y, bounds.max[2]),
   ];
   for (let index = 0; index < corners.length; index += 1) {
-    group.add(buildCylinderBetween(corners[index], corners[(index + 1) % corners.length], radius, color, 0.76));
+    group.add(
+      buildCylinderBetween(
+        corners[index],
+        corners[(index + 1) % corners.length],
+        radius,
+        color,
+        0.76,
+      ),
+    );
   }
   for (const point of supportSamplePoints(bounds, y)) {
     group.add(buildEdgeSupportCone(point, bounds, span, color));
@@ -636,12 +751,12 @@ function buildEdgeSupportCone(
   point: THREE.Vector3,
   bounds: SceneBounds,
   span: number,
-  color: string
+  color: string,
 ) {
   const center = new THREE.Vector3(
     (bounds.min[0] + bounds.max[0]) / 2,
     point.y,
-    (bounds.min[2] + bounds.max[2]) / 2
+    (bounds.min[2] + bounds.max[2]) / 2,
   );
   const inward = center.sub(point);
   inward.y = 0;
@@ -652,10 +767,18 @@ function buildEdgeSupportCone(
   const height = Math.max(span * 0.035, 1.6);
   const support = new THREE.Mesh(
     new THREE.ConeGeometry(Math.max(span * 0.012, 0.55), height, 4),
-    new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.74, roughness: 0.4 })
+    new THREE.MeshStandardMaterial({
+      color,
+      transparent: true,
+      opacity: 0.74,
+      roughness: 0.4,
+    }),
   );
   support.quaternion.copy(
-    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), inward)
+    new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      inward,
+    ),
   );
   support.position.copy(point).add(inward.clone().multiplyScalar(-height / 2));
   return support;
@@ -680,7 +803,7 @@ function buildLoadMarker(
   scene: VisualizationScene,
   load: SceneLoad,
   bounds: SceneBounds,
-  span: number
+  span: number,
 ): THREE.Object3D {
   const group = new THREE.Group();
   const type = normalizeToken(load.type);
@@ -690,14 +813,24 @@ function buildLoadMarker(
   const color = "#dc2626";
 
   if (type.includes("pressure") && isEndFaceRegion(region)) {
-    for (const origin of endFaceLoadOrigins(bounds, region, direction, arrowLength)) {
+    for (const origin of endFaceLoadOrigins(
+      bounds,
+      region,
+      direction,
+      arrowLength,
+    )) {
       group.add(buildArrow(origin, direction, arrowLength, color, span));
     }
     return group;
   }
 
   if (type.includes("pressure") || region.includes("surface")) {
-    for (const origin of pressureOrigins(scene, bounds, direction, arrowLength)) {
+    for (const origin of pressureOrigins(
+      scene,
+      bounds,
+      direction,
+      arrowLength,
+    )) {
       group.add(buildArrow(origin, direction, arrowLength, color, span));
     }
     return group;
@@ -711,7 +844,12 @@ function buildLoadMarker(
   }
 
   const pointArrowLength = arrowLength * 1.15;
-  for (const origin of pointLoadOrigins(bounds, region, direction, pointArrowLength)) {
+  for (const origin of pointLoadOrigins(
+    bounds,
+    region,
+    direction,
+    pointArrowLength,
+  )) {
     group.add(buildArrow(origin, direction, pointArrowLength, color, span));
   }
   return group;
@@ -722,7 +860,7 @@ function buildArrow(
   direction: THREE.Vector3,
   length: number,
   color: string,
-  span: number
+  span: number,
 ) {
   const unit = direction.clone().normalize();
   const group = new THREE.Group();
@@ -739,16 +877,22 @@ function buildArrow(
       transparent: true,
       opacity: 0.94,
       roughness: 0.38,
-      metalness: 0.02
-    })
+      metalness: 0.02,
+    }),
   );
-  cone.position.copy(tip.clone().add(unit.clone().multiplyScalar(-headLength / 2)));
+  cone.position.copy(
+    tip.clone().add(unit.clone().multiplyScalar(-headLength / 2)),
+  );
   cone.quaternion.copy(
-    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), unit)
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), unit),
   );
   group.add(cone);
   group.traverse((object) => {
-    const material = (object as THREE.Object3D & { material?: THREE.Material | THREE.Material[] }).material;
+    const material = (
+      object as THREE.Object3D & {
+        material?: THREE.Material | THREE.Material[];
+      }
+    ).material;
     if (Array.isArray(material)) {
       material.forEach(markOverlayMaterial);
     } else if (material) {
@@ -762,20 +906,22 @@ function pressureOrigins(
   scene: VisualizationScene,
   bounds: SceneBounds,
   direction: THREE.Vector3,
-  tailDistance: number
+  tailDistance: number,
 ) {
   return surfacePressureTargets(scene, bounds, direction).map((target) =>
-    target.add(direction.clone().multiplyScalar(-tailDistance))
+    target.add(direction.clone().multiplyScalar(-tailDistance)),
   );
 }
 
 function surfacePressureTargets(
   scene: VisualizationScene,
   bounds: SceneBounds,
-  direction: THREE.Vector3
+  direction: THREE.Vector3,
 ) {
   const normalAxis = dominantAxis(direction);
-  const planeAxes = (["x", "y", "z"] as AxisName[]).filter((axis) => axis !== normalAxis);
+  const planeAxes = (["x", "y", "z"] as AxisName[]).filter(
+    (axis) => axis !== normalAxis,
+  );
   const [uAxis, vAxis] = planeAxes;
   const normalValue = surfaceAxisValue(bounds, direction, normalAxis);
   const uSpan = axisSpan(bounds, uAxis);
@@ -789,7 +935,7 @@ function surfacePressureTargets(
       const target = vectorFromAxisValues({
         [normalAxis]: normalValue,
         [uAxis]: u,
-        [vAxis]: v
+        [vAxis]: v,
       } as Record<AxisName, number>);
       if (!isInsidePlateHole(scene, bounds, target, normalAxis)) {
         targets.push(target);
@@ -798,16 +944,30 @@ function surfacePressureTargets(
   }
   return targets.length > 0
     ? targets
-    : [midpointVector(bounds).setComponent(AXIS_INDEX[normalAxis], normalValue)];
+    : [
+        midpointVector(bounds).setComponent(
+          AXIS_INDEX[normalAxis],
+          normalValue,
+        ),
+      ];
 }
 
-function lineLoadOrigins(bounds: SceneBounds, direction: THREE.Vector3, tailDistance: number) {
+function lineLoadOrigins(
+  bounds: SceneBounds,
+  direction: THREE.Vector3,
+  tailDistance: number,
+) {
   const origins: THREE.Vector3[] = [];
   const count = 7;
   const z = (bounds.min[2] + bounds.max[2]) / 2;
   for (let index = 0; index < count; index += 1) {
-    const x = bounds.min[0] + ((index + 0.5) / count) * (bounds.max[0] - bounds.min[0]);
-    const target = new THREE.Vector3(x, surfaceAxisValue(bounds, direction, "y"), z);
+    const x =
+      bounds.min[0] + ((index + 0.5) / count) * (bounds.max[0] - bounds.min[0]);
+    const target = new THREE.Vector3(
+      x,
+      surfaceAxisValue(bounds, direction, "y"),
+      z,
+    );
     origins.push(target.add(direction.clone().multiplyScalar(-tailDistance)));
   }
   return origins;
@@ -817,7 +977,7 @@ function pointLoadOrigins(
   bounds: SceneBounds,
   region: string,
   direction: THREE.Vector3,
-  tailDistance: number
+  tailDistance: number,
 ) {
   const x =
     region.includes("root") || region.includes("left")
@@ -826,7 +986,7 @@ function pointLoadOrigins(
   const target = new THREE.Vector3(
     x,
     (bounds.min[1] + bounds.max[1]) / 2,
-    (bounds.min[2] + bounds.max[2]) / 2
+    (bounds.min[2] + bounds.max[2]) / 2,
   ).add(direction.clone().multiplyScalar(-tailDistance));
   return [target];
 }
@@ -835,7 +995,7 @@ function endFaceLoadOrigins(
   bounds: SceneBounds,
   region: string,
   direction: THREE.Vector3,
-  tailDistance: number
+  tailDistance: number,
 ) {
   const x =
     region.includes("root") || region.includes("left")
@@ -843,16 +1003,20 @@ function endFaceLoadOrigins(
       : bounds.max[0];
   const yValues = [
     bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.3,
-    bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.7
+    bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.7,
   ];
   const zValues = [
     bounds.min[2] + (bounds.max[2] - bounds.min[2]) * 0.3,
-    bounds.min[2] + (bounds.max[2] - bounds.min[2]) * 0.7
+    bounds.min[2] + (bounds.max[2] - bounds.min[2]) * 0.7,
   ];
   const origins: THREE.Vector3[] = [];
   for (const y of yValues) {
     for (const z of zValues) {
-      origins.push(new THREE.Vector3(x, y, z).add(direction.clone().multiplyScalar(-tailDistance)));
+      origins.push(
+        new THREE.Vector3(x, y, z).add(
+          direction.clone().multiplyScalar(-tailDistance),
+        ),
+      );
     }
   }
   return origins;
@@ -861,11 +1025,15 @@ function endFaceLoadOrigins(
 function dominantAxis(direction: THREE.Vector3): AxisName {
   const axes: AxisName[] = ["x", "y", "z"];
   return axes.reduce((selected, axis) =>
-    Math.abs(direction[axis]) > Math.abs(direction[selected]) ? axis : selected
+    Math.abs(direction[axis]) > Math.abs(direction[selected]) ? axis : selected,
   );
 }
 
-function surfaceAxisValue(bounds: SceneBounds, direction: THREE.Vector3, axis: AxisName) {
+function surfaceAxisValue(
+  bounds: SceneBounds,
+  direction: THREE.Vector3,
+  axis: AxisName,
+) {
   const index = AXIS_INDEX[axis];
   return direction[axis] < 0 ? bounds.max[index] : bounds.min[index];
 }
@@ -875,14 +1043,23 @@ function axisSpan(bounds: SceneBounds, axis: AxisName) {
   return Math.max(bounds.max[index] - bounds.min[index], 0);
 }
 
-function distributedCount(span: number, spacing: number, minCount: number, maxCount: number) {
+function distributedCount(
+  span: number,
+  spacing: number,
+  minCount: number,
+  maxCount: number,
+) {
   if (span <= 1e-9) {
     return 1;
   }
   return Math.max(minCount, Math.min(maxCount, Math.round(span / spacing) + 1));
 }
 
-function distributedAxisValues(bounds: SceneBounds, axis: AxisName, count: number) {
+function distributedAxisValues(
+  bounds: SceneBounds,
+  axis: AxisName,
+  count: number,
+) {
   const index = AXIS_INDEX[axis];
   const min = bounds.min[index];
   const max = bounds.max[index];
@@ -904,7 +1081,7 @@ function midpointVector(bounds: SceneBounds) {
   return new THREE.Vector3(
     (bounds.min[0] + bounds.max[0]) / 2,
     (bounds.min[1] + bounds.max[1]) / 2,
-    (bounds.min[2] + bounds.max[2]) / 2
+    (bounds.min[2] + bounds.max[2]) / 2,
   );
 }
 
@@ -912,7 +1089,7 @@ function isInsidePlateHole(
   scene: VisualizationScene,
   bounds: SceneBounds,
   target: THREE.Vector3,
-  normalAxis: AxisName
+  normalAxis: AxisName,
 ) {
   if (normalAxis !== "y" || scene.geometry_type.toLowerCase() !== "plate") {
     return false;
@@ -939,27 +1116,38 @@ function buildCylinderBetween(
   end: THREE.Vector3,
   radius: number,
   color: string,
-  opacity: number
+  opacity: number,
 ) {
   const direction = end.clone().sub(start);
   const length = direction.length();
-  const geometry = new THREE.CylinderGeometry(radius, radius, Math.max(length, 1e-6), 12);
+  const geometry = new THREE.CylinderGeometry(
+    radius,
+    radius,
+    Math.max(length, 1e-6),
+    12,
+  );
   const material = new THREE.MeshStandardMaterial({
     color,
     transparent: true,
     opacity,
     roughness: 0.42,
-    metalness: 0.02
+    metalness: 0.02,
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(start.clone().add(end).multiplyScalar(0.5));
   mesh.quaternion.copy(
-    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize())
+    new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      direction.normalize(),
+    ),
   );
   return mesh;
 }
 
-function viewDirection(scene: VisualizationScene, direction: [number, number, number]) {
+function viewDirection(
+  scene: VisualizationScene,
+  direction: [number, number, number],
+) {
   const mapped = viewVector(scene, direction);
   const vector = new THREE.Vector3(mapped[0], mapped[1], mapped[2]);
   if (vector.length() <= 1e-9) {
@@ -970,7 +1158,7 @@ function viewDirection(scene: VisualizationScene, direction: [number, number, nu
 
 function viewVector(
   scene: VisualizationScene,
-  vector: [number, number, number]
+  vector: [number, number, number],
 ): [number, number, number] {
   const geometryType = scene.geometry_type.toLowerCase();
   if (geometryType === "plate" || geometryType === "solid") {
@@ -980,7 +1168,10 @@ function viewVector(
 }
 
 function normalizeToken(value: string) {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
 function isEndFaceRegion(region: string) {
@@ -991,7 +1182,7 @@ function isEndFaceRegion(region: string) {
 function buildMeshActor(
   scene: VisualizationScene,
   deformed: boolean,
-  field: SceneField
+  field: SceneField,
 ): THREE.Object3D {
   if (scene.geometry_type.toLowerCase() === "beam") {
     return buildBeamFieldActor(scene, deformed, field);
@@ -1017,7 +1208,11 @@ function buildMeshActor(
         const position = viewNodePosition(scene, node, deformed);
         surfacePositions.push(...position);
         if (deformed) {
-          const color = scalarColor(nodeFieldValue(node, field), field.min, scalarRange);
+          const color = scalarColor(
+            nodeFieldValue(node, field),
+            field.min,
+            scalarRange,
+          );
           surfaceColors.push(color.r, color.g, color.b);
         } else {
           surfaceColors.push(0.86, 0.91, 0.96);
@@ -1028,8 +1223,14 @@ function buildMeshActor(
 
   if (surfacePositions.length > 0) {
     const surfaceGeometry = new THREE.BufferGeometry();
-    surfaceGeometry.setAttribute("position", new THREE.Float32BufferAttribute(surfacePositions, 3));
-    surfaceGeometry.setAttribute("color", new THREE.Float32BufferAttribute(surfaceColors, 3));
+    surfaceGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(surfacePositions, 3),
+    );
+    surfaceGeometry.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(surfaceColors, 3),
+    );
     surfaceGeometry.computeVertexNormals();
     const surface = new THREE.Mesh(
       surfaceGeometry,
@@ -1038,8 +1239,8 @@ function buildMeshActor(
         transparent: true,
         vertexColors: true,
         opacity: deformed ? (field.kind === "stress" ? 0.92 : 0.78) : 0.08,
-        depthWrite: false
-      })
+        depthWrite: false,
+      }),
     );
     surface.renderOrder = deformed ? 1 : 0;
     group.add(surface);
@@ -1060,13 +1261,20 @@ function buildMeshActor(
   }
 
   const lineGeometry = new THREE.BufferGeometry();
-  lineGeometry.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
+  lineGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(linePositions, 3),
+  );
   const lineMaterial = new THREE.LineBasicMaterial({
-    color: deformed ? (field.kind === "stress" ? 0x334155 : GEOMETRY_COLORS.result) : GEOMETRY_COLORS.edge,
+    color: deformed
+      ? field.kind === "stress"
+        ? 0x334155
+        : GEOMETRY_COLORS.result
+      : GEOMETRY_COLORS.edge,
     transparent: true,
     opacity: deformed ? (field.kind === "stress" ? 0.26 : 0.72) : 0.98,
     depthTest: deformed,
-    depthWrite: false
+    depthWrite: false,
   });
   const lineSegments = new THREE.LineSegments(lineGeometry, lineMaterial);
   lineSegments.renderOrder = deformed ? 2 : 3;
@@ -1075,14 +1283,24 @@ function buildMeshActor(
   for (const node of scene.nodes) {
     const position = viewNodePosition(scene, node, deformed);
     positions.push(...position);
-    const color = scalarColor(nodeFieldValue(node, field), field.min, scalarRange);
+    const color = scalarColor(
+      nodeFieldValue(node, field),
+      field.min,
+      scalarRange,
+    );
     colors.push(color.r, color.g, color.b);
   }
 
   const pointGeometry = new THREE.BufferGeometry();
-  pointGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  pointGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
   if (deformed) {
-    pointGeometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    pointGeometry.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(colors, 3),
+    );
   }
   const pointMaterial = new THREE.PointsMaterial({
     color: deformed ? 0xffffff : GEOMETRY_COLORS.edge,
@@ -1092,7 +1310,7 @@ function buildMeshActor(
     transparent: true,
     opacity: deformed ? 0.92 : 0.48,
     depthTest: deformed,
-    depthWrite: false
+    depthWrite: false,
   });
   const nodePoints = new THREE.Points(pointGeometry, pointMaterial);
   nodePoints.renderOrder = deformed ? 3 : 4;
@@ -1119,7 +1337,7 @@ function buildPerforatedPlateGeometry(
   width: number,
   thickness: number,
   holes: PlateHole[],
-  slots: PlateSlot[]
+  slots: PlateSlot[],
 ) {
   const shape = new THREE.Shape();
   shape.moveTo(-length / 2, -width / 2);
@@ -1136,7 +1354,7 @@ function buildPerforatedPlateGeometry(
       item.radius,
       0,
       Math.PI * 2,
-      true
+      true,
     );
     shape.holes.push(hole);
   }
@@ -1163,7 +1381,7 @@ function buildPerforatedPlateGeometry(
   const geometry = new THREE.ExtrudeGeometry(shape, {
     depth: thickness,
     bevelEnabled: false,
-    curveSegments: 48
+    curveSegments: 48,
   });
   geometry.center();
   geometry.rotateX(-Math.PI / 2);
@@ -1173,7 +1391,7 @@ function buildPerforatedPlateGeometry(
 function plateHoles(
   dims: Record<string, number | undefined>,
   length: number,
-  width: number
+  width: number,
 ): PlateHole[] {
   const count = Math.max(0, Math.round(positive(dims.hole_count, 0)));
   if (count > 0) {
@@ -1200,15 +1418,15 @@ function plateHoles(
     {
       radius,
       centerX: positive(dims.hole_center_x, length / 2),
-      centerY: positive(dims.hole_center_y, width / 2)
-    }
+      centerY: positive(dims.hole_center_y, width / 2),
+    },
   ];
 }
 
 function plateSlots(
   dims: Record<string, number | undefined>,
   length: number,
-  width: number
+  width: number,
 ): PlateSlot[] {
   const count = Math.max(0, Math.round(positive(dims.slot_count, 0)));
   if (count > 0) {
@@ -1243,33 +1461,46 @@ function plateSlots(
       length: slotLength,
       width: slotWidth,
       centerX: positive(dims.slot_center_x, length / 2),
-      centerY: positive(dims.slot_center_y, width / 2)
-    }
+      centerY: positive(dims.slot_center_y, width / 2),
+    },
   ];
 }
 
 function buildBeamFieldActor(
   scene: VisualizationScene,
   deformed: boolean,
-  field: SceneField
+  field: SceneField,
 ): THREE.Object3D {
   const group = new THREE.Group();
-  const orderedNodes = [...scene.nodes].sort((left, right) => left.position[0] - right.position[0]);
+  const orderedNodes = [...scene.nodes].sort(
+    (left, right) => left.position[0] - right.position[0],
+  );
   const bounds = viewBounds(scene, "geometry");
   const span = Math.max(
     bounds.max[0] - bounds.min[0],
     bounds.max[1] - bounds.min[1],
     bounds.max[2] - bounds.min[2],
-    1
+    1,
   );
   const section = beamSection(scene, span);
-  const originalPoints = orderedNodes.map((node) => vectorFromArray(viewPosition(scene, node.position)));
+  const originalPoints = orderedNodes.map((node) =>
+    vectorFromArray(viewPosition(scene, node.position)),
+  );
   const fieldPoints = orderedNodes.map((node) => {
     return vectorFromArray(viewNodePosition(scene, node, deformed));
   });
 
   if (deformed) {
-    group.add(buildSegmentedBeamBody(originalPoints, orderedNodes, field, section, false, true));
+    group.add(
+      buildSegmentedBeamBody(
+        originalPoints,
+        orderedNodes,
+        field,
+        section,
+        false,
+        true,
+      ),
+    );
   }
 
   group.add(
@@ -1279,8 +1510,8 @@ function buildBeamFieldActor(
       field,
       section,
       deformed,
-      false
-    )
+      false,
+    ),
   );
   if (!deformed) {
     group.add(buildBeamNodeMarkers(fieldPoints, section.nodeSize));
@@ -1303,12 +1534,12 @@ function beamSection(scene: VisualizationScene, span: number): BeamSection {
   const height = Math.max(
     positive(scene.dimensions.height, positive(scene.dimensions.thickness, 0)),
     span * 0.016,
-    1
+    1,
   );
   return {
     width,
     height,
-    nodeSize: Math.max(Math.min(width, height) * 0.18, 2.8)
+    nodeSize: Math.max(Math.min(width, height) * 0.18, 2.8),
   };
 }
 
@@ -1318,7 +1549,7 @@ function buildSegmentedBeamBody(
   field: SceneField,
   section: BeamSection,
   deformed: boolean,
-  reference: boolean
+  reference: boolean,
 ): THREE.Object3D {
   const group = new THREE.Group();
   const scalarRange = field.max - field.min || 1;
@@ -1332,15 +1563,29 @@ function buildSegmentedBeamBody(
     }
     const tangent = direction.normalize();
     const center = start.clone().add(end).multiplyScalar(0.5);
-    const startValue = nodes[index] ? nodeFieldValue(nodes[index], field) : field.min;
-    const endValue = nodes[index + 1] ? nodeFieldValue(nodes[index + 1], field) : startValue;
+    const startValue = nodes[index]
+      ? nodeFieldValue(nodes[index], field)
+      : field.min;
+    const endValue = nodes[index + 1]
+      ? nodeFieldValue(nodes[index + 1], field)
+      : startValue;
     const averageValue = (startValue + endValue) / 2;
     const color = reference
       ? new THREE.Color("#8798aa")
       : deformed
         ? scalarColor(averageValue, field.min, scalarRange)
         : new THREE.Color("#9bc3e8");
-    group.add(buildBeamSegmentPrism(center, tangent, length, section, color, deformed, reference));
+    group.add(
+      buildBeamSegmentPrism(
+        center,
+        tangent,
+        length,
+        section,
+        color,
+        deformed,
+        reference,
+      ),
+    );
   }
   return group;
 }
@@ -1352,28 +1597,34 @@ function buildBeamSegmentPrism(
   section: BeamSection,
   color: THREE.Color,
   deformed: boolean,
-  reference: boolean
+  reference: boolean,
 ): THREE.Object3D {
   const group = new THREE.Group();
-  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), tangent);
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(1, 0, 0),
+    tangent,
+  );
   const bodyMaterial = deformed
     ? new THREE.MeshBasicMaterial({
         color,
         transparent: true,
         opacity: 0.96,
         toneMapped: false,
-        depthWrite: false
+        depthWrite: false,
       })
     : new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.38,
-      metalness: 0.03,
-      transparent: true,
+        color,
+        roughness: 0.38,
+        metalness: 0.03,
+        transparent: true,
         opacity: reference ? 0.16 : 0.42,
-      flatShading: true,
-      depthWrite: false
+        flatShading: true,
+        depthWrite: false,
       });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(length, section.width, section.height), bodyMaterial);
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(length, section.width, section.height),
+    bodyMaterial,
+  );
   body.position.copy(center);
   body.quaternion.copy(quaternion);
   body.renderOrder = reference ? 1 : deformed ? 3 : 2;
@@ -1381,14 +1632,16 @@ function buildBeamSegmentPrism(
 
   if (!deformed || reference) {
     const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(length, section.width, section.height)),
+      new THREE.EdgesGeometry(
+        new THREE.BoxGeometry(length, section.width, section.height),
+      ),
       new THREE.LineBasicMaterial({
         color: reference ? "#6b7c8f" : "#0f4c81",
         transparent: true,
         opacity: reference ? 0.2 : 0.86,
         depthTest: false,
-        depthWrite: false
-      })
+        depthWrite: false,
+      }),
     );
     edges.position.copy(center);
     edges.quaternion.copy(quaternion);
@@ -1400,12 +1653,15 @@ function buildBeamSegmentPrism(
 
 function buildBeamNodeMarkers(
   points: THREE.Vector3[],
-  nodeSize: number
+  nodeSize: number,
 ): THREE.Object3D {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
-    new THREE.Float32BufferAttribute(points.flatMap((point) => [point.x, point.y, point.z]), 3)
+    new THREE.Float32BufferAttribute(
+      points.flatMap((point) => [point.x, point.y, point.z]),
+      3,
+    ),
   );
   const nodes = new THREE.Points(
     geometry,
@@ -1416,8 +1672,8 @@ function buildBeamNodeMarkers(
       transparent: true,
       opacity: 0.84,
       depthTest: false,
-      depthWrite: false
-    })
+      depthWrite: false,
+    }),
   );
   nodes.renderOrder = 8;
   return nodes;
@@ -1426,21 +1682,29 @@ function buildBeamNodeMarkers(
 function buildBeamFixedMarker(
   rootPoint: THREE.Vector3,
   section: BeamSection,
-  span: number
+  span: number,
 ): THREE.Object3D {
   const group = new THREE.Group();
   const markerThickness = Math.max(span * 0.006, 2.0);
   const marker = new THREE.Mesh(
-    new THREE.BoxGeometry(markerThickness, section.width * 1.16, section.height * 1.16),
+    new THREE.BoxGeometry(
+      markerThickness,
+      section.width * 1.16,
+      section.height * 1.16,
+    ),
     new THREE.MeshStandardMaterial({
       color: "#24364d",
       roughness: 0.5,
       metalness: 0.02,
       transparent: true,
-      opacity: 0.92
-    })
+      opacity: 0.92,
+    }),
   );
-  marker.position.set(rootPoint.x - markerThickness * 0.55, rootPoint.y, rootPoint.z);
+  marker.position.set(
+    rootPoint.x - markerThickness * 0.55,
+    rootPoint.y,
+    rootPoint.z,
+  );
   marker.renderOrder = 9;
   group.add(marker);
 
@@ -1456,10 +1720,13 @@ function buildBeamFixedMarker(
       z0,
       rootPoint.x - markerThickness * 1.12,
       y + section.width * 0.12,
-      z0 - section.height * 0.18
+      z0 - section.height * 0.18,
     );
   }
-  lineGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  lineGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
   const hatch = new THREE.LineSegments(
     lineGeometry,
     new THREE.LineBasicMaterial({
@@ -1467,8 +1734,8 @@ function buildBeamFixedMarker(
       transparent: true,
       opacity: 0.62,
       depthTest: false,
-      depthWrite: false
-    })
+      depthWrite: false,
+    }),
   );
   hatch.renderOrder = 10;
   group.add(hatch);
@@ -1478,7 +1745,7 @@ function buildBeamFixedMarker(
 function nodePosition(
   node: VisualizationScene["nodes"][number],
   deformed: boolean,
-  deformationScale: number
+  deformationScale: number,
 ): [number, number, number] {
   if (!deformed) {
     return node.position;
@@ -1486,21 +1753,24 @@ function nodePosition(
   return [
     node.position[0] + node.displacement[0] * deformationScale,
     node.position[1] + node.displacement[1] * deformationScale,
-    node.position[2] + node.displacement[2] * deformationScale
+    node.position[2] + node.displacement[2] * deformationScale,
   ];
 }
 
 function viewNodePosition(
   scene: VisualizationScene,
   node: VisualizationScene["nodes"][number],
-  deformed: boolean
+  deformed: boolean,
 ): [number, number, number] {
-  return viewPosition(scene, nodePosition(node, deformed, scene.deformation_scale));
+  return viewPosition(
+    scene,
+    nodePosition(node, deformed, scene.deformation_scale),
+  );
 }
 
 function viewPosition(
   scene: VisualizationScene,
-  position: [number, number, number]
+  position: [number, number, number],
 ): [number, number, number] {
   const geometryType = scene.geometry_type.toLowerCase();
   if (geometryType === "plate" || geometryType === "solid") {
@@ -1515,25 +1785,28 @@ function vectorFromArray(point: [number, number, number]) {
 
 function viewBounds(scene: VisualizationScene, mode: RenderMode) {
   const deformed = mode === "result";
-  const points = scene.nodes.map((node) => viewNodePosition(scene, node, deformed));
+  const points = scene.nodes.map((node) =>
+    viewNodePosition(scene, node, deformed),
+  );
   if (points.length === 0) {
-    const bounds = mode === "result" ? scene.bounds.deformed : scene.bounds.original;
+    const bounds =
+      mode === "result" ? scene.bounds.deformed : scene.bounds.original;
     return {
       min: viewPosition(scene, bounds.min),
-      max: viewPosition(scene, bounds.max)
+      max: viewPosition(scene, bounds.max),
     };
   }
   return {
     min: [
       Math.min(...points.map((point) => point[0])),
       Math.min(...points.map((point) => point[1])),
-      Math.min(...points.map((point) => point[2]))
+      Math.min(...points.map((point) => point[2])),
     ] as [number, number, number],
     max: [
       Math.max(...points.map((point) => point[0])),
       Math.max(...points.map((point) => point[1])),
-      Math.max(...points.map((point) => point[2]))
-    ] as [number, number, number]
+      Math.max(...points.map((point) => point[2])),
+    ] as [number, number, number],
   };
 }
 
@@ -1545,7 +1818,7 @@ function elementEdges(nodes: number[]): Array<[number, number]> {
     return [
       [nodes[0], nodes[1]],
       [nodes[1], nodes[2]],
-      [nodes[2], nodes[0]]
+      [nodes[2], nodes[0]],
     ];
   }
   if (nodes.length === 4) {
@@ -1553,7 +1826,7 @@ function elementEdges(nodes: number[]): Array<[number, number]> {
       [nodes[0], nodes[1]],
       [nodes[1], nodes[2]],
       [nodes[2], nodes[3]],
-      [nodes[3], nodes[0]]
+      [nodes[3], nodes[0]],
     ];
   }
   if (nodes.length >= 8) {
@@ -1569,7 +1842,7 @@ function elementEdges(nodes: number[]): Array<[number, number]> {
       [nodes[0], nodes[4]],
       [nodes[1], nodes[5]],
       [nodes[2], nodes[6]],
-      [nodes[3], nodes[7]]
+      [nodes[3], nodes[7]],
     ];
   }
   const edges: Array<[number, number]> = [];
@@ -1579,14 +1852,16 @@ function elementEdges(nodes: number[]): Array<[number, number]> {
   return edges;
 }
 
-function elementSurfaceTriangles(nodes: number[]): Array<[number, number, number]> {
+function elementSurfaceTriangles(
+  nodes: number[],
+): Array<[number, number, number]> {
   if (nodes.length === 3) {
     return [[nodes[0], nodes[1], nodes[2]]];
   }
   if (nodes.length === 4) {
     return [
       [nodes[0], nodes[1], nodes[2]],
-      [nodes[0], nodes[2], nodes[3]]
+      [nodes[0], nodes[2], nodes[3]],
     ];
   }
   if (nodes.length >= 8) {
@@ -1596,11 +1871,11 @@ function elementSurfaceTriangles(nodes: number[]): Array<[number, number, number
       [nodes[0], nodes[1], nodes[5], nodes[4]],
       [nodes[1], nodes[2], nodes[6], nodes[5]],
       [nodes[2], nodes[3], nodes[7], nodes[6]],
-      [nodes[3], nodes[0], nodes[4], nodes[7]]
+      [nodes[3], nodes[0], nodes[4], nodes[7]],
     ];
     return faces.flatMap((face) => [
       [face[0], face[1], face[2]] as [number, number, number],
-      [face[0], face[2], face[3]] as [number, number, number]
+      [face[0], face[2], face[3]] as [number, number, number],
     ]);
   }
   if (nodes.length > 4) {
@@ -1624,8 +1899,8 @@ function resultFields(scene: VisualizationScene): SceneField[] {
       unit: scene.scalar.unit,
       kind: "result",
       min: scene.scalar.min,
-      max: scene.scalar.max
-    }
+      max: scene.scalar.max,
+    },
   ];
 }
 
@@ -1640,10 +1915,12 @@ function fieldByKey(scene: VisualizationScene, key: string): SceneField {
 
 function nodeFieldValue(
   node: VisualizationScene["nodes"][number],
-  field: SceneField
+  field: SceneField,
 ): number {
   const value = node.fields?.[field.key];
-  return typeof value === "number" && Number.isFinite(value) ? value : node.scalar;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : node.scalar;
 }
 
 function orientCamera(
@@ -1651,15 +1928,21 @@ function orientCamera(
   controls: OrbitControls,
   scene: VisualizationScene,
   mode: RenderMode,
-  view: ViewPreset
+  view: ViewPreset,
 ) {
   const directions: Record<ViewPreset, [number, number, number]> = {
     iso: cameraOffset(scene.geometry_type, mode),
     top: [0.0, 1.0, 0.0001],
     front: [0.0, 0.0001, 1.0],
-    right: [1.0, 0.0001, 0.0]
+    right: [1.0, 0.0001, 0.0],
   };
-  applyCameraFit(camera, controls, scene, mode, normalizeDirection(directions[view]));
+  applyCameraFit(
+    camera,
+    controls,
+    scene,
+    mode,
+    normalizeDirection(directions[view]),
+  );
 }
 
 // 调整相机距离以完整框住模型，保留当前视角方向（用于尺寸变化时重新适配）。
@@ -1667,12 +1950,12 @@ function refitCameraDistance(
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
   scene: VisualizationScene,
-  mode: RenderMode
+  mode: RenderMode,
 ) {
   const direction = normalizeDirection([
     camera.position.x - controls.target.x,
     camera.position.y - controls.target.y,
-    camera.position.z - controls.target.z
+    camera.position.z - controls.target.z,
   ]);
   applyCameraFit(camera, controls, scene, mode, direction);
 }
@@ -1683,7 +1966,7 @@ function applyCameraFit(
   controls: OrbitControls,
   scene: VisualizationScene,
   mode: RenderMode,
-  direction: [number, number, number]
+  direction: [number, number, number],
 ) {
   const bounds = viewBounds(scene, mode);
   const center = midpoint(bounds.min, bounds.max);
@@ -1692,7 +1975,7 @@ function applyCameraFit(
   camera.position.set(
     center[0] + direction[0] * distance,
     center[1] + direction[1] * distance,
-    center[2] + direction[2] * distance
+    center[2] + direction[2] * distance,
   );
   camera.near = Math.max(distance / 200, 0.05);
   camera.far = (distance + radius) * 6;
@@ -1709,14 +1992,19 @@ function fitDistance(camera: THREE.PerspectiveCamera, radius: number) {
   return (radius / Math.sin(limitingFov / 2)) * 1.15;
 }
 
-function boundingRadius(bounds: { min: [number, number, number]; max: [number, number, number] }) {
+function boundingRadius(bounds: {
+  min: [number, number, number];
+  max: [number, number, number];
+}) {
   const dx = bounds.max[0] - bounds.min[0];
   const dy = bounds.max[1] - bounds.min[1];
   const dz = bounds.max[2] - bounds.min[2];
   return Math.max(0.5 * Math.hypot(dx, dy, dz), 0.5);
 }
 
-function normalizeDirection(direction: [number, number, number]): [number, number, number] {
+function normalizeDirection(
+  direction: [number, number, number],
+): [number, number, number] {
   const length = Math.hypot(direction[0], direction[1], direction[2]);
   if (length < 1e-9) {
     const fallback = Math.hypot(1, 0.8, 0.8);
@@ -1725,7 +2013,12 @@ function normalizeDirection(direction: [number, number, number]): [number, numbe
   return [direction[0] / length, direction[1] / length, direction[2] / length];
 }
 
-function sceneSummary(scene: VisualizationScene, mode: RenderMode, field: SceneField) {
+function sceneSummary(
+  scene: VisualizationScene,
+  mode: RenderMode,
+  field: SceneField,
+  t: (text: string, ...args: Array<string | number>) => string,
+) {
   const modeLabel =
     mode === "geometry"
       ? "几何"
@@ -1734,13 +2027,19 @@ function sceneSummary(scene: VisualizationScene, mode: RenderMode, field: SceneF
         : field.kind === "stress"
           ? "应力云图"
           : "位移云图";
-  const scalarLabel = `${field.name} ${field.unit ? `(${field.unit})` : ""}`.trim();
+  const scalarLabel =
+    `${t(field.name)} ${field.unit ? `(${field.unit})` : ""}`.trim();
   const meshSource = scene.has_real_mesh ? "真实网格" : "示意网格";
   return {
-    label: `${modeLabel} · ${scene.geometry_type}`,
-    mesh: `${meshSource} · ${scene.mesh.node_count} 节点 / ${scene.mesh.element_count} 单元`,
+    label: `${t(modeLabel)} · ${scene.geometry_type}`,
+    mesh: t(
+      "{0} · {1} 节点 / {2} 单元",
+      meshSource,
+      scene.mesh.node_count,
+      scene.mesh.element_count,
+    ),
     result: `${scalarLabel} · ${formatScalar(field.min)} ~ ${formatScalar(field.max)}`,
-    scalarLabel
+    scalarLabel,
   };
 }
 
@@ -1771,15 +2070,21 @@ function positive(value: number | null | undefined, fallback: number) {
   return fallback;
 }
 
-function midpoint(minPoint: [number, number, number], maxPoint: [number, number, number]) {
+function midpoint(
+  minPoint: [number, number, number],
+  maxPoint: [number, number, number],
+) {
   return [
     (minPoint[0] + maxPoint[0]) / 2,
     (minPoint[1] + maxPoint[1]) / 2,
-    (minPoint[2] + maxPoint[2]) / 2
+    (minPoint[2] + maxPoint[2]) / 2,
   ] as [number, number, number];
 }
 
-function cameraOffset(geometryType: string, mode: RenderMode): [number, number, number] {
+function cameraOffset(
+  geometryType: string,
+  mode: RenderMode,
+): [number, number, number] {
   const normalized = geometryType.toLowerCase();
   if (normalized === "beam") {
     return mode === "result" ? [1.34, 1.02, 0.7] : [1.0, 0.72, 0.52];
@@ -1791,7 +2096,10 @@ function cameraOffset(geometryType: string, mode: RenderMode): [number, number, 
 }
 
 function scalarColor(value: number, min: number, range: number) {
-  const clamped = Math.min(Math.max((value - min) / Math.max(range, 1e-9), 0), 1);
+  const clamped = Math.min(
+    Math.max((value - min) / Math.max(range, 1e-9), 0),
+    1,
+  );
   const color = new THREE.Color();
   color.setHSL(0.62 - 0.62 * clamped, 0.85, 0.52);
   return color;

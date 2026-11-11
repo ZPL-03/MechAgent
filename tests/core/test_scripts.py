@@ -288,7 +288,9 @@ def test_check_wheel_install_import_check_validates_license_files() -> None:
     assert 'single_path("mechagent-*.dist-info")' in check_wheel_install._IMPORT_CHECK_CODE
     assert 'single_path("mechagent_core-*.dist-info")' in check_wheel_install._IMPORT_CHECK_CODE
     assert '"licenses" / "LICENSE"' in check_wheel_install._IMPORT_CHECK_CODE
-    assert "Requires-Dist: mechagent-core==0.1.0" in check_wheel_install._IMPORT_CHECK_CODE
+    assert "Requires-Dist: mechagent-core=={version('mechagent-core')}" in (
+        check_wheel_install._IMPORT_CHECK_CODE
+    )
     assert "Requires-Dist: langgraph>=0.2" in check_wheel_install._IMPORT_CHECK_CODE
     assert "Requires-Dist: gmsh>=4.13" in check_wheel_install._IMPORT_CHECK_CODE
     assert "entry_points.txt" in check_wheel_install._IMPORT_CHECK_CODE

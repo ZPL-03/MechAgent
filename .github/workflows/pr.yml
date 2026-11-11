@@ -26,6 +26,7 @@ jobs:
       - name: Build Studio frontend
         run: |
           npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+          npm --prefix apps/mechagent-studio test
           npm --prefix apps/mechagent-studio run build
       - name: Quality checks
         run: |

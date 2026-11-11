@@ -27,13 +27,6 @@ export function buildStageRows(
   });
 }
 
-export function stageCaption(stage: StageRow) {
-  if (!stage.eventMessage) {
-    return stage.caption;
-  }
-  return stage.eventTime ? `${stage.caption} · ${stage.eventTime}` : stage.caption;
-}
-
 export function stageState(
   key: StageKey,
   result: StudioRunResponse | null,

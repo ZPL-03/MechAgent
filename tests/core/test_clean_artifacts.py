@@ -44,7 +44,7 @@ def test_clean_artifacts_uses_repository_root(
     monkeypatch.setattr(clean_artifacts, "REPO_ROOT", repo)
     monkeypatch.chdir(unrelated)
 
-    result = clean_artifacts.main()
+    result = clean_artifacts.main(["--include-runs"])
 
     assert result == 0
     assert not (repo / "build").exists()
@@ -66,7 +66,7 @@ def test_clean_artifacts_rejects_paths_outside_repository(tmp_path: Path) -> Non
     outside = tmp_path / "outside"
     outside.mkdir()
 
-    with pytest.raises(ValueError, match="不在仓库目录内"):
+    with pytest.raises(ValueError, match="不在仓库子目录内"):
         clean_artifacts._ensure_inside_repo(outside)
 
 
@@ -87,3 +87,34 @@ def test_clean_artifacts_scan_tolerates_vanished_paths(
     monkeypatch.setattr(clean_artifacts, "REPO_ROOT", VanishingRoot())
 
     assert list(clean_artifacts._iter_repo_paths(".pytest_cache")) == [cache]
+
+
+def test_default_cleanup_preserves_runs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    output = tmp_path / "mechagent_output"
+    output.mkdir()
+    (output / "evidence.dat").write_text("result")
+    assert clean_artifacts.main([]) == 0
+    assert (output / "evidence.dat").exists()
+
+
+def test_cleanup_preserves_tracked_files(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    build = tmp_path / "build"
+    build.mkdir()
+    formal = build / "formal.dat"
+    formal.write_text("keep")
+    monkeypatch.setattr(clean_artifacts, "_tracked_paths", lambda: {formal})
+    assert clean_artifacts.main(["--include-runs"]) == 0
+    assert formal.exists()
+
+
+def test_cleanup_rejects_locked_runs_before_deleting(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    (tmp_path / "build").mkdir()
+    (tmp_path / "job.lck").touch()
+    with pytest.raises(RuntimeError, match="求解锁"):
+        clean_artifacts.main(["--include-runs"])
+    assert (tmp_path / "build").exists()

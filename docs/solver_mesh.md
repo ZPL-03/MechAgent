@@ -77,3 +77,11 @@ A = b h
 ```
 
 标准验证数值见 [验证与质量门禁](validation.md)。
+
+## Abaqus 独立工具检查
+
+`scripts/run_abaqus_smoke.py` 调用 `scripts/abaqus/linear_static_smoke.py.tmpl`，在唯一运行目录执行 Abaqus/CAE 建模、C3D8R 网格、Abaqus/Standard 静力与 ODB 提取。模型为 100 × 10 × 10 mm 实体，E=210000 MPa、nu=0.3、端面拉应力 1 MPa；约束消除刚体运动并允许泊松收缩。
+
+位移参考为 `pL/E=0.000476190476 mm`，应力参考为 1 MPa。检查要求体积 10000 mm³、正节点/单元数、求解器 `.sta` 明确成功、ODB 解锁且位移与应力相对误差均不大于 1%。CAE `job.status` 与求解器完成来源分别记录，不能只依据启动器退出码判定成功。
+
+结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是平台注册能力，也不是与 CalculiX 现有固定端实体模型的同边界对比。平台接入仍需 `AbstractCADKernel`/`AbstractMesher`/`AbstractSolver` 适配、区域与单元映射、结果契约、失败测试和跨工具验证。商业工具的安装与许可由使用者维护。

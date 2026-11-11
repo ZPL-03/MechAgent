@@ -83,6 +83,8 @@ def _run_import_check(target: Path) -> dict[str, object]:
 _IMPORT_CHECK_CODE = r"""
 import inspect
 import json
+import re
+from importlib.metadata import version
 from pathlib import Path
 
 import mechagent
@@ -131,7 +133,7 @@ core_metadata = (core_dist / "METADATA").read_text(encoding="utf-8")
 app_entry_points = (app_dist / "entry_points.txt").read_text(encoding="utf-8")
 if "Name: mechagent" not in app_metadata:
     raise AssertionError("mechagent wheel 缺少包名元数据。")
-if "Requires-Dist: mechagent-core==0.1.0" not in app_metadata:
+if f"Requires-Dist: mechagent-core=={version('mechagent-core')}" not in app_metadata:
     raise AssertionError("mechagent wheel 缺少 mechagent-core 精确依赖。")
 if "Requires-Dist: langgraph>=0.2" not in app_metadata:
     raise AssertionError("mechagent wheel 缺少 langgraph 依赖。")
@@ -155,15 +157,11 @@ if not any(studio_assets.glob("*.js")):
     raise AssertionError(f"缺少 Studio JS 资源: {studio_assets}")
 if not any(studio_assets.glob("*.css")):
     raise AssertionError(f"缺少 Studio CSS 资源: {studio_assets}")
-for brand_name in (
-    "favicon-32.png",
-    "mechagent-logo-64.png",
-    "mechagent-logo-192.png",
-    "mechagent-logo.png",
-):
-    brand_path = studio_brand / brand_name
-    if not brand_path.exists():
-        raise AssertionError(f"缺少 Studio 品牌资源: {brand_path}")
+html = studio_index.read_text(encoding="utf-8")
+for asset in re.findall(r'(?:src|href)="(/(?:assets|brand)/[^"]+)"', html):
+    resource = studio_index.parent / asset.lstrip("/")
+    if not resource.is_file():
+        raise AssertionError(f"缺少 Studio 资源: {resource}")
 
 params = tc01_model_params()
 print(json.dumps({

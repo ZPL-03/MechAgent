@@ -1,47 +1,23 @@
 # mechagent-core
 
-`mechagent-core` 提供开源 CAE/FEA 工具抽象层，包括求解器接口、网格器接口、
-Pydantic 数据模型、后处理工具、开源适配器和解析参考公式。该包不包含 Agent 编排，
-由 `mechagent` 在上层调用。
+`mechagent-core` 提供 CAE/FEA 数据模型、材料目录、工具抽象、后处理与验证参考，不依赖 Agent 编排层。
 
-内置材料目录位于 `mechagent.core.materials`，提供钢和铝合金的自然语言别名匹配。
-核心 Pydantic 模型要求几何尺寸、材料参数、载荷幅值/方向、边界值、网格尺寸和复合铺层数值均为有限数值。
-`MeshConfig.seed_size`、`MeshConfig.min_quality` 和 `SolverResult.wall_time` 同样拒绝非有限数值。
+| 模块 | 职责 |
+| --- | --- |
+| `models` / `rules` | Pydantic 参数、枚举、范围和结构静力执行约束 |
+| `solver` / `mesher` | `AbstractSolver`、`AbstractMesher` 与统一结果模型 |
+| `cad` | `AbstractCADKernel`、形体摘要与参数候选 |
+| `executor` | `AbstractJobExecutor`、作业模型与同步本地执行器 |
+| `factory` | 求解器、网格器、CAD 内核与执行器的注册/创建/注销 |
+| `materials` / `postproc` | 钢铝材料目录、`PostProcessor` 摘要；没有独立工厂注册 API |
+| `adapters` / `validation` | CalculiX、Gmsh OCC 适配与解析参考 |
 
-## 适配器
+内置注册名为 `calculix`、`calculix-inp`、`gmsh-occ`、`local`。适配器封装后端格式和调用，不把单一求解器的专用模型设为通用默认契约。参数拒绝非有限数值，成功网格必须提供实际网格路径。支持范围和失败行为见[架构与数据契约](../../docs/architecture.md)、[工具说明](../../docs/solver_mesh.md)。
 
-- `CalculiXAdapter`：生成 B31 梁、S3/S4 壳板和 C3D8R 实体 `.inp`，调用 CalculiX，并解析 `.frd`。
-- `CalculiXInpMesher`：矩形板和单孔/多孔薄板路径调用 Gmsh Python API，梁和矩形实体块路径使用确定性结构化网格，
-  统一生成 CalculiX 可消费网格片段。
+在已激活 Python 3.10+ 虚拟环境中安装：
 
-网格质量通过 `MeshResult.quality` 进入上层编排。Gmsh 路径读取 `min_sicn` 与 `mean_sicn`；
-结构化梁和实体路径提供确定性质量指标。`mesher.min_quality` 只作用于 `min_*` 质量指标，
-不把单元数量、最大尺寸或其他上界指标作为最小质量门槛。
+```powershell
+python -m pip install -e packages/mechagent-core
+```
 
-求解器和网格器通过 `register_solver()`、`register_mesher()` 注册到工厂，通过
-`unregister_solver()`、`unregister_mesher()` 注销。上层调用 `create_solver()`、
-`create_mesher()` 获取后端实例。
-
-工程规则函数包括 `check_parameter_ranges()`、`ensure_parameter_ranges()`、
-`check_static_execution_contract()` 和 `ensure_static_execution_contract()`。
-`CalculiXAdapter` 在输入生成前校验各向同性线性静力材料、几何非线性开关、单元类型、
-几何必需尺寸、边界条件、载荷区域和载荷方向。
-
-## 结构静力能力
-
-| 几何 | 单元 | 载荷 | 边界 |
-| --- | --- | --- | --- |
-| 梁 | B31 | 纯全局 Y 向端部集中力、全跨均布线载荷 | 一端固支 |
-| 矩形板 | S4 | 纯全局 Z 向均布压力 | 四边简支 |
-| 开孔薄板 | S3/S4 | 纯全局 Z 向均布压力 | 外边界四边简支，孔边自由，单孔或多孔孔心坐标可由自然语言给定 |
-| 矩形实体块 | C3D8R | 纯全局 X 向端面压力、端面合力 | 一端固定 |
-
-## 标准验证
-
-| 编号 | 物理量 | 求解器 | 验收 |
-| --- | --- | --- | --- |
-| TC-01 | `tip_deflection` | CalculiX | 误差 < 1% |
-| TC-02 | `center_deflection` | CalculiX | 误差 < 2% |
-| TC-03 | `axial_displacement` | CalculiX | 误差 < 8% |
-| TC-04 | `tip_deflection` | CalculiX | 误差 < 2% |
-| TC-05 | `axial_displacement` | CalculiX | 误差 < 8% |
+本包采用 Apache License 2.0，提供 PEP 561 类型标记。验证与数值证据见[验证说明](../../docs/validation.md)。

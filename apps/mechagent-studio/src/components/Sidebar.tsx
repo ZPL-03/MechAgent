@@ -1,8 +1,22 @@
-import { History, Ruler, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { useI18n } from "../i18n/LocaleProvider";
+import { handleTabKeyDown } from "../lib/tabs";
+import {
+  History,
+  Ruler,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+} from "lucide-react";
 import { EXAMPLE_FILTERS } from "../lib/constants";
 import { runOutcome } from "../lib/results";
 import { historyMeta, historyTitle } from "../lib/storage";
-import type { DisplayItem, Example, ExampleFilter, RunHistoryItem, SideTab } from "../lib/uiTypes";
+import type {
+  DisplayItem,
+  Example,
+  ExampleFilter,
+  RunHistoryItem,
+  SideTab,
+} from "../lib/uiTypes";
 import type { StudioRunResponse } from "../types";
 import { CompactEmpty } from "./common";
 
@@ -22,7 +36,7 @@ export function SidePanel({
   onClearHistory,
   onUndoClear,
   onSelectHistory,
-  facts
+  facts,
 }: {
   selectedSideTab: SideTab;
   onSelectSideTab: (tab: SideTab) => void;
@@ -41,14 +55,24 @@ export function SidePanel({
   onSelectHistory: (item: RunHistoryItem) => void;
   facts: DisplayItem[];
 }) {
-  const tabs: Array<{ key: SideTab; label: string; icon: typeof SlidersHorizontal }> = [
-    { key: "examples", label: "工况", icon: SlidersHorizontal },
-    { key: "history", label: "历史", icon: History },
-    { key: "facts", label: "摘要", icon: Ruler }
+  const { t } = useI18n();
+  const tabs: Array<{
+    key: SideTab;
+    label: string;
+    icon: typeof SlidersHorizontal;
+  }> = [
+    { key: "examples", label: t("工况"), icon: SlidersHorizontal },
+    { key: "history", label: t("历史"), icon: History },
+    { key: "facts", label: t("摘要"), icon: Ruler },
   ];
   return (
     <section className="panel side-panel">
-      <div className="side-tabs" role="tablist" aria-label="输入辅助面板">
+      <div
+        className="side-tabs"
+        role="tablist"
+        aria-label={t("输入辅助面板")}
+        onKeyDown={handleTabKeyDown}
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -57,16 +81,24 @@ export function SidePanel({
               className={selectedSideTab === tab.key ? "active" : ""}
               type="button"
               role="tab"
+              id={`side-tab-${tab.key}`}
+              aria-controls="side-tabpanel"
+              tabIndex={selectedSideTab === tab.key ? 0 : -1}
               aria-selected={selectedSideTab === tab.key}
               onClick={() => onSelectSideTab(tab.key)}
             >
               <Icon aria-hidden="true" size={15} />
-              {tab.label}
+              {t(tab.label)}
             </button>
           );
         })}
       </div>
-      <div className="side-panel-body">
+      <div
+        className="side-panel-body"
+        role="tabpanel"
+        id="side-tabpanel"
+        aria-labelledby={`side-tab-${selectedSideTab}`}
+      >
         {selectedSideTab === "examples" && (
           <ExampleList
             examples={examples}
@@ -101,7 +133,7 @@ function ExampleList({
   query,
   onFilterChange,
   onQueryChange,
-  onSelect
+  onSelect,
 }: {
   examples: Example[];
   totalCount: number;
@@ -111,6 +143,7 @@ function ExampleList({
   onQueryChange: (query: string) => void;
   onSelect: (request: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="example-panel">
       <div className="example-toolbar">
@@ -121,13 +154,13 @@ function ExampleList({
             name="example-search"
             autoComplete="off"
             inputMode="search"
-            placeholder="搜索工况、材料、载荷…"
+            placeholder={t("搜索工况、材料、载荷…")}
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            aria-label="搜索工况示例"
+            aria-label={t("搜索工况示例")}
           />
         </label>
-        <div className="example-filter" role="group" aria-label="工况筛选">
+        <div className="example-filter" role="group" aria-label={t("工况筛选")}>
           {EXAMPLE_FILTERS.map((item) => (
             <button
               key={item.key}
@@ -136,12 +169,12 @@ function ExampleList({
               aria-pressed={filter === item.key}
               onClick={() => onFilterChange(item.key)}
             >
-              {item.label}
+              {t(item.label)}
             </button>
           ))}
         </div>
         <span className="example-count">
-          {examples.length}/{totalCount} 个工况
+          {examples.length}/{totalCount} {t("个工况")}
         </span>
       </div>
       {examples.length > 0 ? (
@@ -154,14 +187,14 @@ function ExampleList({
               type="button"
               onClick={() => onSelect(example.request)}
             >
-              <span className="example-tag">{example.tag}</span>
-              <strong>{example.title}</strong>
+              <span className="example-tag">{t(example.tag)}</span>
+              <strong>{t(example.title)}</strong>
               <small>{example.request}</small>
             </button>
           ))}
         </div>
       ) : (
-        <CompactEmpty text="没有匹配工况。" />
+        <CompactEmpty text={t("没有匹配工况。")} />
       )}
     </div>
   );
@@ -173,7 +206,7 @@ function HistoryList({
   recentlyClearedCount,
   onClear,
   onUndoClear,
-  onSelect
+  onSelect,
 }: {
   activeHistoryId: string | null;
   history: RunHistoryItem[];
@@ -182,27 +215,35 @@ function HistoryList({
   onUndoClear: () => void;
   onSelect: (item: RunHistoryItem) => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="side-panel-actions">
-        <span>{history.length > 0 ? `${history.length} 条记录` : "无历史记录"}</span>
+        <span>
+          {history.length > 0
+            ? t("{0} 条记录", history.length)
+            : t("无历史记录")}
+        </span>
         <button
           className="clear-history-button"
-          title="清空历史"
+          title={t("清空历史")}
           type="button"
-          aria-label="清空运行历史"
+          aria-label={t("清空运行历史")}
           disabled={history.length === 0}
           onClick={onClear}
         >
           <Trash2 aria-hidden="true" size={16} />
-          <span>清空</span>
+          <span>{t("清空")}</span>
         </button>
       </div>
       {recentlyClearedCount > 0 && (
         <div className="undo-clear" role="status" aria-live="polite">
-          <span>已清空 {recentlyClearedCount} 条记录</span>
+          <span>
+            {t("已清空")}
+            {recentlyClearedCount} {t("条记录")}
+          </span>
           <button type="button" onClick={onUndoClear}>
-            恢复
+            {t("恢复")}
           </button>
         </div>
       )}
@@ -216,34 +257,38 @@ function HistoryList({
               onClick={() => onSelect(item)}
             >
               <HistoryState result={item.result} />
-              <strong>{historyTitle(item.result)}</strong>
-              <small>{historyMeta(item)}</small>
+              <strong>{t(historyTitle(item.result))}</strong>
+              <small>{t(historyMeta(item))}</small>
               <span>{item.request}</span>
             </button>
           ))}
         </div>
       ) : (
-        <CompactEmpty text="运行后显示最近结果，便于回看不同请求。" />
+        <CompactEmpty text={t("运行后显示最近结果，便于回看不同请求。")} />
       )}
     </>
   );
 }
 
 function HistoryState({ result }: { result: StudioRunResponse }) {
+  const { t } = useI18n();
   const outcome = runOutcome(result);
-  return <span className={`history-state ${outcome.tone}`}>{outcome.label}</span>;
+  return (
+    <span className={`history-state ${outcome.tone}`}>{t(outcome.label)}</span>
+  );
 }
 
 function FactList({ facts }: { facts: DisplayItem[] }) {
+  const { t } = useI18n();
   if (facts.length === 0) {
-    return <CompactEmpty text="运行后显示几何、材料、载荷和网格摘要。" />;
+    return <CompactEmpty text={t("运行后显示几何、材料、载荷和网格摘要。")} />;
   }
   return (
     <dl className="fact-list">
       {facts.map((fact) => (
         <div key={fact.label}>
-          <dt>{fact.label}</dt>
-          <dd>{fact.value}</dd>
+          <dt>{t(fact.label)}</dt>
+          <dd>{t(fact.value)}</dd>
         </div>
       ))}
     </dl>

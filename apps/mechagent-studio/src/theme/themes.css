@@ -1,103 +1,67 @@
-/*
- * 颜色语义令牌与明暗主题。
- * :root 为浅色；[data-theme="dark"] 覆盖深色。
- * 组件只引用语义令牌（var(--color-*)），不写死色值。
- */
-
+/* 表面和文本颜色以工程工作台的层级映射；科学色标保持领域语义。 */
 :root {
   color-scheme: light;
-
-  /* 表面 */
-  --color-bg: #f3f6fa;
+  --color-bg: #edf0f2;
   --color-surface: #ffffff;
-  --color-surface-subtle: #f6f9fc;
-  --color-surface-strong: #eaf0f7;
-
-  /* 描边 */
-  --color-border: #dce3ec;
-  --color-border-strong: #b4c2d1;
-
-  /* 文本 */
-  --color-text: #14202e;
-  --color-text-muted: #566576;
-  --color-text-subtle: #8493a4;
-
-  /* 主操作 */
-  --color-primary: #1c5d99;
-  --color-primary-hover: #154a7d;
+  --color-surface-subtle: #f4f6f8;
+  --color-surface-strong: #e8edf2;
+  --color-border: #dde2e7;
+  --color-border-strong: #b2bdc8;
+  --color-text: #202833;
+  --color-text-muted: #536170;
+  --color-text-subtle: #606f7e;
+  --color-primary: #245fc0;
+  --color-primary-hover: #1c4da1;
   --color-on-primary: #ffffff;
-  --color-primary-surface: rgba(28, 93, 153, 0.1);
-
-  /* 次强调 */
-  --color-accent: #0b7a75;
-
-  /* 语义状态 */
-  --color-success: #17663a;
-  --color-warning: #9a5d12;
-  --color-danger: #b42318;
-  --color-info: #1c5d99;
-  --color-success-surface: rgba(23, 102, 58, 0.12);
-  --color-warning-surface: rgba(154, 93, 18, 0.13);
-  --color-danger-surface: rgba(180, 35, 24, 0.1);
-  --color-info-surface: rgba(28, 93, 153, 0.1);
-
-  /* 焦点 */
-  --color-focus-ring: rgba(28, 93, 153, 0.32);
-
-  /* 可视化 */
-  --color-viewport-bg: #eef3f8;
-  --color-viewport-grid: #c8d4e0;
-
-  /* 阴影 */
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.1), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.1);
-
-  /* 滚动条 */
-  --color-scrollbar: #c4d0dd;
-  --color-scrollbar-hover: #a7b7c8;
+  --color-primary-surface: #eaf0fb;
+  --color-accent: #287e79;
+  --color-success: #247148;
+  --color-warning: #926015;
+  --color-danger: #b53738;
+  --color-info: #245fc0;
+  --color-success-surface: #edf7f0;
+  --color-warning-surface: #fbf4e7;
+  --color-danger-surface: #fceeee;
+  --color-info-surface: #eaf0fb;
+  --color-focus-ring: #245fc0;
+  --color-viewport-bg: #e9edf1;
+  --color-viewport-grid: #c1cbd5;
+  --color-field-low: #255bbb;
+  --color-field-mid: #53c8ba;
+  --color-field-high: #e8bb51;
+  --color-field-max: #d85140;
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px #18233018;
+  --shadow-lg: 0 16px 48px #18233024;
 }
-
 [data-theme="dark"] {
   color-scheme: dark;
-
-  --color-bg: #0c1118;
-  --color-surface: #151c26;
-  --color-surface-subtle: #1a2330;
-  --color-surface-strong: #23303f;
-
-  --color-border: #2a3645;
-  --color-border-strong: #3c4c5f;
-
-  --color-text: #e7eef6;
-  --color-text-muted: #9eb0c2;
-  --color-text-subtle: #6c7e91;
-
-  --color-primary: #4d9be0;
-  --color-primary-hover: #69aeea;
-  --color-on-primary: #08111b;
-  --color-primary-surface: rgba(77, 155, 224, 0.16);
-
-  --color-accent: #2bb8ad;
-
-  --color-success: #3ec27e;
-  --color-warning: #e0a94c;
-  --color-danger: #ef6b5f;
-  --color-info: #4d9be0;
-  --color-success-surface: rgba(62, 194, 126, 0.15);
-  --color-warning-surface: rgba(224, 169, 76, 0.16);
-  --color-danger-surface: rgba(239, 107, 95, 0.16);
-  --color-info-surface: rgba(77, 155, 224, 0.16);
-
-  --color-focus-ring: rgba(105, 174, 234, 0.45);
-
-  --color-viewport-bg: #0f1620;
-  --color-viewport-grid: #2a3645;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
-
-  --color-scrollbar: #2f3d4e;
-  --color-scrollbar-hover: #3e4f63;
+  --color-bg: #16191d;
+  --color-surface: #1d2126;
+  --color-surface-subtle: #20252b;
+  --color-surface-strong: #2b323b;
+  --color-border: #30363e;
+  --color-border-strong: #525e6b;
+  --color-text: #e4e8ee;
+  --color-text-muted: #a6b0bd;
+  --color-text-subtle: #96a1af;
+  --color-primary: #82aaf0;
+  --color-primary-hover: #9fbef4;
+  --color-on-primary: #152339;
+  --color-primary-surface: #29374c;
+  --color-accent: #81beb4;
+  --color-success: #8ac5a0;
+  --color-warning: #dbb77b;
+  --color-danger: #f09898;
+  --color-info: #82aaf0;
+  --color-success-surface: #25372f;
+  --color-warning-surface: #383126;
+  --color-danger-surface: #3e2b30;
+  --color-info-surface: #29374c;
+  --color-focus-ring: #9fbef4;
+  --color-viewport-bg: #171c22;
+  --color-viewport-grid: #38424e;
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px #00000030;
+  --shadow-lg: 0 16px 48px #00000050;
 }

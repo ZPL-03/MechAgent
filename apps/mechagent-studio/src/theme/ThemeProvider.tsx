@@ -1,37 +1,55 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ResolvedTheme,
   THEME_STORAGE_KEY,
   ThemeContext,
-  ThemePreference
+  ThemePreference,
 } from "./themeContext";
 
 const PREFERENCE_ORDER: ThemePreference[] = ["light", "dark", "system"];
 
 function readStoredPreference(): ThemePreference {
   if (typeof window === "undefined") {
-    return "system";
+    return "dark";
   }
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    // 禁用本地存储的浏览器仍使用默认主题。
+  }
   if (stored === "light" || stored === "dark" || stored === "system") {
     return stored;
   }
-  return "system";
+  return "dark";
 }
 
 function systemTheme(): ResolvedTheme {
   if (typeof window === "undefined" || !window.matchMedia) {
     return "light";
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
-function resolveTheme(preference: ThemePreference, system: ResolvedTheme): ResolvedTheme {
+function resolveTheme(
+  preference: ThemePreference,
+  system: ResolvedTheme,
+): ResolvedTheme {
   return preference === "system" ? system : preference;
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreferenceState] = useState<ThemePreference>(() => readStoredPreference());
+  const [preference, setPreferenceState] = useState<ThemePreference>(() =>
+    readStoredPreference(),
+  );
   const [system, setSystem] = useState<ResolvedTheme>(() => systemTheme());
 
   // 跟随系统配色变化。
@@ -87,8 +105,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({ preference, resolvedTheme, setPreference, cyclePreference }),
-    [preference, resolvedTheme, setPreference, cyclePreference]
+    [preference, resolvedTheme, setPreference, cyclePreference],
   );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }

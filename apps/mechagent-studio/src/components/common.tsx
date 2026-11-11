@@ -1,14 +1,16 @@
+import { useI18n } from "../i18n/LocaleProvider";
 import type { ReactNode } from "react";
 
 export function PanelTitle({
   icon,
   title,
-  actions
+  actions,
 }: {
   icon?: ReactNode;
   title: string;
   actions?: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <div className="panel-title">
       <div className="panel-title-head">
@@ -17,7 +19,7 @@ export function PanelTitle({
             {icon}
           </span>
         ) : null}
-        <h2>{title}</h2>
+        <h2>{t(title)}</h2>
       </div>
       {actions ? <div className="panel-actions">{actions}</div> : null}
     </div>
@@ -29,7 +31,7 @@ export function EmptyState({
   title,
   text,
   actionLabel,
-  onAction
+  onAction,
 }: {
   icon: ReactNode;
   title: string;
@@ -37,16 +39,17 @@ export function EmptyState({
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="empty-state">
       <span className="empty-state-icon" aria-hidden="true">
         {icon}
       </span>
-      <strong>{title}</strong>
-      <span>{text}</span>
+      <strong>{t(title)}</strong>
+      <span>{t(text)}</span>
       {actionLabel && onAction ? (
         <button className="empty-action" type="button" onClick={onAction}>
-          {actionLabel}
+          {t(actionLabel)}
         </button>
       ) : null}
     </div>
@@ -54,10 +57,17 @@ export function EmptyState({
 }
 
 export function CompactEmpty({ text }: { text: string }) {
-  return <p className="compact-empty">{text}</p>;
+  const { t } = useI18n();
+  return <p className="compact-empty">{t(text)}</p>;
 }
 
-export function Skeleton({ lines = 3, className }: { lines?: number; className?: string }) {
+export function Skeleton({
+  lines = 3,
+  className,
+}: {
+  lines?: number;
+  className?: string;
+}) {
   return (
     <div className={`skeleton-block ${className ?? ""}`} aria-hidden="true">
       {Array.from({ length: lines }).map((_, index) => (
