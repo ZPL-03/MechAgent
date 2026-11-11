@@ -84,6 +84,8 @@ python scripts/clean_artifacts.py
 
 `scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；它不提供签名、作者身份或可信构建服务证明。
 
+Python 运行时依赖审计的 JSON 报告作为发布证据上传；报告缺失或漏洞服务不可用时，审计门禁失败，发布清单不会伪造审计结果。
+
 ## 作业故障与证据校验
 
 `tests/core/test_runtime.py` 使用真实独立进程验证取消、心跳丢失、执行超时、进程身份与子进程终止，使用数据库并发验证幂等键、排队容量和领取上限。API 测试通过真实 worker 产生失败报告，并在应用生命周期重启后查询相同作业；不依靠同进程 monkeypatch 代替 worker 求解。SDK、结果文件和清单测试覆盖配置脱敏、源配置变化、文件缺失与内容篡改。
