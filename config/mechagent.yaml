@@ -33,3 +33,11 @@ orchestrator:
 output:
   default_format: markdown
   output_dir: mechagent_output
+
+studio:
+  database: mechagent_output/.studio/jobs.sqlite3
+  max_workers: 2
+  max_queued: 32
+  startup_timeout: 60
+  heartbeat_timeout: 30
+  job_timeout: 7200

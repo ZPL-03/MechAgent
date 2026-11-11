@@ -2,31 +2,36 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 import webbrowser
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from threading import RLock, Thread
 from typing import Any, Optional
 from urllib.parse import urlencode
-from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent import MechAgent, __version__
+from mechagent.config import StudioSettings
 from mechagent.diagnostics import run_environment_diagnostics
+from mechagent.evidence import verify_manifest, write_manifest
 from mechagent.examples import example_payloads
 from mechagent.orchestrator.capabilities import all_capabilities
-from mechagent.orchestrator.progress import ProgressEvent, progress_sink
-from mechagent.ui.visualization import visualizations_from_summary
+from mechagent.runtime.manager import JobManager
+from mechagent.runtime.store import (
+    TERMINAL,
+    IdempotencyError,
+    JobStore,
+    QueueFullError,
+)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
-_MAX_STUDIO_JOBS = 16
 _STUDIO_VIEW_MODES = {"geometry", "mesh", "result"}
 
 
@@ -34,48 +39,85 @@ class StudioRunRequest(BaseModel):
     """Studio 单次运行请求。"""
 
     model_config = ConfigDict(extra="forbid")
-
-    request: str = Field(default="", description="自然语言仿真请求。")
-    use_llm_agents: bool = Field(default=False, description="本次运行是否启用远端参数补全链路。")
-
-
-@dataclass
-class StudioJob:
-    """Studio 后端作业状态。"""
-
-    job_id: str
-    request: str
-    use_llm_agents: bool
-    status: str
-    created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    result: dict[str, Any] | None = None
-    error: str | None = None
-    events: list[ProgressEvent] | None = None
+    request: str = Field(default="", max_length=20000, description="自然语言仿真请求。")
+    use_llm_agents: bool = Field(default=False, description="是否启用远端参数补全链路。")
 
 
-def create_studio_app(config: Path = Path("config/mechagent.yaml")) -> FastAPI:
-    """创建 MechAgent Studio ASGI 应用。"""
-
+def create_studio_app(
+    config: Path = Path("config/mechagent.yaml"), *, studio_settings: StudioSettings | None = None
+) -> FastAPI:
+    """创建本机单用户 ASGI 应用；生命周期启动持久队列调度。"""
     config_path = config
-    jobs: dict[str, StudioJob] = {}
-    jobs_lock = RLock()
+    manager: JobManager | None = None
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        nonlocal manager
+        settings = studio_settings or MechAgent.from_config(config_path).config.studio
+        manager = JobManager(JobStore(settings.database), settings)
+        manager.start()
+        try:
+            yield
+        finally:
+            manager.close()
+
     app = FastAPI(
         title="MechAgent Studio API",
         version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
+
+    def runtime() -> JobManager:
+        if manager is None:
+            raise HTTPException(503, "作业调度器未启动。")
+        return manager
+
+    def read(job_id: str) -> dict[str, Any]:
+        try:
+            return runtime().store.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(404, "作业不存在。") from exc
+
+    def payload(job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
+        try:
+            return runtime().store.payload(job, include_result=include_result)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    def submit(
+        body: StudioRunRequest, key: str | None, parent: str | None = None
+    ) -> dict[str, Any]:
+        request_text = body.request.strip()
+        if not request_text:
+            raise HTTPException(400, "请求不能为空。")
+        dispatcher = runtime()
+        if dispatcher.error:
+            raise HTTPException(503, dispatcher.error)
+        try:
+            return dispatcher.store.submit(
+                request_text,
+                body.use_llm_agents,
+                config_path,
+                max_queued=dispatcher.settings.max_queued,
+                idempotency_key=key,
+                parent_job_id=parent,
+            )
+        except IdempotencyError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except QueueFullError as exc:
+            raise HTTPException(429, str(exc), headers={"Retry-After": "2"}) from exc
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {
-            "ok": True,
+            "ok": manager is None or manager.error is None,
             "product": "MechAgent Studio",
             "config": str(config_path),
             "python_executable": sys.executable,
             "static_ready": _STATIC_DIR.joinpath("index.html").exists(),
+            "runtime": {"ready": manager is not None, "error": manager.error if manager else None},
         }
 
     @app.get("/api/diagnostics")
@@ -107,63 +149,106 @@ def create_studio_app(config: Path = Path("config/mechagent.yaml")) -> FastAPI:
         return {"examples": example_payloads()}
 
     @app.post("/api/run")
-    async def run_simulation(payload: StudioRunRequest) -> dict[str, Any]:
-        request_text = payload.request.strip()
-        if not request_text:
-            raise HTTPException(status_code=400, detail="请求不能为空。")
-        return _run_studio_request(config_path, request_text, payload.use_llm_agents)
+    def run_simulation(
+        body: StudioRunRequest,
+        idempotency_key: str | None = Header(None, min_length=1, max_length=128),
+    ) -> dict[str, Any]:
+        job = submit(body, idempotency_key)
+        while job["status"] not in TERMINAL:
+            if runtime().error:
+                raise HTTPException(503, runtime().error)
+            time.sleep(0.25)
+            job = read(job["job_id"])
+        return payload(job)["result"] or {
+            "success": False,
+            "error": job["error"],
+            "job_id": job["job_id"],
+            "status": job["status"],
+        }
 
     @app.post("/api/inspect")
-    async def inspect_simulation(payload: StudioRunRequest) -> dict[str, Any]:
-        request_text = payload.request.strip()
+    def inspect_simulation(body: StudioRunRequest) -> dict[str, Any]:
+        request_text = body.request.strip()
         if not request_text:
-            raise HTTPException(status_code=400, detail="请求不能为空。")
-        agent = MechAgent.from_config(config_path)
-        return agent.inspect(
-            request_text,
-            use_llm_agents=payload.use_llm_agents,
-        ).model_dump(mode="json")
+            raise HTTPException(400, "请求不能为空。")
+        return (
+            MechAgent.from_config(config_path)
+            .inspect(
+                request_text,
+                use_llm_agents=body.use_llm_agents,
+            )
+            .model_dump(mode="json")
+        )
 
     @app.post("/api/jobs", status_code=202)
-    def create_job(payload: StudioRunRequest) -> dict[str, Any]:
-        request_text = payload.request.strip()
-        if not request_text:
-            raise HTTPException(status_code=400, detail="请求不能为空。")
-        job = StudioJob(
-            job_id=uuid4().hex,
-            request=request_text,
-            use_llm_agents=payload.use_llm_agents,
-            status="queued",
-            created_at=_utc_now(),
-            events=[],
-        )
-        with jobs_lock:
-            jobs[job.job_id] = job
-            _prune_jobs(jobs)
-        thread = Thread(
-            target=_run_studio_job,
-            args=(jobs, jobs_lock, job.job_id, config_path),
-            daemon=True,
-        )
-        thread.start()
-        return _job_payload(job)
+    def create_job(
+        body: StudioRunRequest,
+        idempotency_key: str | None = Header(None, min_length=1, max_length=128),
+    ) -> dict[str, Any]:
+        return payload(submit(body, idempotency_key))
 
     @app.get("/api/jobs/{job_id}")
     def read_job(job_id: str) -> dict[str, Any]:
-        with jobs_lock:
-            job = jobs.get(job_id)
-            if job is None:
-                raise HTTPException(status_code=404, detail="作业不存在。")
-            return _job_payload(job)
+        return payload(read(job_id))
 
     @app.get("/api/jobs")
-    def list_jobs() -> dict[str, Any]:
-        with jobs_lock:
-            ordered_jobs = sorted(jobs.values(), key=lambda item: item.created_at, reverse=True)
-            return {"jobs": [_job_payload(item) for item in ordered_jobs]}
+    def list_jobs(
+        limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)
+    ) -> dict[str, Any]:
+        return {
+            "jobs": [
+                payload(item, include_result=False)
+                for item in runtime().store.list_jobs(limit=limit, offset=offset)
+            ]
+        }
+
+    @app.post("/api/jobs/{job_id}/cancel", status_code=202)
+    def cancel_job(job_id: str) -> dict[str, Any]:
+        read(job_id)
+        runtime().store.cancel(job_id)
+        job = read(job_id)
+        if job["status"] == "cancelled":
+            write_manifest(
+                runtime().store.directory(job_id),
+                status="cancelled",
+                details={"job_id": job_id, "error_code": "cancelled_before_start"},
+            )
+        return payload(job)
+
+    @app.post("/api/jobs/{job_id}/retry", status_code=202)
+    def retry_job(
+        job_id: str, idempotency_key: str | None = Header(None, min_length=1, max_length=128)
+    ) -> dict[str, Any]:
+        job = read(job_id)
+        if job["status"] not in TERMINAL:
+            raise HTTPException(409, "只有终态作业可以重试。")
+        return payload(
+            submit(
+                StudioRunRequest(request=job["request"], use_llm_agents=job["use_llm_agents"]),
+                idempotency_key,
+                job_id,
+            )
+        )
+
+    @app.get("/api/jobs/{job_id}/evidence")
+    def job_evidence(job_id: str) -> dict[str, Any]:
+        job = read(job_id)
+        if job["status"] not in TERMINAL:
+            raise HTTPException(409, "作业尚未结束。")
+        path = runtime().store.directory(job_id) / "manifest.json"
+        if not path.is_file():
+            raise HTTPException(409, "作业证据清单缺失。")
+        errors = verify_manifest(path)
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "manifest": json.loads(path.read_text(encoding="utf-8")),
+        }
 
     @app.get("/{full_path:path}")
     def serve_studio(full_path: str) -> Response:
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "API 不存在。")
         if _STATIC_DIR.joinpath("index.html").exists():
             static_file = _static_file_for(full_path)
             if static_file is not None and static_file.is_file():
@@ -172,114 +257,6 @@ def create_studio_app(config: Path = Path("config/mechagent.yaml")) -> FastAPI:
         return HTMLResponse(render_index_html())
 
     return app
-
-
-def _run_studio_request(
-    config_path: Path,
-    request_text: str,
-    use_llm_agents: bool,
-) -> dict[str, Any]:
-    started = time.perf_counter()
-    try:
-        agent = MechAgent.from_config(config_path)
-        result = agent.run(request_text, use_llm_agents=use_llm_agents)
-        visualizations = [item.to_dict() for item in visualizations_from_summary(result.summary)]
-        return {
-            "success": bool(result.summary.get("success", False)),
-            "report": result.report,
-            "summary": result.summary,
-            "visualizations": visualizations,
-            "metadata": {"duration_ms": int((time.perf_counter() - started) * 1000)},
-        }
-    except Exception as exc:
-        return {
-            "success": False,
-            "error": str(exc),
-            "summary": {
-                "success": False,
-                "errors": [{"node": "studio", "message": str(exc)}],
-                "tasks": [],
-            },
-            "visualizations": [],
-            "metadata": {"duration_ms": int((time.perf_counter() - started) * 1000)},
-        }
-
-
-def _run_studio_job(
-    jobs: dict[str, StudioJob],
-    jobs_lock: RLock,
-    job_id: str,
-    config_path: Path,
-) -> None:
-    with jobs_lock:
-        job = jobs[job_id]
-        job.status = "running"
-        job.started_at = _utc_now()
-        request_text = job.request
-        use_llm_agents = job.use_llm_agents
-    try:
-
-        def collect_event(event: ProgressEvent) -> None:
-            with jobs_lock:
-                active_job = jobs[job_id]
-                if active_job.events is None:
-                    active_job.events = []
-                active_job.events.append(event)
-
-        with progress_sink(collect_event):
-            result = _run_studio_request(config_path, request_text, use_llm_agents)
-        with jobs_lock:
-            job = jobs[job_id]
-            job.result = result
-            job.error = result.get("error")
-            job.status = "succeeded" if result.get("success") else "failed"
-            job.finished_at = _utc_now()
-    except Exception as exc:
-        with jobs_lock:
-            job = jobs[job_id]
-            job.result = None
-            job.error = str(exc)
-            job.status = "failed"
-            job.finished_at = _utc_now()
-
-
-def _job_payload(job: StudioJob) -> dict[str, Any]:
-    duration_ms: int | None = None
-    if job.started_at is not None:
-        ended_at = job.finished_at or _utc_now()
-        duration_ms = int((ended_at - job.started_at).total_seconds() * 1000)
-    return {
-        "job_id": job.job_id,
-        "status": job.status,
-        "request": job.request,
-        "use_llm_agents": job.use_llm_agents,
-        "created_at": _isoformat(job.created_at),
-        "started_at": _isoformat(job.started_at),
-        "finished_at": _isoformat(job.finished_at),
-        "duration_ms": duration_ms,
-        "result": job.result,
-        "error": job.error,
-        "events": list(job.events or []),
-    }
-
-
-def _prune_jobs(jobs: dict[str, StudioJob]) -> None:
-    removable = sorted(
-        (job for job in jobs.values() if job.status not in {"queued", "running"}),
-        key=lambda item: item.created_at,
-    )
-    while len(jobs) > _MAX_STUDIO_JOBS and removable:
-        jobs.pop(removable.pop(0).job_id, None)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _isoformat(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.isoformat().replace("+00:00", "Z")
 
 
 def run_studio(

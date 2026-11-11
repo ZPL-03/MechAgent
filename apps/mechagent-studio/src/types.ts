@@ -269,7 +269,8 @@ export interface StudioRunResponse {
   error?: string;
 }
 
-export type StudioJobStatus = "queued" | "running" | "succeeded" | "failed";
+export type StudioJobStatus = "queued" | "starting" | "running" | "cancelling" |
+  "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export interface StudioProgressEvent {
   stage: StageKey;

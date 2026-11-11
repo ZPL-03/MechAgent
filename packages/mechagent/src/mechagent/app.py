@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Optional, Union, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from mechagent.config import MechAgentConfig
+from mechagent.config import MechAgentConfig, config_to_public_dict
+from mechagent.evidence import public_value, write_manifest
 from mechagent.orchestrator import (
     ErrorRecord,
     SequentialWorkflow,
@@ -20,6 +21,7 @@ from mechagent.orchestrator import (
 )
 from mechagent.orchestrator.agents import PlannerAgent
 from mechagent.orchestrator.graph import build_graph
+from mechagent.orchestrator.ids import new_run_id
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 
 _ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
@@ -51,6 +53,7 @@ class MechAgentResult(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     output_dir: Optional[Path] = None
     report_path: Optional[Path] = None
+    manifest_path: Optional[Path] = None
 
     def save_report(self, path: Union[str, Path]) -> Path:
         """保存 Markdown 报告。
@@ -146,9 +149,23 @@ class MechAgent:
         config_path = Path(path)
         if not config_path.exists():
             raise FileNotFoundError(config_path)
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        try:
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            mark = getattr(exc, "problem_mark", None)
+            location = f"（行 {mark.line + 1}，列 {mark.column + 1}）" if mark else ""
+            raise ValueError(f"YAML 配置无法解析{location}。") from None
+        if not isinstance(data, dict):
+            raise ValueError("配置顶层必须是字段映射。")
         expanded = _expand_env(cast(dict[str, Any], data), _config_env(config_path))
-        return cls(config=MechAgentConfig.model_validate(expanded))
+        try:
+            return cls(config=MechAgentConfig.model_validate(expanded))
+        except ValidationError as exc:
+            fields = "; ".join(
+                f"{'.'.join(map(str, error['loc']))}: {error['type']}"
+                for error in exc.errors(include_input=False)
+            )
+            raise ValueError(f"配置字段校验失败：{fields}") from None
 
     def run(
         self,
@@ -174,20 +191,42 @@ class MechAgent:
             True
         """
 
-        active_config = self.config
+        active_config = self.config.model_copy(deep=True)
         if use_llm_agents is not None:
-            active_config = self.config.model_copy(deep=True)
             active_config.orchestrator.use_llm_agents = use_llm_agents
-        if active_config.orchestrator.mode.lower() == "dag":
-            result = _run_langgraph_workflow(active_config, request)
-        else:
-            workflow = SequentialWorkflow(active_config)
-            result = workflow.run(request)
+        work_dir = active_config.output.output_dir / new_run_id(request)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        details = {
+            "request": request,
+            "config": config_to_public_dict(active_config),
+            "solver_version": "unknown",
+        }
+        secrets = (active_config.llm.api_key,)
+        try:
+            if active_config.orchestrator.mode.lower() == "dag":
+                result = _run_langgraph_workflow(active_config, request, work_dir=work_dir)
+            else:
+                workflow = SequentialWorkflow(active_config)
+                result = workflow.run(request, work_dir=work_dir)
+        except Exception as exc:
+            write_manifest(
+                work_dir,
+                status="failed",
+                details=public_value({**details, "error": str(exc)}, secrets),
+            )
+            raise
+        summary = result.summary()
+        manifest_path = write_manifest(
+            work_dir,
+            status="succeeded" if result.success else "failed",
+            details=public_value({**details, "summary": summary}, secrets),
+        )
         return MechAgentResult(
             report=result.report,
-            summary=result.summary(),
+            summary=summary,
             output_dir=result.work_dir,
             report_path=result.report_path,
+            manifest_path=manifest_path,
         )
 
     def inspect(
@@ -315,9 +354,13 @@ def _expand_env(value: Any, env: dict[str, str]) -> Any:
     return value
 
 
-def _run_langgraph_workflow(config: MechAgentConfig, request: str) -> WorkflowResult:
+def _run_langgraph_workflow(
+    config: MechAgentConfig, request: str, *, work_dir: Path | None = None
+) -> WorkflowResult:
     graph = build_graph(config)
-    state = graph.invoke({"user_request": request})
+    state = graph.invoke(
+        {"user_request": request, **({"work_dir": str(work_dir)} if work_dir else {})}
+    )
     raw_records = cast(list[Any], state.get("records", []))
     raw_errors = cast(list[Any], state.get("errors", []))
     records = [TaskRunRecord.model_validate(item) for item in raw_records]

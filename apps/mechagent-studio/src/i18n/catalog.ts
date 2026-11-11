@@ -1,5 +1,15 @@
 /** 界面文案目录；工程请求、报告正文与求解器诊断保留来源语言。 */
 export const english: Record<string, string> = {
+  "启动中": "Starting", "取消中": "Cancelling", "已取消": "Cancelled",
+  "已中断": "Interrupted", "提交中…": "Submitting…", "取消": "Cancel",
+  "重新连接作业": "Reconnect to job", "服务器作业": "Server jobs",
+  "停止跟踪": "Stop tracking",
+  "已停止跟踪；服务器作业继续执行，可从服务器记录打开。": "Tracking stopped. The server job continues; reopen it from server jobs.",
+  "刷新": "Refresh", "重试": "Retry", "校验证据": "Verify evidence",
+  "最近 10 个作业；完整记录保存在本机数据库。": "Latest 10 jobs; full records are stored in the local database.",
+  "证据文件完整性通过。": "Evidence file integrity passed.",
+  "浏览器无法保存作业标识；可从服务器记录重新打开。": "The browser cannot save the job ID. Reopen it from server jobs.",
+  "浏览器作业标识无法恢复；可从服务器记录重新打开。": "The browser job ID could not be restored. Reopen it from server jobs.",
   "结构静力分析": "Structural static analysis",
   "梁图使用求解器位移场绘制变形线；无位移场时使用主结果值生成等效形状。": "The beam uses solver displacement fields; without field output, the shape is inferred from the primary result.",
 

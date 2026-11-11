@@ -1,8 +1,9 @@
 import { useI18n } from "../i18n/LocaleProvider";
 import { ClipboardList, Copy, LoaderCircle, Play, Share2 } from "lucide-react";
 import { summaryLabel, uniqueStrings } from "../lib/format";
+import { jobStatusLabel } from "../lib/job";
 import type { DisplayItem } from "../lib/uiTypes";
-import type { StudioInspectionResponse } from "../types";
+import type { StudioInspectionResponse, StudioJobResponse } from "../types";
 
 export function Composer({
   request,
@@ -16,6 +17,7 @@ export function Composer({
   cliCommand,
   workspaceLink,
   onCopy,
+  job, jobError, disconnected, onCancel, onReconnect, onStopTracking,
 }: {
   request: string;
   onRequestChange: (value: string) => void;
@@ -28,6 +30,12 @@ export function Composer({
   cliCommand: string;
   workspaceLink: string;
   onCopy: (text: string, label: string) => void;
+  job: StudioJobResponse | null;
+  jobError: string;
+  disconnected: boolean;
+  onCancel: () => void;
+  onReconnect: () => void;
+  onStopTracking: () => void;
 }) {
   const { t } = useI18n();
   const trimmed = request.trim();
@@ -42,6 +50,7 @@ export function Composer({
         </div>
       </div>
       <textarea
+        disabled={running}
         value={request}
         onChange={(event) => onRequestChange(event.target.value)}
         name="simulation-request"
@@ -54,6 +63,7 @@ export function Composer({
       <div className="composer-controls">
         <label className="switch-control">
           <input
+            disabled={running}
             type="checkbox"
             checked={useParameterCompletion}
             onChange={(event) =>
@@ -70,6 +80,15 @@ export function Composer({
         </span>
       </div>
       <PreflightPanel inspection={inspection} loading={inspectionRunning} />
+      {job && <p className="job-status" role="status">
+        {job.job_id.slice(0, 8)} · {t(jobStatusLabel(job.status))}
+      </p>}
+      {jobError && <p className="preflight-error" role="status">{t(jobError)}</p>}
+      {disconnected && <div className="server-job-actions"><button type="button" className="secondary-action" onClick={onReconnect}>
+        {t("重新连接作业")}
+      </button><button type="button" className="secondary-action" onClick={onStopTracking}>
+        {t("停止跟踪")}
+      </button></div>}
       <div className="composer-actions">
         <button
           className="primary-action"
@@ -82,8 +101,12 @@ export function Composer({
           ) : (
             <Play aria-hidden="true" size={18} />
           )}
-          <span>{running ? t("求解中…") : t("运行仿真")}</span>
+          <span>{running ? (job ? t(jobStatusLabel(job.status)) : t("提交中…")) : t("运行仿真")}</span>
         </button>
+        {running && job && <button className="secondary-action" type="button"
+          disabled={job.status === "cancelling"} onClick={onCancel}>
+          {t("取消")}
+        </button>}
         <button
           className="secondary-action"
           title={t("复制当前请求的 CLI 复现命令")}

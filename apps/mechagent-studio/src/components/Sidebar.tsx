@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useI18n } from "../i18n/LocaleProvider";
 import { handleTabKeyDown } from "../lib/tabs";
 import {
@@ -37,6 +38,7 @@ export function SidePanel({
   onUndoClear,
   onSelectHistory,
   facts,
+  serverJobs,
 }: {
   selectedSideTab: SideTab;
   onSelectSideTab: (tab: SideTab) => void;
@@ -54,6 +56,7 @@ export function SidePanel({
   onUndoClear: () => void;
   onSelectHistory: (item: RunHistoryItem) => void;
   facts: DisplayItem[];
+  serverJobs: ReactNode;
 }) {
   const { t } = useI18n();
   const tabs: Array<{
@@ -111,14 +114,14 @@ export function SidePanel({
           />
         )}
         {selectedSideTab === "history" && (
-          <HistoryList
+          <>{serverJobs}<HistoryList
             activeHistoryId={activeHistoryId}
             history={history}
             recentlyClearedCount={recentlyClearedCount}
             onClear={onClearHistory}
             onUndoClear={onUndoClear}
             onSelect={onSelectHistory}
-          />
+          /></>
         )}
         {selectedSideTab === "facts" && <FactList facts={facts} />}
       </div>

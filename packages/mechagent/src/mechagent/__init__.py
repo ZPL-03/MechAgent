@@ -18,7 +18,7 @@ from mechagent.examples import (
 try:
     __version__ = version("mechagent")
 except PackageNotFoundError:
-    __version__ = "0.1.1"
+    __version__ = "0.2.0"
 
 __all__ = [
     "MechAgent",

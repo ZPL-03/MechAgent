@@ -2,7 +2,7 @@ import type { StudioJobResponse, StudioRunResponse } from "../types";
 import { formatDuration } from "./format";
 
 export function isActiveJob(job: StudioJobResponse) {
-  return job.status === "queued" || job.status === "running";
+  return ["queued", "starting", "running", "cancelling"].includes(job.status);
 }
 
 export function sleep(ms: number) {
@@ -16,6 +16,10 @@ export function shortJobId(jobId: string) {
 }
 
 export function jobStatusLabel(status: StudioJobResponse["status"]) {
+  if (status === "starting") return "启动中";
+  if (status === "cancelling") return "取消中";
+  if (status === "cancelled") return "已取消";
+  if (status === "interrupted") return "已中断";
   if (status === "queued") {
     return "排队";
   }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,6 +16,7 @@ from mechagent.core.factory import (
     registered_meshers,
     registered_solvers,
 )
+from mechagent.evidence import public_value
 
 
 class LLMSettings(BaseModel):
@@ -339,6 +341,19 @@ class OutputSettings(BaseModel):
         return normalized
 
 
+class StudioSettings(BaseModel):
+    """本机持久队列；相对数据库路径以 Studio 启动目录为基准。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    database: Path = Path("mechagent_output/.studio/jobs.sqlite3")
+    max_workers: int = Field(default=2, ge=1, le=32)
+    max_queued: int = Field(default=32, ge=1, le=10000)
+    startup_timeout: int = Field(default=60, ge=5)
+    heartbeat_timeout: int = Field(default=30, ge=5)
+    job_timeout: int = Field(default=7200, ge=10)
+
+
 class MechAgentConfig(BaseModel):
     """MechAgent 全局配置。
 
@@ -371,6 +386,7 @@ class MechAgentConfig(BaseModel):
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     orchestrator: OrchestratorSettings = Field(default_factory=OrchestratorSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
+    studio: StudioSettings = Field(default_factory=StudioSettings)
 
 
 def config_to_public_dict(config: MechAgentConfig) -> dict[str, Any]:
@@ -395,7 +411,23 @@ def config_to_public_dict(config: MechAgentConfig) -> dict[str, Any]:
     llm = data.get("llm")
     if isinstance(llm, dict) and llm.get("api_key"):
         llm["api_key"] = "***"
-    return data
+    if isinstance(llm, dict) and llm.get("base_url"):
+        try:
+            url = urlsplit(str(llm["base_url"]))
+            llm["base_url"] = urlunsplit(
+                (
+                    url.scheme,
+                    url.netloc.rsplit("@", 1)[-1],
+                    url.path,
+                    urlencode(
+                        [(key, "***") for key, _ in parse_qsl(url.query, keep_blank_values=True)]
+                    ),
+                    "",
+                )
+            )
+        except ValueError:
+            llm["base_url"] = "[invalid URL]"
+    return dict(public_value(data, (config.llm.api_key,)))
 
 
 def maybe_config(data: Optional[dict[str, Any]]) -> MechAgentConfig:

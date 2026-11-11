@@ -16,6 +16,7 @@ from mechagent import MechAgent
 from mechagent.config import config_to_public_dict
 from mechagent.core.validation import run_core_benchmarks
 from mechagent.diagnostics import run_environment_diagnostics
+from mechagent.evidence import verify_manifest
 from mechagent.examples import (
     DEFAULT_SHOWCASE_EXAMPLE_ID,
     SimulationExample,
@@ -33,6 +34,15 @@ knowledge_app = typer.Typer(help="知识库管理。")
 app.add_typer(config_app, name="config")
 app.add_typer(knowledge_app, name="knowledge")
 console = Console()
+
+
+@app.command("verify-evidence")
+def verify_evidence(path: Path = typer.Argument(..., exists=True, dir_okay=False)) -> None:
+    """校验证据清单中的相对路径、文件大小与 SHA-256。"""
+    errors = verify_manifest(path)
+    _echo_json({"valid": not errors, "errors": errors})
+    if errors:
+        raise typer.Exit(1)
 
 
 class StudioView(str, Enum):
@@ -256,6 +266,9 @@ def run(
         console.print(f"报告已写入: {result.report_path}")
     if result.output_dir:
         console.print(f"输出目录: {result.output_dir}")
+    manifest_path = getattr(result, "manifest_path", None)
+    if manifest_path:
+        console.print(f"证据清单: {manifest_path}")
     if not result.summary.get("success", False):
         raise typer.Exit(code=1)
 

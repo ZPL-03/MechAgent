@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import subprocess
 from argparse import ArgumentParser
 from collections.abc import Iterator
@@ -39,6 +40,19 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     if args.include_runs:
+        for database in _iter_repo_paths("*.sqlite3"):
+            with sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True) as connection:
+                has_jobs = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'"
+                ).fetchone()
+                if (
+                    has_jobs
+                    and connection.execute(
+                        "SELECT 1 FROM jobs WHERE status IN "
+                        "('queued','starting','running','cancelling') LIMIT 1"
+                    ).fetchone()
+                ):
+                    raise RuntimeError(f"作业数据库存在非终态任务，拒绝删除运行证据: {database}")
         locks = list(_iter_repo_paths("*.lck"))
         if locks:
             raise RuntimeError(f"存在求解锁，请核实作业状态后处理锁文件: {locks[0]}")

@@ -68,9 +68,20 @@ python scripts/clean_artifacts.py
 
 ## 验证范围与结果
 
-测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性及标签键盘切换；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
+测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-本机 v0.1.1 的运行记录包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 完整测试为 492 passed，便携测试为 474 passed、18 deselected；两者均有 2 条第三方弃用告警。前端 9 项测试、TypeScript/Vite 构建、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。完整门禁结果随 GitHub Release 的脱敏验证摘要提供。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+本机 v0.2.0 的运行记录包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 完整测试为 507 passed，便携测试以最终门禁输出为准；两者均有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。完整门禁结果随 GitHub Release 的脱敏验证摘要提供。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+
+## 作业故障与证据校验
+
+`tests/core/test_runtime.py` 使用真实独立进程验证取消、心跳丢失、执行超时、进程身份与子进程终止，使用数据库并发验证幂等键、排队容量和领取上限。API 测试通过真实 worker 产生失败报告，并在应用生命周期重启后查询相同作业；不依靠同进程 monkeypatch 代替 worker 求解。SDK、结果文件和清单测试覆盖配置脱敏、源配置变化、文件缺失与内容篡改。
+
+```powershell
+python -m pytest tests/core/test_runtime.py tests/core/test_studio.py
+python -m mechagent.cli verify-evidence path/to/run/manifest.json
+```
+
+文件校验通过返回退出码 0，不匹配返回 1；校验不替代工程参考比较。Windows Job Object 进程树终止具有本机与 Windows CI 行为测试；其他操作系统的进程边界仍需独立验收。运行层不提供求解器内部断点续算。
 
 ## 清理策略
 
@@ -79,6 +90,6 @@ python scripts/clean_artifacts.py
 python scripts/clean_artifacts.py --include-runs
 ```
 
-默认清理缓存、包构建目录、前端依赖、文档站点、浏览器临时输出和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用该选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 时拒绝清理。
+默认清理缓存、包构建目录、前端依赖、文档站点、浏览器临时输出和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用该选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
 
 `.env`、`knowledge/sources/` 和非空 `knowledge/raw/` 不属于清理目标。外部求解器和 Python 安装目录由维护者管理。

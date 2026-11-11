@@ -27,6 +27,8 @@ packages/
       llm/             # OpenAI 兼容 Chat Completions 调用与健康检查
       knowledge/       # JSONL 混合检索与文档标准化
       orchestrator/    # LangGraph DAG、顺序工作流和 Agent 节点
+      runtime/         # SQLite 队列、调度、独立 worker 与进程隔离
+      evidence.py      # 运行清单、原子写入与文件完整性验证
       ui/              # FastAPI Studio 服务和构建后的静态资源
 apps/
   mechagent-studio/    # React/TypeScript Studio 前端源码
@@ -101,3 +103,17 @@ generate_input -> solve -> extract_results
 ```
 
 子类实现 `generate_input()`、`solve()`、`extract_results()`，`run()` 由基类统一提供。这一约束由 `__init_subclass__` 强制执行。CalculiX 适配器实现见 [求解器、网格与后处理](solver_mesh.md)。
+
+## 持久执行与证据
+
+Studio 的运行层位于应用包 `runtime/`，不替代 core 的工具执行器契约。HTTP 提交、同步兼容入口和显式重试共用 SQLite 队列。`BEGIN IMMEDIATE` 事务串行化领取、取消和终态提交，并在数据库层限制活动 worker 数量；FastAPI 生命周期仅管理调度线程，每个任务由独立 Python 进程调用 SDK。SDK 和 CLI 直接运行不经过 Studio 队列。
+
+状态依次为 `queued → starting → running → succeeded/failed`，取消经过 `cancelling → cancelled`；未登记或失联的执行进程为 `interrupted`。取消先于结果提交时，worker 不得覆盖取消状态。进程身份使用 PID 与创建时间核验；Windows worker 先加入带 `KILL_ON_JOB_CLOSE` 的 Job Object，再登记身份和执行工作，隔离失败不开始求解。Windows 下 worker 异常退出会终止其后代。POSIX 使用独立进程组处理主动取消；worker 被外部单独强杀后的孤儿回收尚无平台验证，不作完整进程树恢复承诺。
+
+`studio` 配置定义数据库路径、并发、排队、启动登记、心跳和总执行时限。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 1，不支持的版本拒绝打开。队列和结果没有自动删除策略；归档由维护者管理。
+
+每个 Studio 作业使用数据库同目录下的 `jobs/<job_id>/`，其中 `runs/` 保存 SDK 运行、`result.json` 保存公开响应、`manifest.json` 保存清单。原始 `worker.log` 仅作本地故障诊断，不通过 API 公开，也不纳入清单；日志目录仍应按工程数据管理。队列保存请求、配置路径及其源文件哈希，不保存展开后的密钥。worker 执行前校验配置文件哈希，配置变化导致显式失败；`.env` 与进程环境在 worker 启动时解析，环境变更不在源文件哈希覆盖范围内。
+
+SDK 的运行清单包含 schema、Python/操作系统、包版本、脱敏有效配置、请求、公开摘要、产物相对路径、大小与 SHA-256。工具版本无法确定时明确为 `unknown`，不把包版本当作求解器二进制版本。异常、取消和中断保存已有产物；哈希不跟随目录外的符号链接。清单按临时文件、刷盘和原子替换写入，校验可发现清单列出的文件缺失与内容变化；该机制不是数字签名，不提供作者身份或物理正确性证明。数值复现依赖相同模型、工具和验收容差，不承诺文件逐字节一致。
+
+数据库和 `jobs/` 必须一起保留。冷备份要求所有任务终态并停止服务，完整复制数据库目录及其运行文件；不得在活动事务期间仅复制主 `.sqlite3` 文件而忽略 WAL。服务恢复提供状态与结果查询，不提供求解器内部断点续算或无声重算。

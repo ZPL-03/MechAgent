@@ -9,6 +9,21 @@ import pytest
 from pytest import MonkeyPatch
 from scripts import clean_artifacts
 
+from mechagent.runtime.store import JobStore
+
+
+def test_cleanup_refuses_nonterminal_persistent_jobs(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(tmp_path / "mechagent_output/.studio/jobs.sqlite3")
+    store.submit("求解请求", False, config, max_queued=1)
+    with pytest.raises(RuntimeError, match="非终态"):
+        clean_artifacts.main(["--include-runs"])
+    assert store.database.exists()
+
 
 def test_clean_artifacts_uses_repository_root(
     tmp_path: Path,

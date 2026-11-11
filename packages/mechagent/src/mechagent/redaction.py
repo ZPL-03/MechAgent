@@ -17,6 +17,7 @@ def redact_sensitive_text(message: str, extra_secrets: Iterable[str] = ()) -> st
     redacted = re.sub(r"\bsk-[A-Za-z0-9_\-]{8,}\b", "sk-***", redacted)
     redacted = re.sub(r"\btp-[A-Za-z0-9_\-]{8,}\b", "tp-***", redacted)
     redacted = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._\-]+", "Bearer ***", redacted)
+    redacted = re.sub(r"(https?://)[^/\s@]+@", r"\1***@", redacted)
     redacted = re.sub(
         r"(?i)([?&](?:api[_-]?key|token|access_token)=)[^&\s]+",
         r"\1***",

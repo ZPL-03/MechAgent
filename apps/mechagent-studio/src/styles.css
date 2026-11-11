@@ -1,4 +1,18 @@
 /* 工作台按任务、视口和证据分区，控件消费语义令牌。 */
+.server-jobs { margin-bottom: var(--space-4); }
+.server-jobs-head, .server-job-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.server-jobs-head { justify-content: space-between; }
+.server-jobs-help, .job-status {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  margin: var(--space-2) 0;
+}
+.server-job-actions { padding: var(--space-1) var(--space-2) var(--space-3); }
 .spin {
   animation: spin 0.9s linear infinite;
 }

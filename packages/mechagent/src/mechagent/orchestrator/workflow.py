@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mechagent.config import MechAgentConfig
 from mechagent.orchestrator.agents import (
     AnalystAgent,
@@ -39,7 +41,7 @@ class SequentialWorkflow:
     def __init__(self, config: MechAgentConfig) -> None:
         self.config = config
 
-    def run(self, request: str) -> WorkflowResult:
+    def run(self, request: str, *, work_dir: Path | None = None) -> WorkflowResult:
         """执行完整工作流。
 
         Args:
@@ -57,7 +59,7 @@ class SequentialWorkflow:
             True
         """
 
-        work_dir = self.config.output.output_dir / new_run_id(request)
+        work_dir = work_dir or self.config.output.output_dir / new_run_id(request)
         work_dir.mkdir(parents=True, exist_ok=True)
         planner = PlannerAgent(self.config)
         designer = DesignerAgent(self.config)

@@ -6,7 +6,6 @@ import inspect
 import sys
 from pathlib import Path
 from time import sleep
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -16,7 +15,7 @@ from pytest import CaptureFixture, MonkeyPatch
 from typer.testing import CliRunner
 
 from mechagent.cli import app
-from mechagent.orchestrator.progress import emit_progress
+from mechagent.config import StudioSettings
 from mechagent.ui.server import (
     _browser_url,
     _studio_entry_url,
@@ -173,7 +172,7 @@ def test_studio_inspect_rejects_empty_request(tmp_path: Path) -> None:
     assert response.json()["detail"] == "请求不能为空。"
 
 
-def test_studio_run_endpoint_uses_event_loop_thread(tmp_path: Path) -> None:
+def test_studio_run_endpoint_uses_thread_pool(tmp_path: Path) -> None:
     studio_app = create_studio_app(tmp_path / "mechagent.yaml")
     route = next(
         route
@@ -181,98 +180,59 @@ def test_studio_run_endpoint_uses_event_loop_thread(tmp_path: Path) -> None:
         if isinstance(route, APIRoute) and route.path == "/api/run"
     )
 
-    assert inspect.iscoroutinefunction(route.endpoint)
+    assert not inspect.iscoroutinefunction(route.endpoint)
 
 
-def test_studio_run_returns_summary_and_visualizations(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeAgent:
-        def run(
-            self,
-            request: str,
-            use_llm_agents: bool | None = None,
-        ) -> SimpleNamespace:
-            captured["request"] = request
-            captured["use_llm_agents"] = use_llm_agents
-            emit_progress("planner", "running", "任务识别开始")
-            emit_progress("planner", "complete", "任务识别完成")
-            return SimpleNamespace(report="# 报告", summary=_beam_summary())
-
-    monkeypatch.setattr("mechagent.ui.server.MechAgent.from_config", lambda _path: FakeAgent())
-    client = TestClient(create_studio_app(tmp_path / "mechagent.yaml"))
-
-    response = client.post(
-        "/api/run",
-        json={"request": "求解悬臂梁", "use_llm_agents": True},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert captured == {"request": "求解悬臂梁", "use_llm_agents": True}
-    assert payload["success"] is True
-    assert payload["report"] == "# 报告"
-    assert payload["summary"]["tasks"][0]["task_id"] == "TASK_1"
-    assert payload["visualizations"][0]["kind"] == "beam"
-    assert payload["metadata"]["duration_ms"] >= 0
+def test_studio_sync_run_uses_real_worker(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    settings = StudioSettings(database=tmp_path / "jobs.sqlite3")
+    with TestClient(create_studio_app(config, studio_settings=settings)) as client:
+        response = client.post("/api/run", json={"request": "不支持的仿真请求"})
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert response.json()["summary"]["errors"]
+        assert len(client.get("/api/jobs").json()["jobs"]) == 1
 
 
-def test_studio_job_endpoints_return_polled_result(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeAgent:
-        def run(
-            self,
-            request: str,
-            use_llm_agents: bool | None = None,
-        ) -> SimpleNamespace:
-            captured["request"] = request
-            captured["use_llm_agents"] = use_llm_agents
-            emit_progress("planner", "running", "任务识别开始")
-            emit_progress("planner", "complete", "任务识别完成")
-            return SimpleNamespace(report="# 报告", summary=_beam_summary())
-
-    monkeypatch.setattr("mechagent.ui.server.MechAgent.from_config", lambda _path: FakeAgent())
-    client = TestClient(create_studio_app(tmp_path / "mechagent.yaml"))
-
-    response = client.post(
-        "/api/jobs",
-        json={"request": "求解悬臂梁", "use_llm_agents": True},
-    )
-
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["job_id"]
-    assert payload["status"] in {"queued", "running", "succeeded"}
-
-    job_payload = payload
-    for _ in range(50):
-        job_response = client.get(f"/api/jobs/{payload['job_id']}")
-        assert job_response.status_code == 200
-        job_payload = job_response.json()
-        if job_payload["status"] in {"succeeded", "failed"}:
-            break
-        sleep(0.01)
-
-    assert captured == {"request": "求解悬臂梁", "use_llm_agents": True}
-    assert job_payload["status"] == "succeeded"
-    assert job_payload["duration_ms"] >= 0
-    assert job_payload["result"]["success"] is True
-    assert job_payload["result"]["visualizations"][0]["kind"] == "beam"
-    assert [(event["stage"], event["status"]) for event in job_payload["events"]] == [
-        ("planner", "running"),
-        ("planner", "complete"),
-    ]
-
-    list_response = client.get("/api/jobs")
-    assert list_response.status_code == 200
-    assert list_response.json()["jobs"][0]["job_id"] == payload["job_id"]
+def test_studio_jobs_persist_and_expose_retry_evidence(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    settings = StudioSettings(database=tmp_path / "jobs.sqlite3")
+    with TestClient(create_studio_app(config, studio_settings=settings)) as client:
+        headers = {"Idempotency-Key": "test-request"}
+        response = client.post("/api/jobs", json={"request": "不支持的仿真请求"}, headers=headers)
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        assert (
+            client.post("/api/jobs", json={"request": "不支持的仿真请求"}, headers=headers).json()[
+                "job_id"
+            ]
+            == job_id
+        )
+        assert (
+            client.post("/api/jobs", json={"request": "其他请求"}, headers=headers).status_code
+            == 409
+        )
+        for _ in range(300):
+            job = client.get(f"/api/jobs/{job_id}").json()
+            if job["status"] in {"succeeded", "failed", "interrupted"}:
+                break
+            sleep(0.05)
+        assert job["status"] == "failed", job
+        assert job["result"]["summary"]["errors"]
+        assert job["events"]
+        assert client.get(f"/api/jobs/{job_id}/evidence").json()["valid"]
+        assert client.get("/api/jobs?limit=101").status_code == 422
+        assert client.get("/api/jobs/unknown").status_code == 404
+        assert client.get("/api/unknown").status_code == 404
+    with TestClient(create_studio_app(config, studio_settings=settings)) as client:
+        assert client.get(f"/api/jobs/{job_id}").json()["status"] == "failed"
+        retry = client.post(f"/api/jobs/{job_id}/retry").json()
+        assert retry["job_id"] != job_id
+        assert retry["parent_job_id"] == job_id
+        cancelled = client.post(f"/api/jobs/{retry['job_id']}/cancel")
+        assert cancelled.status_code == 202
 
 
 def test_studio_static_fallback_html_is_available() -> None:

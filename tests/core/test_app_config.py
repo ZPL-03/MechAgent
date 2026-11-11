@@ -167,8 +167,9 @@ def test_config_accepts_registered_tool_plugins() -> None:
         unregister_mesher("unit-config-mesher")
 
 
-def test_run_llm_agents_override_is_single_call(monkeypatch: MonkeyPatch) -> None:
+def test_run_llm_agents_override_is_single_call(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     config = MechAgentConfig(orchestrator=OrchestratorSettings(mode="dag", use_llm_agents=False))
+    config.output.output_dir = tmp_path
     agent = MechAgent(config)
     captured: list[bool] = []
     workflow_config_ids: list[int] = []
@@ -176,10 +177,12 @@ def test_run_llm_agents_override_is_single_call(monkeypatch: MonkeyPatch) -> Non
     def fake_run_langgraph_workflow(
         workflow_config: MechAgentConfig,
         request: str,
+        *,
+        work_dir: Path | None = None,
     ) -> WorkflowResult:
         captured.append(workflow_config.orchestrator.use_llm_agents)
         workflow_config_ids.append(id(workflow_config))
-        return WorkflowResult(success=True, request=request)
+        return WorkflowResult(success=True, request=request, work_dir=work_dir)
 
     monkeypatch.setattr("mechagent.app._run_langgraph_workflow", fake_run_langgraph_workflow)
 

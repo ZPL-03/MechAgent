@@ -5,12 +5,10 @@ import type { ExampleFilter, RunHistoryItem, SideTab } from "./lib/uiTypes";
 import type { StudioRunResponse } from "./types";
 import {
   HISTORY_UNDO_TIMEOUT_MS,
-  JOB_POLL_INTERVAL_MS,
   MAX_HISTORY_ITEMS,
   RENDER_MODES,
   URL_SYNC_DEBOUNCE_MS,
 } from "./lib/constants";
-import { createJob, fetchJob } from "./lib/api";
 import { writeClipboardText } from "./lib/clipboard";
 import { reproducibleCliCommand } from "./lib/cli";
 import { runtimeStatus } from "./lib/diagnostics";
@@ -20,7 +18,7 @@ import {
   downloadVisualization,
 } from "./lib/download";
 import { displayExamples, filterExamples } from "./lib/examples";
-import { isActiveJob, recentJobEvents, runError, sleep } from "./lib/job";
+import { recentJobEvents, runError } from "./lib/job";
 import {
   artifactPaths,
   metricItems,
@@ -48,6 +46,8 @@ import {
   defaultRenderModeIndex,
   visualizationsForTask,
 } from "./lib/visualization";
+import { usePersistentJob } from "./hooks/usePersistentJob";
+import { ServerJobs } from "./components/ServerJobs";
 import { useInspection } from "./hooks/useInspection";
 import { useStudioBootstrap } from "./hooks/useStudioBootstrap";
 import { useToast } from "./hooks/useToast";
@@ -76,10 +76,6 @@ export function App() {
   const [useParameterCompletion, setUseParameterCompletion] = useState(() =>
     initialParameterCompletionFromUrl(),
   );
-  const [running, setRunning] = useState(false);
-  const [activeJob, setActiveJob] = useState<Awaited<
-    ReturnType<typeof createJob>
-  > | null>(null);
   const [monitorTick, setMonitorTick] = useState(0);
   const [result, setResult] = useState<StudioRunResponse | null>(null);
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
@@ -97,6 +93,20 @@ export function App() {
   const [recentlyClearedHistory, setRecentlyClearedHistory] = useState<
     RunHistoryItem[] | null
   >(null);
+
+  const jobRuntime = usePersistentJob((requestText, runResult) => {
+    setRequest(requestText);
+    setResult(runResult);
+    setSelectedRenderModeIndex(defaultRenderModeIndex(runResult));
+    recordRun(requestText, runResult);
+  });
+  const { activeJob, running, setActiveJob } = jobRuntime;
+  useEffect(() => {
+    if (activeJob) {
+      setRequest(activeJob.request);
+      setUseParameterCompletion(activeJob.use_llm_agents);
+    }
+  }, [activeJob?.job_id]);
 
   const { health, diagnostics, capabilities, catalogExamples } =
     useStudioBootstrap();
@@ -234,7 +244,6 @@ export function App() {
     if (requestOverride !== undefined) {
       setRequest(requestText);
     }
-    setRunning(true);
     setResult(null);
     setActiveHistoryId(null);
     setActiveJob(null);
@@ -242,31 +251,7 @@ export function App() {
     setSelectedTaskIndex(0);
     setSelectedVisualIndex(0);
     setSelectedRenderModeIndex(0);
-    try {
-      let job = await createJob(requestText, useParameterCompletion);
-      setActiveJob(job);
-      while (isActiveJob(job)) {
-        await sleep(JOB_POLL_INTERVAL_MS);
-        job = await fetchJob(job.job_id);
-        setActiveJob(job);
-      }
-      if (!job.result) {
-        throw new Error(job.error ?? "作业结束但没有可用结果。");
-      }
-      const runResult = job.result;
-      setResult(runResult);
-      setSelectedRenderModeIndex(defaultRenderModeIndex(runResult));
-      recordRun(requestText, runResult);
-    } catch (error) {
-      const failedResult = runError(
-        error instanceof Error ? error.message : String(error),
-      );
-      setResult(failedResult);
-      setSelectedRenderModeIndex(0);
-      recordRun(requestText, failedResult);
-    } finally {
-      setRunning(false);
-    }
+    await jobRuntime.start(requestText, useParameterCompletion);
   }
 
   function recordRun(requestText: string, runResult: StudioRunResponse) {
@@ -372,6 +357,12 @@ export function App() {
             inspectionRunning={inspectionRunning}
             running={running}
             onRun={() => void runSimulation()}
+            job={activeJob}
+            jobError={jobRuntime.error}
+            disconnected={jobRuntime.disconnected}
+            onCancel={() => void jobRuntime.cancel()}
+            onReconnect={jobRuntime.reconnect}
+            onStopTracking={jobRuntime.stopTracking}
             cliCommand={cliCommand}
             workspaceLink={workspaceLink}
             onCopy={(text, label) => void copyTextToClipboard(text, label)}
@@ -393,6 +384,13 @@ export function App() {
             onUndoClear={restoreHistory}
             onSelectHistory={selectHistoryItem}
             facts={facts}
+            serverJobs={<ServerJobs running={running} onOpen={(job) => {
+              setResult(null);
+              setActiveHistoryId(null);
+              setSelectedTaskIndex(0);
+              setSelectedVisualIndex(0);
+              void jobRuntime.open(job);
+            }} />}
           />
         </aside>
 

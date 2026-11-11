@@ -23,7 +23,7 @@
 
 ## 实现基线
 
-结构线弹性静力提供梁、矩形板、开孔薄板与实体块的闭环。工具工厂内置 `calculix`、`calculix-inp`、`gmsh-occ` 和 `local`；CAD 链路将形体摘要映射为参数候选。Abaqus 的独立本机检查验证外部工具链，生产适配仍需接口与案例门禁。具体实现和边界分别见[架构](architecture.md)、[能力](capabilities.md)与[工具说明](solver_mesh.md)。
+结构线弹性静力提供梁、矩形板、开孔薄板与实体块的闭环。工具工厂内置 `calculix`、`calculix-inp`、`gmsh-occ` 和 `local`；CAD 链路将形体摘要映射为参数候选。Studio 提供单机持久队列、独立 worker、取消、重启查询和运行清单校验；该运行层不表示远程执行、多租户或求解器断点续算。Abaqus 的独立本机检查验证外部工具链，生产适配仍需接口与案例门禁。具体实现和边界分别见[架构](architecture.md)、[能力](capabilities.md)与[工具说明](solver_mesh.md)。
 
 ## 能力路线
 
@@ -37,7 +37,7 @@
 | 热与多物理场 | 传热、热结构与场映射 | 多场单位、耦合与守恒契约 | 场映射误差、守恒、网格/时间收敛 |
 | CFD 与 FSI | 流动、共轭传热、流固耦合 | 流体能力、边界与耦合执行协议 | 公开基准、残差、守恒与网格独立性 |
 | 优化与设计探索 | 参数扫描、DOE、代理和不确定性 | 批量任务、设计变量、实验记录 | 基准优化问题、代理误差和独立校核 |
-| 平台协作 | 持久队列、远程/HPC、归档与权限 | 作业生命周期、产物索引、身份边界 | 中断恢复、并发隔离、审计与部署验收 |
+| 平台协作 | 远程/HPC、归档与权限 | 作业生命周期、产物索引、身份边界 | 中断恢复、并发隔离、审计与部署验收 |
 
 ## 工具生态接入矩阵
 
@@ -46,7 +46,7 @@
 | 求解 | `AbstractSolver`、CalculiX | Abaqus、Code_Aster、Elmer、FEniCSx、OpenFOAM、SU2；各后端独立满足能力契约 |
 | 网格 | `AbstractMesher`、CalculiX INP/Gmsh 路径 | 独立 Gmsh 网格适配、Netgen、重网格和质量统一 |
 | CAD | `AbstractCADKernel`、Gmsh OCC 导入 | Abaqus/CAE、FreeCAD、OpenCASCADE；需拓扑保真、单位和区域映射 |
-| 执行 | `AbstractJobExecutor`、同步本地执行器 | 异步本地、远程工作站、Slurm、容器；需取消和恢复语义 |
+| 执行 | `AbstractJobExecutor`、同步本地执行器 | Studio 独立进程运行层；远程工作站、Slurm、容器仍需适配与验证 |
 | 后处理 | `PostProcessor` 与 CalculiX 字段解析 | 独立注册 API、ODB、meshio、VTK；需字段位置、坐标和分量约定 |
 | 材料 | 内置各向同性材料目录 | 目录/模型注册契约、各向异性、非线性与用户本构 |
 | 评价 | 能力 `evaluator` | 收敛、跨工具和实验评价策略；需参考来源与阈值记录 |
@@ -72,6 +72,6 @@ LLM 评估需同时覆盖能力选择、单位、缺项、歧义、工具约束�
 
 ## 发布与治理
 
-跨层扩展先说明目的、模型契约、工具差异、失败行为与验收数据。发布记录保留版本、配置、工具版本、输入输出与校核结果；完整内容哈希和可恢复归档属于平台化工作。贡献规范见[贡献指南](https://github.com/ZPL-03/MechAgent/blob/main/CONTRIBUTING.md)，执行门禁见[验证说明](validation.md)。
+跨层扩展先说明目的、模型契约、工具差异、失败行为与验收数据。发布记录保留版本、配置、工具版本、输入输出与校核结果；文件内容哈希由运行清单提供；签名、归档格式、恢复工具和远端制品存储仍属于平台化工作。贡献规范见[贡献指南](https://github.com/ZPL-03/MechAgent/blob/main/CONTRIBUTING.md)，执行门禁见[验证说明](validation.md)。
 
 优先处理输入真实性、数值可验证性、CAD 拓扑和执行可靠性，再扩大模型与物理域范围。许可、计算资源、并发控制和私密数据边界按具体后端部署条件评估。
