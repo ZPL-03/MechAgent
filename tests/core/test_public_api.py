@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import mechagent
 from mechagent import (
     DEFAULT_SHOWCASE_EXAMPLE_ID,
@@ -12,6 +14,8 @@ from mechagent import (
 )
 from mechagent import core as mechagent_core
 from mechagent.config import MechAgentConfig
+from mechagent.orchestrator.intent import SimulationIntent
+from mechagent.orchestrator.models import TaskItem
 
 
 def test_public_api_exports_version_and_sdk() -> None:
@@ -64,6 +68,33 @@ def test_sdk_inspect_reports_missing_inputs() -> None:
     assert inspection.success is True
     assert inspection.ready is False
     assert inspection.tasks[0]["missing_fields"]
+
+
+def test_sdk_inspect_rejects_low_confidence_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def low_confidence_plan(_planner: object, _request: str) -> list[TaskItem]:
+        return [
+            TaskItem(
+                task_id="TASK_1",
+                case_id="STATIC-STRUCTURAL",
+                capability_id="structural_static",
+                title="结构静力分析",
+                intent=SimulationIntent(
+                    raw_request="完整请求",
+                    capability_id="structural_static",
+                    confidence=0.79,
+                ),
+            )
+        ]
+
+    monkeypatch.setattr("mechagent.app.PlannerAgent.plan", low_confidence_plan)
+    inspection = MechAgent(MechAgentConfig()).inspect("完整请求")
+
+    assert inspection.success is True
+    assert inspection.ready is False
+    assert inspection.tasks[0]["execution_ready"] is False
+    assert "低于 0.800" in inspection.tasks[0]["execution_blockers"][0]
 
 
 def test_core_public_api_exports_rule_checks() -> None:

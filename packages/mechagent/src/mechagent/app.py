@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mechagent.config import MechAgentConfig, config_to_public_dict
+from mechagent.core.models import MIN_EXECUTION_CONFIDENCE
 from mechagent.evidence import public_value, write_manifest
 from mechagent.orchestrator import (
     ErrorRecord,
@@ -280,7 +281,10 @@ class MechAgent:
             )
 
         task_payloads = [_inspection_task_payload(task) for task in tasks]
-        ready = bool(task_payloads) and all(bool(task.get("complete")) for task in task_payloads)
+        ready = bool(task_payloads) and all(
+            bool(task.get("complete")) and bool(task.get("execution_ready"))
+            for task in task_payloads
+        )
         return MechAgentInspection(
             success=True,
             ready=ready,
@@ -301,6 +305,18 @@ def _inspection_task_payload(task: TaskItem) -> dict[str, Any]:
     data["geometry_type"] = getattr(intent, "geometry_type", None) if intent is not None else None
     data["confidence"] = getattr(intent, "confidence", None) if intent is not None else None
     data["source"] = getattr(intent, "source", "") if intent is not None else ""
+    confidence = getattr(intent, "confidence", None) if intent is not None else None
+    execution_blockers: list[str] = []
+    if missing_fields:
+        execution_blockers.append("缺少必要输入: " + "、".join(missing_fields))
+    if confidence is None:
+        execution_blockers.append("缺少执行置信度")
+    elif confidence < MIN_EXECUTION_CONFIDENCE:
+        execution_blockers.append(
+            f"执行置信度 {confidence:.3f} 低于 {MIN_EXECUTION_CONFIDENCE:.3f}"
+        )
+    data["execution_ready"] = not execution_blockers
+    data["execution_blockers"] = execution_blockers
     data["planner_llm_trace"] = _public_trace(trace)
     return data
 

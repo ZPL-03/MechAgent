@@ -24,11 +24,13 @@ MechAgent 是开源 CAE/FEA 多智能体编排框架。它把自然语言工程�
 
 Studio 稳定 HTTP 入口为 `/api/v1`，旧 `/api` 路径仅用于兼容已有本地集成并带弃用响应头。Studio 使用 SQLite 作业记录、独立 worker、幂等提交、取消、重启查询、并发限制和运行清单校验；服务仍是本机单用户队列，不提供认证、项目隔离、RBAC 或集群调度。
 
+`inspect` 预检只执行 Planner，返回缺项、置信度和执行阻断原因；只有 `complete=true` 且 `execution_ready=true` 才报告请求可进入执行链路。
+
 SDK、CLI 和 Studio 使用同一编排模型及公开摘要。公开响应保留任务、状态、错误、结果、产物和审计元数据，不输出原始 prompt、LLM response 或密钥。运行目录中的输入、网格、求解输出、报告和 manifest 按文件校验和保存，文件完整性与工程参考验收分别判断。
 
 ## 验证证据
 
-维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。Python 测试收集 522 项，便携测试和 18 项真实 CalculiX 回归均通过；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 通过。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
+维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。Python 测试收集 523 项，便携测试和 18 项真实 CalculiX 回归均通过；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 通过。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
 
 验证命令、算例误差、环境边界、依赖审计和清理策略见[验证与质量门禁](validation.md)。标准算例和自然语言案例的具体范围见[能力与自然语言解析](capabilities.md)及[求解器、网格与后处理](solver_mesh.md)。
 
