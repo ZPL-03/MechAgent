@@ -8,6 +8,7 @@ import pytest
 from pytest import MonkeyPatch
 from scripts import (
     check_wheel_install,
+    generate_sbom,
     natural_language_cases,
     run_benchmarks,
     run_llm_smoke,
@@ -272,11 +273,46 @@ def test_check_wheel_install_rejects_missing_or_ambiguous_wheels(tmp_path: Path)
 
     with pytest.raises(FileNotFoundError, match="数量必须为 1"):
         check_wheel_install._find_single_wheel(dist, "mechagent-*.whl")
-
     (dist / "mechagent-0.1.0-py3-none-any.whl").write_text("unit", encoding="utf-8")
     (dist / "mechagent-0.1.1-py3-none-any.whl").write_text("unit", encoding="utf-8")
     with pytest.raises(FileNotFoundError, match="数量必须为 1"):
         check_wheel_install._find_single_wheel(dist, "mechagent-*.whl")
+
+
+def test_generate_sbom_contains_python_and_npm_packages(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    lockfile = tmp_path / "apps/mechagent-studio/package-lock.json"
+    lockfile.parent.mkdir(parents=True)
+    lockfile.write_text(
+        '{"packages": {"": {"name": "studio"}, '
+        '"node_modules/@scope/widget": {"version": "1.2.3"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        generate_sbom,
+        "_pip_packages",
+        lambda: [
+            generate_sbom._package(
+                package_id="SPDXRef-PyPI-demo-1-0",
+                name="demo",
+                version="1.0",
+                purl="pkg:pypi/demo@1.0",
+                license_declared="MIT",
+            )
+        ],
+    )
+
+    document = generate_sbom.build_document(tmp_path)
+
+    assert document["spdxVersion"] == "SPDX-2.3"
+    packages = {item["name"]: item for item in document["packages"]}
+    assert packages["demo"]["licenseDeclared"] == "MIT"
+    assert packages["demo"]["licenseConcluded"] == "NOASSERTION"
+    assert packages["@scope/widget"]["externalRefs"][0]["referenceLocator"] == (
+        "pkg:npm/@scope/widget@1.2.3"
+    )
+    assert len(document["documentDescribes"]) == 2
 
 
 def test_check_wheel_install_import_check_validates_type_markers() -> None:

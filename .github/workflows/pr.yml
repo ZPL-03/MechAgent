@@ -41,6 +41,16 @@ jobs:
           python -m pip check
           python -m build packages/mechagent-core --no-isolation
           python -m build packages/mechagent --no-isolation
+          python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v6
+        with:
+          name: mechagent-sbom
+          path: dist/mechagent-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate built wheels
+        run: |
           python scripts/check_wheel_install.py
           python -m mkdocs build --strict
           python scripts/clean_artifacts.py
