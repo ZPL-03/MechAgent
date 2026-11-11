@@ -12,6 +12,7 @@ from mechagent.core.models import (
     BCSpec,
     BCType,
     CompositeSpec,
+    CoordinateSystem,
     ElementType,
     GeometrySpec,
     GeometryType,
@@ -21,6 +22,7 @@ from mechagent.core.models import (
     MeshSpec,
     ModelParams,
     SimulationCase,
+    UnitSystem,
 )
 from mechagent.core.solver import SolverResult
 from mechagent.core.validation import tc01_model_params
@@ -145,16 +147,74 @@ def test_simulation_case_wraps_legacy_model_with_explicit_provenance() -> None:
     assert restored.metadata["case_schema_version"] == 1
 
 
-def test_simulation_case_rejects_future_schema_and_non_canonical_units() -> None:
+def test_simulation_case_rejects_future_schema_and_unknown_units() -> None:
     params = tc01_model_params()
     payload = SimulationCase.from_model_params(params).model_dump(mode="json")
     payload["schema_version"] = 99
     with pytest.raises(ValidationError):
         SimulationCase.model_validate(payload)
     payload = SimulationCase.from_model_params(params).model_dump(mode="json")
-    payload["units"]["length"] = "m"
+    payload["units"]["length"] = "yard"
     with pytest.raises(ValidationError):
         SimulationCase.model_validate(payload)
+
+
+def test_simulation_case_converts_declared_units_to_solver_baseline() -> None:
+    params = tc01_model_params()
+    model = params.model_copy(
+        update={
+            "geometry": params.geometry.model_copy(
+                update={"dimensions": {"length": 1.0, "width": 0.02, "height": 0.04}}
+            ),
+            "material": params.material.model_copy(update={"E": 210.0, "rho": 7850.0}),
+            "loads": [params.loads[0].model_copy(update={"magnitude": 1.0})],
+            "bcs": [params.bcs[0].model_copy(update={"values": [0.001, 0.0, 0.0, 0.0, 0.0, 0.0]})],
+            "mesh": params.mesh.model_copy(update={"seed_size": 0.01}),
+        }
+    )
+    case = SimulationCase.from_model_params(model).model_copy(
+        update={
+            "units": UnitSystem(length="m", force="kN", stress="GPa", density="kg/m^3"),
+            "coordinate_system": CoordinateSystem(origin=(1.0, 2.0, 3.0)),
+        }
+    )
+
+    restored = case.to_model_params()
+
+    assert restored.geometry.dimensions == {"length": 1000.0, "width": 20.0, "height": 40.0}
+    assert pytest.approx(210000.0) == restored.material.E
+    assert pytest.approx(7.85e-9) == restored.material.rho
+    assert pytest.approx(1000.0) == restored.loads[0].magnitude
+    assert restored.bcs[0].values[0] == pytest.approx(1.0)
+    assert restored.mesh.seed_size == pytest.approx(10.0)
+    assert restored.metadata["canonical_coordinate_system"]["origin"] == [1000.0, 2000.0, 3000.0]
+
+
+def test_unit_conversion_scales_load_quantities_by_physical_dimension() -> None:
+    params = tc01_model_params()
+    model = params.model_copy(
+        update={
+            "loads": [
+                LoadSpec(
+                    type=LoadType.LINE_LOAD, magnitude=1.0, region="span", direction=(0, -1, 0)
+                ),
+                LoadSpec(
+                    type=LoadType.PRESSURE, magnitude=1.0, region="surface", direction=(0, 0, -1)
+                ),
+                LoadSpec(
+                    type=LoadType.DISPLACEMENT, magnitude=1.0, region="tip", direction=(1, 0, 0)
+                ),
+                LoadSpec(type=LoadType.MOMENT, magnitude=1.0, region="tip", direction=(0, 0, 1)),
+            ]
+        }
+    )
+
+    converted = UnitSystem(length="m", force="kN").to_canonical_model(model)
+
+    assert converted.loads[0].magnitude == pytest.approx(1.0)
+    assert converted.loads[1].magnitude == pytest.approx(0.001)
+    assert converted.loads[2].magnitude == pytest.approx(1000.0)
+    assert converted.loads[3].magnitude == pytest.approx(1_000_000.0)
 
 
 def test_solver_run_summary_keeps_structured_and_extended_fields() -> None:

@@ -81,7 +81,7 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 `ModelParams` 实例，不复制几何、材料、载荷或边界字段，并额外包含：
 
 - `schema_version`：当前案例契约版本为 `1`；未知未来版本拒绝校验。
-- `units`：显式的 N-mm-MPa-tonne/mm³-°C 基线单位系统。
+- `units`：显式的输入单位系统；当前支持长度 `mm`/`cm`/`m`/`in`、力 `N`/`kN`/`lbf`、应力 `MPa`/`kPa`/`Pa`/`GPa`/`psi`、密度 `tonne/mm^3`/`kg/m^3`/`g/cm^3` 和温度 `C`。`SimulationCase.to_model_params()` 将已声明的几何、材料、载荷、边界位移、网格和坐标转换为 N-mm-MPa-tonne/mm³ 基线；未声明的量不会按字段名推断单位。
 - `coordinate_system`：右手坐标系名称、原点和轴名称。
 - `regions`：载荷和边界区域的命名、区域类型、稳定标识及来源。
 - `request`：原始用户请求、解析器名称和解析版本。

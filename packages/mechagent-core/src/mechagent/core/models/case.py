@@ -12,7 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mechagent.core.models.params import ModelParams
+from mechagent.core.models.geometry import LoadType
+from mechagent.core.models.params import CompositeSpec, ModelParams
 
 CASE_SCHEMA_VERSION = 1
 
@@ -20,17 +21,110 @@ CASE_SCHEMA_VERSION = 1
 class UnitSystem(BaseModel):
     """案例中的物理单位约定。
 
-    当前结构静力基线使用 N-mm-MPa-tonne/mm³。单位字段必须显式存在；
-    单位转换由后续适配器集中实现，案例契约不会根据自然语言猜测单位。
+    求解器兼容基线为 N-mm-MPa-tonne/mm³。案例可声明受支持的输入单位，
+    `to_canonical_model()` 将几何、材料、载荷、边界位移、网格和坐标转换到该基线。
+    温度字段目前只支持摄氏度；案例契约不会根据自然语言猜测单位。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    length: Literal["mm"] = "mm"
-    force: Literal["N"] = "N"
-    stress: Literal["MPa"] = "MPa"
-    density: Literal["tonne/mm^3"] = "tonne/mm^3"
+    length: Literal["mm", "cm", "m", "in"] = "mm"
+    force: Literal["N", "kN", "lbf"] = "N"
+    stress: Literal["MPa", "kPa", "Pa", "GPa", "psi"] = "MPa"
+    density: Literal["tonne/mm^3", "kg/m^3", "g/cm^3"] = "tonne/mm^3"
     temperature: Literal["C"] = "C"
+
+    def to_canonical_model(self, model: ModelParams) -> ModelParams:
+        """把模型数值转换为求解器使用的 N-mm-MPa-tonne/mm³ 基线。"""
+
+        length_factor = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4}[self.length]
+        force_factor = {"N": 1.0, "kN": 1000.0, "lbf": 4.4482216152605}[self.force]
+        stress_factor = {
+            "MPa": 1.0,
+            "kPa": 1.0e-3,
+            "Pa": 1.0e-6,
+            "GPa": 1000.0,
+            "psi": 0.006894757293168,
+        }[self.stress]
+        density_factor = {
+            "tonne/mm^3": 1.0,
+            "kg/m^3": 1.0e-12,
+            "g/cm^3": 1.0e-9,
+        }[self.density]
+        dimensions = {
+            name: value if name in {"hole_count", "slot_count"} else _scaled(value, length_factor)
+            for name, value in model.geometry.dimensions.items()
+        }
+        material = model.material.model_copy(
+            update={
+                "E": _scaled(model.material.E, stress_factor),
+                "rho": _scaled(model.material.rho, density_factor),
+                "composite": _converted_composite(model.material.composite, length_factor),
+            }
+        )
+        loads = [
+            load.model_copy(
+                update={
+                    "magnitude": _scaled(
+                        load.magnitude,
+                        _load_factor(load.type, length_factor, force_factor),
+                    )
+                }
+            )
+            for load in model.loads
+        ]
+        bcs = [
+            bc.model_copy(
+                update={
+                    "values": [
+                        _scaled(value, length_factor) if dof in {"ux", "uy", "uz"} else value
+                        for dof, value in zip(bc.dofs, bc.values, strict=True)
+                    ]
+                }
+            )
+            for bc in model.bcs
+        ]
+        return model.model_copy(
+            update={
+                "geometry": model.geometry.model_copy(update={"dimensions": dimensions}),
+                "material": material,
+                "loads": loads,
+                "bcs": bcs,
+                "mesh": model.mesh.model_copy(
+                    update={"seed_size": _scaled(model.mesh.seed_size, length_factor)}
+                ),
+            }
+        )
+
+
+def _scaled(value: float, factor: float) -> float:
+    scaled = value * factor
+    if not math.isfinite(scaled):
+        raise ValueError("单位换算结果必须是有限数值。")
+    return scaled
+
+
+def _converted_composite(
+    composite: CompositeSpec | None, length_factor: float
+) -> CompositeSpec | None:
+    if composite is None:
+        return None
+    ply_thickness = composite.ply_thickness
+    if ply_thickness is None:
+        return composite
+    return composite.model_copy(update={"ply_thickness": _scaled(ply_thickness, length_factor)})
+
+
+def _load_factor(load_type: LoadType, length_factor: float, force_factor: float) -> float:
+    if load_type in {LoadType.FORCE, LoadType.MOMENT}:
+        return force_factor * (length_factor if load_type is LoadType.MOMENT else 1.0)
+    if load_type is LoadType.LINE_LOAD:
+        return force_factor / length_factor
+    if load_type is LoadType.PRESSURE:
+        return force_factor / length_factor**2
+    if load_type is LoadType.DISPLACEMENT:
+        return length_factor
+    return 1.0
 
 
 class CoordinateSystem(BaseModel):
@@ -202,12 +296,27 @@ class SimulationCase(BaseModel):
         )
 
     def to_model_params(self) -> ModelParams:
-        """返回求解器兼容模型，不丢失案例元数据。"""
+        """返回转换为求解器基线单位的兼容模型，不丢失案例元数据。"""
 
-        metadata = dict(self.model.metadata)
+        model = self.units.to_canonical_model(self.model)
+        metadata = dict(model.metadata)
         metadata.setdefault("case_schema_version", self.schema_version)
         metadata.setdefault("unit_system", self.units.model_dump(mode="json"))
+        canonical_coordinate = self.coordinate_system.model_copy(
+            update={
+                "origin": tuple(
+                    _scaled(
+                        value, {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4}[self.units.length]
+                    )
+                    for value in self.coordinate_system.origin
+                )
+            }
+        )
         metadata.setdefault("coordinate_system", self.coordinate_system.model_dump(mode="json"))
+        metadata.setdefault(
+            "canonical_coordinate_system", canonical_coordinate.model_dump(mode="json")
+        )
+        metadata.setdefault("canonical_unit_system", UnitSystem().model_dump(mode="json"))
         if self.request is not None:
             metadata.setdefault("request_provenance", self.request.model_dump(mode="json"))
-        return self.model.model_copy(update={"metadata": metadata})
+        return model.model_copy(update={"metadata": metadata})
