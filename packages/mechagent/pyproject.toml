@@ -42,6 +42,8 @@ dev = [
   "mypy>=1.13",
   "types-PyYAML>=6",
   "build>=1.2",
+  "pip-audit>=2.9,<3",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 docs = [
   "mkdocs-material>=9",
