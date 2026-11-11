@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mechagent.core.models.geometry import LoadType
+from mechagent.core.models.geometry import AnalysisType, LoadType
 from mechagent.core.models.params import CompositeSpec, ModelParams
 
 CASE_SCHEMA_VERSION = 1
@@ -205,6 +205,88 @@ class SolverControl(BaseModel):
     time_step: float | None = Field(default=None, gt=0.0)
 
 
+class ResultFieldSpec(BaseModel):
+    """案例请求的一个结果字段。
+
+    `quantity` 和 `location` 描述后处理器应查找的物理量和位置；具体求解器
+    是否能够提供该字段由能力注册项和适配器契约判断。字段请求不会把尚未
+    注册的后处理能力伪装成已支持能力。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    quantity: str = Field(min_length=1, max_length=64)
+    location: Literal["node", "element", "integration_point", "global"]
+    component: str | None = Field(default=None, max_length=32)
+    invariant: Literal[
+        "mises",
+        "max_principal",
+        "min_principal",
+        "tresca",
+        "magnitude",
+        "trace",
+    ] | None = None
+    unit: str = Field(default="", max_length=32)
+    required: bool = True
+
+    @model_validator(mode="after")
+    def _result_selector_must_be_unambiguous(self) -> "ResultFieldSpec":
+        if self.component is not None and not self.component.strip():
+            raise ValueError("result_fields.component 不能是空白字符串。")
+        if self.invariant is not None and self.component is not None:
+            raise ValueError("result_fields.component 与 invariant 不能同时指定。")
+        if not self.quantity.strip():
+            raise ValueError("result_fields.quantity 不能是空白字符串。")
+        if self.unit and not self.unit.strip():
+            raise ValueError("result_fields.unit 不能是空白字符串。")
+        return self
+
+
+class LoadStepSpec(BaseModel):
+    """一个有序分析步的执行控制和输出选择。
+
+    `load_case` 为空时继承案例级 `ModelParams.load_case`；`load_scale` 是该步
+    对案例载荷的统一比例。`duration` 使用分析类型定义的时间或伪时间单位，
+    静力步中只用于增量和输出调度。当前兼容转换器只接受单个未缩放分析步，
+    多步和非单位比例会在进入旧求解器接口前明确拒绝。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(
+        default="step-1",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$",
+    )
+    sequence: int = Field(default=1, ge=1, le=1_000_000)
+    analysis: AnalysisType = AnalysisType.STATIC
+    nlgeom: bool = False
+    load_case: str = Field(default="", max_length=128)
+    load_scale: float = Field(default=1.0, ge=0.0)
+    duration: float = Field(default=1.0, gt=0.0)
+    increments: int = Field(default=1, ge=1, le=1_000_000)
+    output_interval: int = Field(default=1, ge=1, le=1_000_000)
+    result_fields: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _step_numbers_and_outputs_must_be_valid(self) -> "LoadStepSpec":
+        if not math.isfinite(self.load_scale):
+            raise ValueError("load_steps.load_scale 必须是有限数值。")
+        if not math.isfinite(self.duration):
+            raise ValueError("load_steps.duration 必须是有限数值。")
+        if self.load_case and not self.load_case.strip():
+            raise ValueError("load_steps.load_case 不能是空白字符串。")
+        if self.output_interval > self.increments:
+            raise ValueError("load_steps.output_interval 不能大于 increments。")
+        if any(not field.strip() for field in self.result_fields):
+            raise ValueError("load_steps.result_fields 不能包含空白名称。")
+        if len(set(self.result_fields)) != len(self.result_fields):
+            raise ValueError("load_steps.result_fields 不能包含重复名称。")
+        return self
+
+
 class RequestProvenance(BaseModel):
     """用户请求及其解析链路的可审计摘要。"""
 
@@ -233,6 +315,8 @@ class SimulationCase(BaseModel):
     regions: dict[str, RegionSpec] = Field(default_factory=dict)
     request: RequestProvenance | None = None
     provenance: dict[str, Provenance] = Field(default_factory=dict)
+    load_steps: list[LoadStepSpec] = Field(default_factory=list)
+    result_fields: list[ResultFieldSpec] = Field(default_factory=list)
     solver_control: SolverControl = Field(default_factory=SolverControl)
 
     @model_validator(mode="after")
@@ -255,7 +339,38 @@ class SimulationCase(BaseModel):
         missing_provenance = sorted(REQUIRED_PROVENANCE_FIELDS - self.provenance.keys())
         if missing_provenance:
             raise ValueError("案例缺少字段来源：" + ", ".join(missing_provenance))
+        if not self.result_fields:
+            if "result_fields" in self.model_fields_set:
+                raise ValueError("案例至少需要一个结果字段请求。")
+            self.result_fields = [_default_result_field()]
+        if not self.load_steps:
+            if "load_steps" in self.model_fields_set:
+                raise ValueError("案例至少需要一个分析步。")
+            self.load_steps = [_default_load_step(self.model, self.result_fields)]
+        self._validate_load_steps_and_results()
         return self
+
+    def _validate_load_steps_and_results(self) -> None:
+        step_ids = [step.step_id for step in self.load_steps]
+        if len(set(step_ids)) != len(step_ids):
+            raise ValueError("案例分析步 step_id 必须唯一。")
+        sequences = [step.sequence for step in self.load_steps]
+        if sorted(sequences) != list(range(1, len(sequences) + 1)):
+            raise ValueError("案例分析步 sequence 必须从 1 开始连续编号。")
+        result_names = [field.name for field in self.result_fields]
+        if len(set(result_names)) != len(result_names):
+            raise ValueError("案例结果字段 name 必须唯一。")
+        result_name_set = set(result_names)
+        unknown = sorted(
+            {
+                result_name
+                for step in self.load_steps
+                for result_name in step.result_fields
+                if result_name not in result_name_set
+            }
+        )
+        if unknown:
+            raise ValueError("分析步引用了未知结果字段：" + ", ".join(unknown))
 
     def execution_readiness(
         self,
@@ -374,6 +489,8 @@ class SimulationCase(BaseModel):
             model=model,
             regions=regions,
             request=request,
+            load_steps=[_default_load_step(model, [_default_result_field()])],
+            result_fields=[_default_result_field()],
             provenance={
                 "geometry": Provenance(
                     source=provenance_source,
@@ -411,6 +528,13 @@ class SimulationCase(BaseModel):
     def to_model_params(self) -> ModelParams:
         """返回转换为求解器基线单位的兼容模型，不丢失案例元数据。"""
 
+        projection_blockers = self._legacy_projection_blockers()
+        if projection_blockers:
+            raise ValueError(
+                "当前 ModelParams 兼容转换器无法表达案例分析步："
+                + "；".join(projection_blockers)
+            )
+
         model = self.units.to_canonical_model(self.model)
         metadata = dict(model.metadata)
         metadata.setdefault("case_schema_version", self.schema_version)
@@ -432,7 +556,28 @@ class SimulationCase(BaseModel):
         metadata.setdefault("canonical_unit_system", UnitSystem().model_dump(mode="json"))
         if self.request is not None:
             metadata.setdefault("request_provenance", self.request.model_dump(mode="json"))
+        metadata["load_steps"] = [step.model_dump(mode="json") for step in self.load_steps]
+        metadata["result_fields"] = [field.model_dump(mode="json") for field in self.result_fields]
         return model.model_copy(update={"metadata": metadata})
+
+    def _legacy_projection_blockers(self) -> list[str]:
+        if len(self.load_steps) != 1:
+            return [f"需要 {len(self.load_steps)} 个分析步，兼容接口只支持 1 个"]
+        step = self.load_steps[0]
+        blockers: list[str] = []
+        if step.analysis != self.model.analysis.type:
+            blockers.append("分析类型与 ModelParams.analysis.type 不一致")
+        if step.nlgeom != self.model.analysis.nlgeom:
+            blockers.append("几何非线性设置与 ModelParams.analysis.nlgeom 不一致")
+        if step.load_case and step.load_case != self.model.load_case:
+            blockers.append("load_case 与 ModelParams.load_case 不一致")
+        if step.load_scale != 1.0:
+            blockers.append("load_scale 不是 1.0")
+        if step.duration != 1.0:
+            blockers.append("duration 不是兼容默认值")
+        if step.increments != 1 or step.output_interval != 1:
+            blockers.append("增量或输出间隔不是兼容默认值")
+        return blockers
 
 
 def _collect_confidence_blocker(
@@ -448,3 +593,29 @@ def _collect_confidence_blocker(
     confidences.append(confidence)
     if confidence < minimum_confidence:
         blockers.append(f"{field_name}.confidence={confidence:.3f} 低于 {minimum_confidence:.3f}")
+
+
+def _default_result_field() -> ResultFieldSpec:
+    """为旧 `ModelParams` 案例提供可审计的主位移请求。"""
+
+    return ResultFieldSpec(
+        name="displacement",
+        quantity="U",
+        location="node",
+        invariant="magnitude",
+        unit="mm",
+    )
+
+
+def _default_load_step(
+    model: ModelParams,
+    result_fields: list[ResultFieldSpec],
+) -> LoadStepSpec:
+    return LoadStepSpec(
+        step_id="step-1",
+        sequence=1,
+        analysis=model.analysis.type,
+        nlgeom=model.analysis.nlgeom,
+        load_case=model.load_case,
+        result_fields=[field.name for field in result_fields],
+    )

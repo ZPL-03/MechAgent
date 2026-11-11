@@ -16,6 +16,11 @@ MechAgent 是开源 CAE/FEA 多智能体编排框架。它把自然语言工程�
 
 `SimulationCase` 明确声明单位、右手坐标系、载荷/边界区域、请求来源、字段来源和求解控制。`to_model_params()` 只执行案例声明的单位换算，不根据字段名称或自然语言推断单位。
 
+案例同时包含有序 `load_steps` 和 `result_fields`。分析步记录分析类型、几何非线性、载荷工况继承、
+载荷比例、增量、输出间隔和结果字段引用；结果字段记录物理量、位置、分量或不变量、单位及是否
+必需。旧案例读取时补齐一个默认分析步和主位移请求。当前兼容求解器接口只接受单个未缩放分析步，
+其余分析步契约可序列化和审计，但在获得对应能力适配器前不会进入执行。
+
 进入网格和求解前，`SimulationCase.execution_readiness()` 检查几何、材料、载荷、边界、网格、分析六类来源以及全部载荷/边界区域来源的置信度。默认门槛为 `0.80`。缺失或低于门槛的旧兼容案例可以读取和迁移，但 `ensure_execution_ready()` 会阻断执行并生成 `execution_not_ready` 错误。参数范围、能力执行契约和工具注册检查在同一执行链路中生效。
 
 执行状态与工程验收分开表达：`success` 表示进程和结果提取完成，`verification_status` 表示参考验收状态，`passed` 表示在存在参考值和阈值时通过工程校核。缺少参考值的结果标记为 `unverified`，不等同于工程验收通过。
@@ -30,7 +35,7 @@ SDK、CLI 和 Studio 使用同一编排模型及公开摘要。公开响应保�
 
 ## 验证证据
 
-维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。Python 测试收集 523 项，便携测试和 18 项真实 CalculiX 回归均通过；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 通过。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
+维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。Python 测试收集 530 项，便携测试和 18 项真实 CalculiX 回归均通过；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 通过。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
 
 验证命令、算例误差、环境边界、依赖审计和清理策略见[验证与质量门禁](validation.md)。标准算例和自然语言案例的具体范围见[能力与自然语言解析](capabilities.md)及[求解器、网格与后处理](solver_mesh.md)。
 

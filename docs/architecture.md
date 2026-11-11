@@ -86,7 +86,15 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `regions`：载荷和边界区域的命名、区域类型、稳定标识及来源。
 - `request`：原始用户请求、解析器名称和解析版本。
 - `provenance`：几何、材料、载荷、边界、网格和分析设置的来源与置信度。
+- `load_steps`：按 `sequence` 排序的分析步、载荷工况继承关系、载荷比例、增量和输出字段引用。
+- `result_fields`：结果量、位置、分量或不变量、单位和是否必需的后处理请求。
 - `solver_control`：可选迭代、容差和时间步字段；具体后端未声明支持时不得自行解释。
+
+旧 `ModelParams` 案例在读取时会补齐一个默认分析步和主位移结果请求。`to_model_params()`
+会把分析步和结果字段写入兼容模型的公开 `metadata`；只有单个、未缩放且与
+`ModelParams.analysis` 一致的分析步可以投影到当前求解器接口。多步、非单位载荷比例或
+不一致分析设置会在投影前报错，避免静默丢失契约字段。结果字段请求描述后处理目标，
+具体字段是否由某个求解器提供仍由能力注册项和适配器契约决定。
 
 `ModelParams.to_simulation_case()` 和 `SimulationCase.to_model_params()` 是兼容转换
 入口。当前结构静力工作流在 Designer 输出后生成案例摘要，求解器仍接收兼容的

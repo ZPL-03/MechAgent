@@ -17,10 +17,12 @@ from mechagent.core.models import (
     GeometrySpec,
     GeometryType,
     LoadSpec,
+    LoadStepSpec,
     LoadType,
     MaterialSpec,
     MeshSpec,
     ModelParams,
+    ResultFieldSpec,
     SimulationCase,
     UnitSystem,
 )
@@ -145,6 +147,70 @@ def test_simulation_case_wraps_legacy_model_with_explicit_provenance() -> None:
     restored = case.to_model_params()
     assert restored.geometry == params.geometry
     assert restored.metadata["case_schema_version"] == 1
+    assert [step.step_id for step in case.load_steps] == ["step-1"]
+    assert case.load_steps[0].result_fields == ["displacement"]
+    assert case.result_fields[0].quantity == "U"
+    assert restored.metadata["load_steps"][0]["step_id"] == "step-1"
+    assert restored.metadata["result_fields"][0]["name"] == "displacement"
+
+
+def test_simulation_case_validates_load_step_result_field_references() -> None:
+    params = tc01_model_params()
+    payload = SimulationCase.from_model_params(params).model_dump(mode="json")
+    payload["result_fields"] = [
+        ResultFieldSpec(
+            name="stress",
+            quantity="S",
+            location="integration_point",
+            invariant="mises",
+            unit="MPa",
+        ).model_dump(mode="json")
+    ]
+    payload["load_steps"][0]["result_fields"] = ["displacement"]
+
+    with pytest.raises(ValidationError, match="未知结果字段"):
+        SimulationCase.model_validate(payload)
+
+
+def test_simulation_case_rejects_non_legacy_multi_step_projection() -> None:
+    params = tc01_model_params()
+    case = SimulationCase.from_model_params(params)
+    second_step = LoadStepSpec(
+        step_id="step-2",
+        sequence=2,
+        analysis=params.analysis.type,
+        result_fields=["displacement"],
+    )
+    multi_step = case.model_copy(update={"load_steps": [case.load_steps[0], second_step]})
+
+    with pytest.raises(ValueError, match="只支持 1 个"):
+        multi_step.to_model_params()
+
+
+def test_result_field_rejects_component_and_invariant_together() -> None:
+    with pytest.raises(ValidationError, match="component 与 invariant"):
+        ResultFieldSpec(
+            name="stress",
+            quantity="S",
+            location="integration_point",
+            component="S11",
+            invariant="mises",
+        )
+
+
+def test_load_step_rejects_output_interval_larger_than_increments() -> None:
+    with pytest.raises(ValidationError, match="output_interval"):
+        LoadStepSpec(increments=2, output_interval=3)
+
+
+def test_simulation_case_rejects_non_default_step_duration_projection() -> None:
+    params = tc01_model_params()
+    case = SimulationCase.from_model_params(params)
+    step = case.load_steps[0].model_copy(update={"duration": 2.0})
+    non_default = case.model_copy(update={"load_steps": [step]})
+
+    with pytest.raises(ValueError, match="duration"):
+        non_default.to_model_params()
 
 
 def test_simulation_case_requires_explicit_provenance_confidence_for_execution() -> None:
