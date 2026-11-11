@@ -51,6 +51,7 @@ python scripts/check_env.py
 npm --prefix apps/mechagent-studio ci --no-audit --no-fund
 npm --prefix apps/mechagent-studio test
 npm --prefix apps/mechagent-studio run build
+npm --prefix apps/mechagent-studio audit --omit=dev --audit-level=high
 python -m ruff format --check packages tests scripts
 python -m ruff check packages tests scripts
 python -m mypy packages scripts tests
@@ -67,6 +68,7 @@ python -m pip check
 python -m build packages/mechagent-core --no-isolation
 python -m build packages/mechagent --no-isolation
 python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
+python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
 python scripts/check_wheel_install.py
 python -m mkdocs build --strict
 python scripts/clean_artifacts.py
@@ -76,9 +78,11 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 512 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 514 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。Python 依赖漏洞审计尚未形成稳定的 CI 门禁。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
 
 `scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单可作为发布前许可证审计输入，不替代许可证人工确认。
+
+`scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型和 SHA-256。清单用于核对构建资产；它不提供签名、作者身份或构建 provenance。
 
 ## 作业故障与证据校验
 

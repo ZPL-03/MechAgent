@@ -28,6 +28,8 @@ jobs:
           npm --prefix apps/mechagent-studio ci --no-audit --no-fund
           npm --prefix apps/mechagent-studio test
           npm --prefix apps/mechagent-studio run build
+      - name: Audit frontend production dependencies
+        run: npm --prefix apps/mechagent-studio audit --omit=dev --audit-level=high
       - name: Quality checks
         run: |
           python scripts/check_env.py --profile portable
@@ -42,11 +44,18 @@ jobs:
           python -m build packages/mechagent-core --no-isolation
           python -m build packages/mechagent --no-isolation
           python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
-      - name: Upload SBOM
+          python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
+      - name: Upload release evidence
         uses: actions/upload-artifact@v6
         with:
-          name: mechagent-sbom
-          path: dist/mechagent-sbom.spdx.json
+          name: mechagent-release-evidence
+          path: |
+            dist/mechagent-sbom.spdx.json
+            dist/mechagent-release-manifest.json
+            packages/mechagent-core/dist/*.whl
+            packages/mechagent-core/dist/*.tar.gz
+            packages/mechagent/dist/*.whl
+            packages/mechagent/dist/*.tar.gz
           if-no-files-found: error
           retention-days: 14
       - name: Validate built wheels

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pytest import MonkeyPatch
 from scripts import (
+    build_release_manifest,
     check_wheel_install,
     generate_sbom,
     natural_language_cases,
@@ -313,6 +314,42 @@ def test_generate_sbom_contains_python_and_npm_packages(
         "pkg:npm/@scope/widget@1.2.3"
     )
     assert len(document["documentDescribes"]) == 2
+
+
+def test_build_release_manifest_records_hashes_and_versions(tmp_path: Path) -> None:
+    for distribution in ("mechagent-core", "mechagent"):
+        package_dir = tmp_path / "packages" / distribution
+        package_dir.mkdir(parents=True)
+        (package_dir / "pyproject.toml").write_text(
+            '[project]\nversion = "1.2.3"\n', encoding="utf-8"
+        )
+        dist_dir = package_dir / "dist"
+        dist_dir.mkdir()
+        normalized = distribution.replace("-", "_")
+        (dist_dir / f"{normalized}-1.2.3-py3-none-any.whl").write_bytes(b"wheel")
+        (dist_dir / f"{normalized}-1.2.3.tar.gz").write_bytes(b"sdist")
+    sbom = tmp_path / "dist" / "mechagent-sbom.spdx.json"
+    sbom.parent.mkdir()
+    sbom.write_text("{}", encoding="utf-8")
+
+    document = build_release_manifest.build_document(tmp_path)
+
+    assert document["schemaVersion"] == "mechagent.release-manifest.v1"
+    assert document["version"] == "1.2.3"
+    assert len(document["artifacts"]) == 5
+    assert all(len(item["sha256"]) == 64 for item in document["artifacts"])
+
+
+def test_build_release_manifest_rejects_missing_artifacts(tmp_path: Path) -> None:
+    for distribution in ("mechagent-core", "mechagent"):
+        package_dir = tmp_path / "packages" / distribution
+        package_dir.mkdir(parents=True)
+        (package_dir / "pyproject.toml").write_text(
+            '[project]\nversion = "1.2.3"\n', encoding="utf-8"
+        )
+
+    with pytest.raises(FileNotFoundError, match="wheel 数量必须为 1"):
+        build_release_manifest.build_document(tmp_path)
 
 
 def test_check_wheel_install_import_check_validates_type_markers() -> None:
