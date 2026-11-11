@@ -19,6 +19,7 @@ nav:
       - 编排与 Agent 通信: orchestration.md
       - 能力与自然语言解析: capabilities.md
       - 求解器、网格与后处理: solver_mesh.md
+      - 技术报告: technical_report.md
   - 验证与开发:
       - 验证与质量门禁: validation.md
       - 本地开发配置: local_setup.md

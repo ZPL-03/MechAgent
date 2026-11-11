@@ -14,6 +14,7 @@ MechAgent 将自然语言工程请求编排为可执行、可追踪的仿真任�
 | 理解任务状态、Agent 输入输出与错误隔离 | [编排与 Agent 通信](orchestration.md) |
 | 理解网格、求解器与后处理 | [求解器、网格与后处理](solver_mesh.md) |
 | 运行检查与解读验证证据 | [验证与质量门禁](validation.md) |
+| 查看当前架构、能力、证据和发布条件汇总 | [技术报告](technical_report.md) |
 | 维护前端模块、语言与主题 | [前端架构](frontend_architecture.md)、[设计系统](design_system.md) |
 | 规划能力、后端和平台扩展 | [长周期开发计划书](development_plan.md) |
 

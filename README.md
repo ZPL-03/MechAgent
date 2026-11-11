@@ -71,5 +71,6 @@ python scripts/run_natural_language_cases.py
 | [架构](docs/architecture.md) | 模块依赖、注册 API、数据与状态契约 |
 | [产品蓝图](docs/product_blueprint.md) | 用户任务、交互入口和产品边界 |
 | [长周期开发计划书](docs/development_plan.md) | 能力成熟度、工具接入、依赖顺序和发布条件 |
+| [技术报告](docs/technical_report.md) | 当前架构、执行契约、验证证据和发布条件汇总 |
 
 项目采用 Apache License 2.0。外部求解器与 CAD 软件的安装和许可由其各自条款管理。
