@@ -17,6 +17,7 @@ from mechagent.config import (
     OrchestratorSettings,
     OutputSettings,
     SolverSettings,
+    StudioSettings,
 )
 from mechagent.core import (
     AbstractMesher,
@@ -165,6 +166,14 @@ def test_config_exposes_abaqus_license_policy() -> None:
     assert settings.abaqus.license_probe == ("{launcher}", "--version")
     with pytest.raises(ValueError, match="license_probe"):
         SolverSettings.model_validate({"abaqus": {"license_probe": [""]}})
+
+
+def test_studio_config_exposes_local_storage_quota() -> None:
+    settings = StudioSettings(max_storage_bytes=4096)
+
+    assert settings.max_storage_bytes == 4096
+    with pytest.raises(ValueError, match="max_storage_bytes"):
+        StudioSettings(max_storage_bytes=1023)
 
 
 def test_config_accepts_registered_tool_plugins() -> None:

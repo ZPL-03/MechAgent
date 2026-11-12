@@ -156,8 +156,12 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 | 字段 | 默认值 | 约束与职责 |
 | --- | --- | --- |
 | `database` | `mechagent_output/.studio/jobs.sqlite3` | 相对 Studio 启动目录解析；父目录保存数据库及作业文件 |
+| `artifact_root` | `mechagent_output/.studio/objects` | 本地对象存储根目录；S3 后端不使用此目录保存远端对象 |
+| `artifact_backend` | `filesystem` | `filesystem` 或 `s3`；S3 凭据使用 boto3 标准凭据链 |
 | `max_workers` | 2 | 1–32，同时处于启动、运行或取消中的作业上限 |
 | `max_queued` | 32 | 1–10000，等待领取的作业容量 |
+| `max_result_bytes` | 104857600 | 单个公开 `result.json` 的字节上限 |
+| `max_storage_bytes` | 空 | 本机工作目录文件总字节上限；空值表示不启用 |
 | `startup_timeout` | 60 s | 至少 5 s，worker 身份登记期限 |
 | `heartbeat_timeout` | 30 s | 至少 5 s，worker 每秒发送心跳 |
 | `job_timeout` | 7200 s | 至少 10 s，从领取开始计时，包含初始化、求解和证据写入 |
@@ -169,6 +173,10 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 | `auth_projects` | `default` | 主体可访问的项目标识 |
 
 每个 worker 的求解器 CPU 配置仍由工具配置控制；并发数与每个求解器的核数共同决定资源占用。SDK/CLI 直接运行不受 Studio 并发限制。
+
+`max_storage_bytes` 统计 `database` 父目录和本地 `artifact_root` 内的普通文件，包括 SQLite、WAL/SHM、作业目录和本地对象目录，
+不跟随符号链接。新作业在入队前检查配额；结果写入后再次检查，超额作业以
+`storage_quota_exceeded` 失败并通过 HTTP 507 返回。该配额只约束本机工作目录，S3 桶容量和保留策略由部署环境管理。
 
 worker 使用当前 Python 环境重新导入内置能力和工具。父进程中临时调用注册函数的插件不会自动传播到独立 worker；此类插件可使用 SDK，Studio 插件发现与打包入口尚无发布契约。配置文件在提交后变化会阻止该任务执行，显式重试读取当前配置。运行目录、状态语义与备份要求见[架构](architecture.md)。
 

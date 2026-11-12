@@ -38,6 +38,7 @@ from mechagent.runtime.store import (
     IdempotencyError,
     JobStore,
     QueueFullError,
+    StorageQuotaError,
 )
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -129,6 +130,7 @@ def create_studio_app(
                 ),
                 max_active_jobs_per_project=settings.max_active_jobs_per_project,
                 max_result_bytes=settings.max_result_bytes,
+                max_storage_bytes=settings.max_storage_bytes,
             ),
             settings,
         )
@@ -268,6 +270,8 @@ def create_studio_app(
             raise HTTPException(409, str(exc)) from exc
         except QueueFullError as exc:
             raise HTTPException(429, str(exc), headers={"Retry-After": "2"}) from exc
+        except StorageQuotaError as exc:
+            raise HTTPException(507, str(exc)) from exc
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

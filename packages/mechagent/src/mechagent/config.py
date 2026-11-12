@@ -413,6 +413,7 @@ class StudioSettings(BaseModel):
     max_queued: int = Field(default=32, ge=1, le=10000)
     max_active_jobs_per_project: int = Field(default=8, ge=1, le=10000)
     max_result_bytes: int = Field(default=100 * 1024 * 1024, ge=1024, le=10 * 1024**3)
+    max_storage_bytes: int | None = Field(default=None, ge=1024)
     startup_timeout: int = Field(default=60, ge=5)
     heartbeat_timeout: int = Field(default=30, ge=5)
     job_timeout: int = Field(default=7200, ge=10)

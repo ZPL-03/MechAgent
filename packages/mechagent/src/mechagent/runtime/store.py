@@ -35,6 +35,10 @@ class IdempotencyError(ValueError):
     """同一个幂等键对应不同请求。"""
 
 
+class StorageQuotaError(ValueError):
+    """Studio 工作目录超过配置的本机存储配额。"""
+
+
 def iso_time(value: float | None) -> str | None:
     return datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else None
 
@@ -66,14 +70,18 @@ class JobStore:
         artifact_store: Any | None = None,
         max_active_jobs_per_project: int | None = 8,
         max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES,
+        max_storage_bytes: int | None = None,
     ) -> None:
         if max_active_jobs_per_project is not None and max_active_jobs_per_project < 1:
             raise ValueError("max_active_jobs_per_project 必须为正数。")
         if max_result_bytes < 1024:
             raise ValueError("max_result_bytes 不能小于 1024。")
+        if max_storage_bytes is not None and max_storage_bytes < 1024:
+            raise ValueError("max_storage_bytes 不能小于 1024。")
         self.database = database.resolve()
         self.max_active_jobs_per_project = max_active_jobs_per_project
         self.max_result_bytes = max_result_bytes
+        self.max_storage_bytes = max_storage_bytes
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self.artifacts = artifact_store or ArtifactStore(
             artifact_root or self.database.parent / "objects"
@@ -320,6 +328,7 @@ class JobStore:
                     ):
                         raise IdempotencyError("幂等键已用于不同请求。")
                     return dict(existing)
+            self._ensure_storage_quota()
             count = connection.execute(
                 "SELECT COUNT(*) FROM jobs WHERE status='queued'"
             ).fetchone()[0]
@@ -354,6 +363,32 @@ class JobStore:
                 ),
             )
         return self.get(job_id)
+
+    def storage_usage_bytes(self) -> int:
+        """返回本地 Studio 工作目录内不跟随符号链接的文件总大小。"""
+
+        total = 0
+        roots = [self.database.parent]
+        artifact_root = getattr(self.artifacts, "root", None)
+        if isinstance(artifact_root, Path):
+            resolved_artifact_root = artifact_root.resolve()
+            if not resolved_artifact_root.is_relative_to(self.database.parent.resolve()):
+                roots.append(resolved_artifact_root)
+        for root in roots:
+            for path in root.rglob("*"):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                total += path.stat().st_size
+        return total
+
+    def _ensure_storage_quota(self) -> None:
+        if self.max_storage_bytes is None:
+            return
+        usage = self.storage_usage_bytes()
+        if usage > self.max_storage_bytes:
+            raise StorageQuotaError(
+                f"Studio 工作目录超过存储配额 {self.max_storage_bytes} 字节（当前 {usage} 字节）。"
+            )
 
     def get(self, job_id: str) -> dict[str, Any]:
         with self.connect() as connection:
@@ -795,6 +830,19 @@ class JobStore:
                     else:
                         result_hash = sha256(path)
                         self.artifacts.put_file(path)
+            if status == "succeeded" and self.max_storage_bytes is not None:
+                usage = self.storage_usage_bytes()
+                if usage > self.max_storage_bytes:
+                    status = "failed"
+                    error = (
+                        f"Studio 工作目录超过存储配额 {self.max_storage_bytes} 字节"
+                        f"（当前 {usage} 字节）。"
+                    )
+                    error_code = "storage_quota_exceeded"
+                    result = None
+                    result_hash = None
+                    result_bytes = None
+                    (self.directory(job_id) / "result.json").unlink(missing_ok=True)
             connection.execute(
                 """UPDATE jobs SET status=?,finished_at=?,error=?,error_code=?,
                 result_hash=?,result_bytes=?,cpu_user_seconds=?,cpu_system_seconds=?,
@@ -924,12 +972,23 @@ class JobStore:
         now = time.time()
         storage: dict[str, Any]
         try:
+            workspace_bytes = self.storage_usage_bytes()
+        except OSError:
+            workspace_bytes = None
+        try:
             disk = shutil.disk_usage(self.database.parent)
             storage = {
                 "available": True,
                 "filesystem_total_bytes": int(disk.total),
                 "filesystem_used_bytes": int(disk.used),
                 "filesystem_free_bytes": int(disk.free),
+                "workspace_bytes": workspace_bytes,
+                "quota_bytes": self.max_storage_bytes,
+                "over_quota": (
+                    workspace_bytes is not None
+                    and self.max_storage_bytes is not None
+                    and workspace_bytes > self.max_storage_bytes
+                ),
                 "result_bytes": int(aggregate["result_bytes"] or 0),
             }
         except OSError:
@@ -938,6 +997,13 @@ class JobStore:
                 "filesystem_total_bytes": None,
                 "filesystem_used_bytes": None,
                 "filesystem_free_bytes": None,
+                "workspace_bytes": workspace_bytes,
+                "quota_bytes": self.max_storage_bytes,
+                "over_quota": (
+                    workspace_bytes is not None
+                    and self.max_storage_bytes is not None
+                    and workspace_bytes > self.max_storage_bytes
+                ),
                 "result_bytes": int(aggregate["result_bytes"] or 0),
             }
         evidence = {"checked": 0, "valid": 0, "invalid": 0, "missing": 0}

@@ -13,7 +13,7 @@ from scripts import drill_studio_recovery
 
 from mechagent.runtime.artifacts import ArtifactStore, S3ArtifactStore
 from mechagent.runtime.backup import backup_studio, restore_studio, verify_backup
-from mechagent.runtime.store import JobStore
+from mechagent.runtime.store import JobStore, StorageQuotaError
 
 
 def test_artifact_store_deduplicates_and_restores_result(tmp_path: Path) -> None:
@@ -241,6 +241,70 @@ def test_job_store_marks_oversized_result_failed(tmp_path: Path) -> None:
     assert finished["status"] == "failed"
     assert finished["error_code"] == "result_too_large"
     assert store.payload(finished)["result"] is None
+
+
+def test_job_store_rejects_submission_over_storage_quota(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database, max_storage_bytes=1024)
+
+    with pytest.raises(StorageQuotaError, match="存储配额"):
+        store.submit("quota", False, config, max_queued=1)
+
+
+def test_job_store_marks_success_failed_when_storage_quota_is_exceeded(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database, max_storage_bytes=10 * 1024 * 1024)
+    job = store.submit("quota-finish", False, config, max_queued=1)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    store.max_storage_bytes = store.storage_usage_bytes() + 10
+    run_dir = store.directory(job["job_id"]) / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "oversized.bin").write_bytes(b"x" * 100)
+
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+    finished = store.get(job["job_id"])
+    assert finished["status"] == "failed"
+    assert finished["error_code"] == "storage_quota_exceeded"
+    assert store.metrics()["storage"]["over_quota"] is True
+
+
+def test_job_store_checks_storage_quota_after_result_write(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database, max_storage_bytes=10 * 1024 * 1024)
+    job = store.submit("quota-result", False, config, max_queued=1)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    store.max_storage_bytes = store.storage_usage_bytes() + 50
+
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"value": "x" * 200})
+    finished = store.get(job["job_id"])
+    assert finished["status"] == "failed"
+    assert finished["error_code"] == "storage_quota_exceeded"
+    assert finished["result_hash"] is None
+    assert not (store.directory(job["job_id"]) / "result.json").exists()
+
+
+def test_job_store_counts_local_artifacts_outside_database_parent(tmp_path: Path) -> None:
+    database = tmp_path / "studio" / "jobs.sqlite3"
+    artifact_root = tmp_path / "objects"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database, artifact_root=artifact_root)
+    (artifact_root / "objects" / "aa").mkdir(parents=True)
+    (artifact_root / "objects" / "aa" / "payload").write_bytes(b"x" * 17)
+
+    assert store.storage_usage_bytes() >= 17
 
 
 def test_recovery_drill_records_rto_rpo_and_restores_jobs(tmp_path: Path) -> None:

@@ -123,6 +123,18 @@ def test_studio_metrics_are_scoped_and_persistent_without_request_data(tmp_path:
         assert all_metrics.json()["metrics"]["jobs"]["total"] >= 1
 
 
+def test_studio_rejects_submission_when_storage_quota_is_exceeded(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    settings = StudioSettings(database=tmp_path / "jobs.sqlite3", max_storage_bytes=1024)
+
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        response = client.post("/api/v1/jobs", json={"request": "quota"})
+
+    assert response.status_code == 507
+    assert "存储配额" in response.json()["detail"]
+
+
 def test_studio_principal_directory_selects_subject_and_scope(tmp_path: Path) -> None:
     config_path = tmp_path / "mechagent.yaml"
     config_path.write_text("{}", encoding="utf-8")

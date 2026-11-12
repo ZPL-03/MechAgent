@@ -50,6 +50,7 @@ studio:
   max_queued: 32
   max_active_jobs_per_project: 8
   max_result_bytes: 104857600
+  max_storage_bytes: null
   startup_timeout: 60
   heartbeat_timeout: 30
   job_timeout: 7200
