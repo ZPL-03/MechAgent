@@ -121,6 +121,56 @@ def test_default_cleanup_preserves_runs(tmp_path: Path, monkeypatch: MonkeyPatch
     assert (output / "evidence.dat").exists()
 
 
+def test_explicit_studio_runtime_cleanup_preserves_formal_evidence(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    runtime = tmp_path / "mechagent_output" / ".studio"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(runtime / "jobs.sqlite3")
+    job = store.submit("finished", False, config, max_queued=1)
+    store.cancel(job["job_id"])
+    formal = tmp_path / "mechagent_output" / "benchmarks" / "manifest.json"
+    formal.parent.mkdir(parents=True)
+    formal.write_text('{"status":"passed"}', encoding="utf-8")
+
+    assert clean_artifacts.main(["--include-studio-runtime"]) == 0
+
+    assert not runtime.exists()
+    assert formal.is_file()
+
+
+def test_studio_runtime_cleanup_refuses_active_jobs(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(tmp_path / "mechagent_output/.studio/jobs.sqlite3")
+    store.submit("active", False, config, max_queued=1)
+
+    with pytest.raises(RuntimeError, match="非终态"):
+        clean_artifacts.main(["--include-studio-runtime"])
+
+    assert store.database.exists()
+
+
+def test_studio_runtime_cleanup_refuses_corrupt_database(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    runtime = tmp_path / "mechagent_output" / ".studio"
+    runtime.mkdir(parents=True)
+    database = runtime / "jobs.sqlite3"
+    database.write_bytes(b"corrupt")
+
+    with pytest.raises(RuntimeError, match="无法读取作业数据库"):
+        clean_artifacts.main(["--include-studio-runtime"])
+
+    assert database.exists()
+
+
 def test_cleanup_preserves_tracked_files(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
     build = tmp_path / "build"

@@ -196,10 +196,11 @@ Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Heade
 
 ```powershell
 python scripts/clean_artifacts.py
+python scripts/clean_artifacts.py --include-studio-runtime
 python scripts/clean_artifacts.py --include-runs
 ```
 
-默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用该选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
+默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-studio-runtime` 仅删除 `mechagent_output/.studio` 的本地 Studio 运行时数据库、作业目录和对象目录，保留正式证据目录；`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用后两个选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
 
 若默认清理后仍有一次性文件，使用以下命令列出未跟踪文件并逐项确认：
 
@@ -211,6 +212,7 @@ Get-ChildItem -Force -Recurse -File .tmp, .pytest_cache, .mypy_cache, .ruff_cach
 仅在确认其中不包含运行证据、正式 FEM、报告或用户文件后，再执行：
 
 ```powershell
+python scripts/clean_artifacts.py --include-studio-runtime
 python scripts/clean_artifacts.py --include-runs
 ```
 

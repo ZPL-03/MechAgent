@@ -133,7 +133,7 @@ Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库
 
 环境检查使用 `python scripts/check_env.py`；便携环境使用 `--profile portable`。质量门禁、`scripts/run_llm_smoke.py`、标准验证与包检查统一见[验证与质量门禁](validation.md)。
 
-`scripts/clean_artifacts.py` 删除再生成输出、知识索引、node_modules 与构建缓存。执行前将需保留的运行证据和发布包存放到仓库外；`.env`、配置、公开知识源和正式源代码不属于再生成产物。
+`scripts/clean_artifacts.py` 删除再生成输出、知识索引、node_modules 与构建缓存。`--include-studio-runtime` 仅删除本地 `mechagent_output/.studio` 运行时目录；`--include-runs` 才会删除正式运行证据和 FEM 临时文件。执行前将需保留的运行证据和发布包存放到仓库外；`.env`、配置、公开知识源和正式源代码不属于再生成产物。
 
 ## Abaqus 本机检查
 

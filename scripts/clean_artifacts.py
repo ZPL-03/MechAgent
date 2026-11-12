@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 from argparse import ArgumentParser
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def main(argv: list[str] | None = None) -> int:
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--include-runs", action="store_true", help="同时删除运行证据与 FEM 产物")
+    parser.add_argument(
+        "--include-studio-runtime",
+        action="store_true",
+        help="删除 mechagent_output/.studio 运行时数据库和作业目录",
+    )
     args = parser.parse_args(argv)
     tracked = _tracked_paths()
     patterns = [
@@ -51,23 +57,33 @@ def main(argv: list[str] | None = None) -> int:
             "coverage.xml",
         )
     )
-    if args.include_runs:
+    if args.include_runs or args.include_studio_runtime:
         for database in _iter_repo_paths("*.sqlite3"):
-            with sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True) as connection:
-                has_jobs = connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'"
-                ).fetchone()
-                if (
-                    has_jobs
-                    and connection.execute(
-                        "SELECT 1 FROM jobs WHERE status IN "
-                        "('queued','starting','running','cancelling') LIMIT 1"
+            try:
+                with closing(
+                    sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+                ) as connection:
+                    has_jobs = connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'"
                     ).fetchone()
-                ):
-                    raise RuntimeError(f"作业数据库存在非终态任务，拒绝删除运行证据: {database}")
+                    if (
+                        has_jobs
+                        and connection.execute(
+                            "SELECT 1 FROM jobs WHERE status IN "
+                            "('queued','starting','running','cancelling') LIMIT 1"
+                        ).fetchone()
+                    ):
+                        raise RuntimeError(
+                            f"作业数据库存在非终态任务，拒绝删除运行证据: {database}"
+                        )
+            except sqlite3.DatabaseError as exc:
+                raise RuntimeError(f"无法读取作业数据库，拒绝删除相关运行目录: {database}") from exc
         locks = list(_iter_repo_paths("*.lck"))
         if locks:
             raise RuntimeError(f"存在求解锁，请核实作业状态后处理锁文件: {locks[0]}")
+    if args.include_studio_runtime:
+        targets.append(REPO_ROOT / "mechagent_output" / ".studio")
+    if args.include_runs:
         targets.append(REPO_ROOT / "mechagent_output")
         targets.extend(
             path
