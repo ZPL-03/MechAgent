@@ -93,13 +93,24 @@ class CalculiXSettings(BaseModel):
 
 
 class AbaqusSettings(BaseModel):
-    """Abaqus/Standard launcher 配置。"""
+    """Abaqus/Standard launcher、许可证探针和本地槽位配置。"""
 
     model_config = ConfigDict(extra="forbid")
 
     path: str = r"D:\Abaqus2023\Commands\abaqus.bat"
     num_cpus: int = Field(default=1, ge=1)
     timeout: int = Field(default=3600, ge=1)
+    max_concurrent: int = Field(default=1, ge=1)
+    license_probe: tuple[str, ...] | None = None
+
+    @field_validator("license_probe")
+    @classmethod
+    def _license_probe_must_not_contain_blank_entries(
+        cls, value: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("solver.abaqus.license_probe 不能包含空命令片段。")
+        return value
 
 
 class SolverSettings(BaseModel):

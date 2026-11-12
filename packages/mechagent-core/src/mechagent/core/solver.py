@@ -23,6 +23,8 @@ class SolverConfig(BaseModel):
         work_dir: 求解工作目录。
         num_cpus: 并行 CPU 核数。
         timeout: 最大允许求解时间，单位为 s。
+        max_concurrent: 适配器本地并发槽位上限；不使用许可证队列的求解器忽略该字段。
+        license_probe: 可选的许可证探针命令片段；仅由支持该契约的适配器执行。
 
     Returns:
         SolverConfig: 经过校验的求解器配置。
@@ -41,6 +43,17 @@ class SolverConfig(BaseModel):
     work_dir: Path = Field(default=Path("mechagent_output"))
     num_cpus: int = Field(default=1, ge=1)
     timeout: int = Field(default=3600, ge=1)
+    max_concurrent: int = Field(default=1, ge=1)
+    license_probe: tuple[str, ...] | None = None
+
+    @field_validator("license_probe")
+    @classmethod
+    def _license_probe_must_not_contain_blank_entries(
+        cls, value: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("solver.license_probe 不能包含空命令片段。")
+        return value
 
 
 class SolverResult(BaseModel):

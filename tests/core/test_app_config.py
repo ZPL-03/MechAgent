@@ -156,6 +156,17 @@ def test_config_normalizes_supported_backend_names() -> None:
     assert OutputSettings(default_format="MARKDOWN").default_format == "markdown"
 
 
+def test_config_exposes_abaqus_license_policy() -> None:
+    settings = SolverSettings.model_validate(
+        {"abaqus": {"max_concurrent": 2, "license_probe": ["{launcher}", "--version"]}}
+    )
+
+    assert settings.abaqus.max_concurrent == 2
+    assert settings.abaqus.license_probe == ("{launcher}", "--version")
+    with pytest.raises(ValueError, match="license_probe"):
+        SolverSettings.model_validate({"abaqus": {"license_probe": [""]}})
+
+
 def test_config_accepts_registered_tool_plugins() -> None:
     register_solver("unit-config-solver", _ConfigDummySolver)
     register_mesher("unit-config-mesher", _ConfigDummyMesher)

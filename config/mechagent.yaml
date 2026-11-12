@@ -11,6 +11,12 @@ solver:
     path: ${CALCULIX_CCX:-ccx}
     num_cpus: 1
     timeout: 3600
+  abaqus:
+    path: ${ABAQUS_LAUNCHER:-D:/Abaqus2023/Commands/abaqus.bat}
+    num_cpus: 1
+    timeout: 3600
+    max_concurrent: 1
+    license_probe: null
 
 mesher:
   default: calculix-inp

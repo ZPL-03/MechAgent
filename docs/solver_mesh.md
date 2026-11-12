@@ -35,7 +35,13 @@ MeshAgent 要求成功网格结果提供 `mesh_file`，并要求 `MeshResult.qua
 
 `AbaqusAdapter` 已通过 `core.factory` 注册名 `abaqus`。适配器覆盖当前梁、矩形板和矩形实体结构静力输入模板，使用 Abaqus 原生 `*OUTPUT`、`*NODE OUTPUT`、`*ELEMENT OUTPUT` 和历史能量输出请求结果场；`run_case()` 支持线性静力多步，调用 `abaqus python` 读取 ODB 的所有输出帧，并将 `U`、`S`、`E`、`EVOL`、`SENER`、`RF` 和 `ENER` 归一到统一结果字段名称。积分点字段使用元素标签、积分点和截面点组成稳定键，避免不同积分点互相覆盖；节点坐标、逐帧场量和 `ALLIE/ALLSE/ALLWK/ALLPD` 历史能量同时保留。结果字段选择器随后按 `ResultFieldSpec` 计算分量、位移幅值和应力不变量，缺失必需场量会使执行失败。
 
-适配器检查 launcher、进程返回状态、ODB 文件、锁文件和 ODB 提取脚本结果。Abaqus 许可证、版本和工作目录由本机安装负责；便携 CI 不依赖商业工具。`scripts/run_abaqus_smoke.py` 是独立工具基准，不能代替适配器真实多步运行证据。`scripts/run_abaqus_multistep.py` 在同一 `SimulationCase` 上运行两个线性静力步，并在 `manifest.json` 中验证步数、帧数、节点数、积分点场、能量场和逐步结果字段；该清单只有所有检查通过时才标记 `passed`。
+适配器检查 launcher、进程返回状态、ODB 文件、锁文件和 ODB 提取脚本结果。`SolverConfig` 或
+`solver.abaqus` 配置可提供本地并发槽位和只读许可证探针；探针失败或槽位等待超时会明确返回
+失败，不会降级为 CalculiX。Abaqus 许可证、版本和工作目录由本机安装负责；便携 CI 不依赖
+商业工具。`scripts/run_abaqus_smoke.py` 是独立工具基准，不能代替适配器真实多步运行证据。
+`scripts/run_abaqus_multistep.py` 在同一 `SimulationCase` 上运行两个线性静力步，并在
+`manifest.json` 中验证步数、帧数、节点数、积分点场、能量场和逐步结果字段；该清单只有所有
+检查通过时才标记 `passed`。
 
 ## `.frd` 后处理
 

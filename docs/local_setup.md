@@ -54,6 +54,10 @@ npm --prefix apps/mechagent-studio run build
 SDK 通过 `MechAgent.from_config()` 加载配置时按以下优先级展开环境变量：显式进程环境变量、
 配置文件同目录 `.env`、当前工作目录 `.env`。`.env` 内容只参与当前配置解析，不写入进程级环境变量。
 
+Abaqus 的 `solver.abaqus.max_concurrent` 限制同一 Python 进程内的适配器槽位；
+`solver.abaqus.license_probe` 可配置只读命令片段，使用 `{launcher}` 引用启动器。探针返回非零
+状态时作业失败并保留诊断；未配置探针不代表许可证可用，跨进程和集群许可证仍由外部队列管理。
+
 ## LLM
 
 `.env.example` 提供公开模板；本机 `.env` 包含：

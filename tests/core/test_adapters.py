@@ -6,6 +6,7 @@ import json
 import math
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, cast
 
@@ -228,6 +229,82 @@ def test_abaqus_adapter_reports_unavailable_launcher(tmp_path: Path) -> None:
 def test_abaqus_execution_policy_rejects_invalid_queue_size() -> None:
     with pytest.raises(ValueError, match="max_concurrent"):
         AbaqusExecutionPolicy(max_concurrent=0)
+
+
+def test_abaqus_adapter_reads_license_policy_from_solver_config(tmp_path: Path) -> None:
+    adapter = AbaqusAdapter(
+        SolverConfig(
+            work_dir=tmp_path,
+            max_concurrent=2,
+            license_probe=("{launcher}", "--version"),
+        )
+    )
+
+    assert adapter.policy.max_concurrent == 2
+    assert adapter.policy.license_probe == ("{launcher}", "--version")
+
+
+def test_abaqus_license_probe_failure_is_reported_without_solver_start(
+    tmp_path: Path,
+) -> None:
+    class ProbeExecutor:
+        def __init__(self) -> None:
+            self.calls: list[JobSpec] = []
+
+        def run(self, spec: JobSpec) -> JobResult:
+            self.calls.append(spec)
+            return JobResult(
+                job_id="probe",
+                status=JobStatus.FAILED,
+                wall_time=0.0,
+                stderr="license denied",
+                error_message="license denied",
+            )
+
+    input_file = tmp_path / "case.inp"
+    input_file.write_text("*HEADING\n", encoding="utf-8")
+    executor = ProbeExecutor()
+    adapter = AbaqusAdapter(
+        SolverConfig(solver_path=sys.executable, work_dir=tmp_path),
+        executor=executor,  # type: ignore[arg-type]
+        policy=AbaqusExecutionPolicy(license_probe=("{launcher}", "--version")),
+    )
+
+    result = adapter.solve(input_file)
+
+    assert result.success is False
+    assert result.error_message == "Abaqus 许可证探针失败: license denied"
+    assert len(executor.calls) == 1
+    assert executor.calls[0].labels["operation"] == "license_probe"
+
+
+def test_abaqus_queue_timeout_reports_license_slot_exhaustion(tmp_path: Path) -> None:
+    policy = AbaqusExecutionPolicy(max_concurrent=1)
+    config = SolverConfig(solver_path=sys.executable, work_dir=tmp_path, timeout=1)
+    holder = AbaqusAdapter(config, policy=policy)
+    waiting = AbaqusAdapter(config, policy=policy)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def occupy_slot() -> None:
+        with holder._execution_slot(sys.executable):
+            entered.set()
+            release.wait(timeout=5)
+
+    thread = threading.Thread(target=occupy_slot)
+    thread.start()
+    assert entered.wait(timeout=2)
+    try:
+        input_file = tmp_path / "queued.inp"
+        input_file.write_text("*HEADING\n", encoding="utf-8")
+        result = waiting.solve(input_file)
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert result.success is False
+    assert result.error_message == "Abaqus 本地执行队列已满，等待许可证槽位超时。"
+    assert not thread.is_alive()
 
 
 def test_abaqus_input_requests_full_field_and_energy_output(tmp_path: Path) -> None:

@@ -93,7 +93,10 @@ class AbaqusAdapter(AbstractSolver):
         self.executor = executor or LocalCommandExecutor(
             ExecutorConfig(work_dir=config.work_dir, default_timeout=config.timeout)
         )
-        self.policy = policy or AbaqusExecutionPolicy()
+        self.policy = policy or AbaqusExecutionPolicy(
+            max_concurrent=config.max_concurrent,
+            license_probe=config.license_probe,
+        )
 
     def generate_input(self, model_params: ModelParams) -> Path:
         if model_params.analysis.type is not AnalysisType.STATIC:

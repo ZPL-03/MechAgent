@@ -144,5 +144,7 @@ class SolverAgent:
                 work_dir=self.work_dir,
                 num_cpus=abaqus.num_cpus,
                 timeout=abaqus.timeout,
+                max_concurrent=abaqus.max_concurrent,
+                license_probe=abaqus.license_probe,
             )
         return SolverConfig(work_dir=self.work_dir)

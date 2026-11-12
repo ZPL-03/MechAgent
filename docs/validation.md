@@ -143,6 +143,8 @@ python scripts/clean_artifacts.py
 
 本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的位移场逐点比较均通过。清单分别记录 `line-coordinate-centerline`、`node-coordinate` 和 `line-coordinate-centerline` 对齐方式；阈值为相对误差 3% 或绝对误差 0.005 mm，最大绝对误差分别为 0.003084 mm、0.0002334 mm 和 0.001560 mm。TC-03 的最大相对误差出现在接近零的节点，仍由绝对误差阈值约束。该证据验证三个案例的位移字段适配器闭环，不代表应力、反力、能量、其他单元、其他网格或其他物理域均可跨后端比较。
 
+适配器测试覆盖许可证探针非零返回、许可证槽位等待超时和配置校验；这些是注入执行器的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。
+
 `scripts/run_abaqus_multistep.py` 的本机验证清单为 `mechagent_output/abaqus-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 2 个 ODB 帧、101 个节点、400 个积分点应力和应变值、100 个单元体积值、400 个应变能密度值、101 个节点反力值、全局 `ALLIE` 能量值以及 4 个逐帧结果记录。两个步骤均保留 `ALLIE`、`ALLSE`、`ALLWK` 和 `ALLPD` 历史能量；`requested_fields` 与 `step_results` 均包含位移、应力分量、应变、体积和能量字段。该证据验证 Abaqus 适配器的本机多步执行与场提取路径，不扩大到非线性、接触或其他单元族。
 
 Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
