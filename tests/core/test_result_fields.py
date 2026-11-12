@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from mechagent.core import attach_case_result_fields
+from mechagent.core import attach_case_result_fields, attach_mapped_result_fields
 from mechagent.core.exceptions import SolverError
 from mechagent.core.models import LoadStepSpec, ResultFieldSpec, SimulationCase
-from mechagent.core.validation import tc01_model_params
+from mechagent.core.validation import tc01_model_params, tc03_model_params
 
 
 def _case() -> SimulationCase:
@@ -128,3 +128,74 @@ def test_step_results_only_contain_fields_declared_by_that_step() -> None:
 
     assert list(extracted["step_results"][0]["fields"]) == ["u_mag"]
     assert list(extracted["step_results"][1]["fields"]) == ["s_mises"]
+
+
+def test_mapped_fields_use_element_centroids_and_preserve_native_fields() -> None:
+    case = SimulationCase.from_model_params(tc03_model_params(), provenance_confidence=1.0)
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {
+                        "10@ip1": [10.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+                        "10@ip2": [12.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+                    },
+                },
+                "strain": {
+                    "location": "integration_point",
+                    "values": {
+                        "10@ip1": [0.1, 0.0, 0.0],
+                        "10@ip2": [0.3, 0.0, 0.0],
+                    },
+                },
+                "volume": {"location": "element", "values": {"10": 20.0}},
+                "strain_energy_density": {
+                    "location": "integration_point",
+                    "values": {"10@ip1": 1.0, "10@ip2": 3.0},
+                },
+            },
+            "elements": {"10": ["1", "2"]},
+            "element_centroids": {"10": [5.0, 0.0, 0.0]},
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [10.0, 0.0, 0.0]},
+        },
+        case,
+    )
+
+    assert extracted["fields"]["stress"]["values"]["10@ip1"][0] == 10.0
+    assert extracted["mapped_fields"]["stress_sxx"]["location"] == "element_centroid"
+    assert extracted["mapped_fields"]["stress_sxx"]["values"] == {"10": 11.0}
+    assert extracted["mapped_fields"]["strain_exx"]["values"] == {"10": 0.2}
+    assert extracted["mapped_fields"]["volume"]["values"] == {"10": 20.0}
+    assert extracted["mapped_fields"]["strain_energy_density"]["values"] == {"10": 2.0}
+
+
+def test_mapped_beam_volume_uses_mesh_nodes_when_native_volume_is_absent() -> None:
+    case = SimulationCase.from_model_params(tc01_model_params(), provenance_confidence=1.0)
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {},
+            "elements": {"1": ["1", "2"]},
+            "element_centroids": {"1": [5.0, 0.0, 0.0]},
+            "mesh_nodes": {"1": [0.0, 0.0, 0.0], "2": [10.0, 0.0, 0.0]},
+        },
+        case,
+    )
+
+    assert extracted["mapped_fields"]["volume"]["values"] == {"1": 8000.0}
+
+
+def test_mapped_beam_volume_accepts_abaqus_node_key() -> None:
+    case = SimulationCase.from_model_params(tc01_model_params(), provenance_confidence=1.0)
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {},
+            "elements": {"1": ["1", "2"]},
+            "element_centroids": {"1": [5.0, 0.0, 0.0]},
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [10.0, 0.0, 0.0]},
+        },
+        case,
+    )
+
+    assert extracted["mapped_fields"]["volume"]["values"] == {"1": 8000.0}

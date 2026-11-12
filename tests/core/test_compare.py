@@ -225,3 +225,39 @@ def test_derived_comparison_fields_use_common_physical_semantics() -> None:
         "strain_energy_density",
         "stress_max_abs",
     }
+
+
+def test_mapped_fields_align_by_element_centroid_coordinates() -> None:
+    left = {
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"10": 100.0},
+            }
+        },
+        "element_centroids": {"10": [5.0, 0.0, 0.0]},
+    }
+    right = {
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"42": 100.05},
+            }
+        },
+        "element_centroids": {"42": [5.0, 0.0, 0.0]},
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-6),
+    )
+
+    assert result.status == "passed"
+    assert result.alignment == {"stress_sxx": "element-centroid-coordinate"}
+    assert result.compared_fields == ["stress_sxx[10<->42]"]

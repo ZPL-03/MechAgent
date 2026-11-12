@@ -28,7 +28,7 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYY
 ```powershell
 python -m mechagent.cli verify-evidence mechagent_output/benchmarks/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/abaqus-multistep-evidence/manifest.json
-python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-final/manifest.json
+python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-current/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-hole-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/studio-recovery-evidence/manifest.json
@@ -118,7 +118,7 @@ python scripts/build_release_manifest.py --output dist/mechagent-release-manifes
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key
 # GitHub OIDC keyless 模式
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
-# 两个后端结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 comparison_fields 或 fields
+# 两个后端结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --output dist/backend-comparison.json
 # 比较统一语义字段
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --field-source comparison_fields --output dist/backend-comparison-semantic.json
@@ -141,9 +141,9 @@ python scripts/clean_artifacts.py
 
 `scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；它不提供签名、作者身份或可信构建服务证明。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
 
-`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一语义字段由应力本构、全场极值和支撑区域合力推导，比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一语义字段和比较清单。
+`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
 
-本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段和统一语义字段比较均通过。证据位于 `mechagent_output/backend-comparison-final/manifest.json`，位移使用 `line-coordinate-centerline`、`node-coordinate` 和 `line-coordinate-centerline` 对齐，阈值为相对误差 3% 或绝对误差 0.005 mm；统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力。原始场比较仍记录节点/积分点、截面展开和反力离散分布造成的 `unverified` 或 `failed`，因此该证据不证明逐节点应力、反力和能量场等价，也不扩大到其他单元、其他网格或其他物理域。
+本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段、统一单元质心字段和统一语义摘要均通过。当前权威清单为 `mechagent_output/backend-comparison-current/manifest.json`，状态为 `passed`。位移使用 `line-coordinate-centerline` 或 `node-coordinate` 对齐；统一单元质心字段包含 `stress_sxx`、`strain_exx` 和 `volume`，实体案例还包含 `strain_energy_density`，阈值为相对误差 10% 或绝对误差 0.005。统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力，阈值为相对误差 3% 或绝对误差 0.005。原始场比较仍因节点/积分点、截面展开和反力离散分布记录为 `unverified` 或 `failed`；该清单不证明逐积分点应力、逐节点反力或原始能量场等价，也不扩大到其他网格、单元族或物理域。
 
 适配器测试覆盖许可证探针非零返回、许可证槽位等待超时和配置校验；这些是注入执行器的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。
 

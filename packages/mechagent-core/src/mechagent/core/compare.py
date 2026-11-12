@@ -26,7 +26,9 @@ class BackendComparison(BaseModel):
     status: Literal["passed", "failed", "unverified"]
     left_backend: str
     right_backend: str
-    field_source: Literal["requested_fields", "fields", "comparison_fields"] = "requested_fields"
+    field_source: Literal["requested_fields", "fields", "mapped_fields", "comparison_fields"] = (
+        "requested_fields"
+    )
     compared_fields: list[str] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
     unverified_fields: list[str] = Field(default_factory=list)
@@ -44,7 +46,9 @@ def compare_backend_results(
     left_backend: str,
     right_backend: str,
     tolerance: ComparisonTolerance | None = None,
-    field_source: Literal["requested_fields", "fields", "comparison_fields"] = "requested_fields",
+    field_source: Literal[
+        "requested_fields", "fields", "mapped_fields", "comparison_fields"
+    ] = "requested_fields",
 ) -> BackendComparison:
     """比较两个适配器的声明字段或原始场，并保留缺失与误差明细。
 
@@ -84,19 +88,25 @@ def compare_backend_results(
         if not isinstance(left_values, dict) or not isinstance(right_values, dict):
             missing.append(name)
             continue
-        if field_source == "fields" and _raw_field_has_incompatible_semantics(
+        if field_source in {"fields", "mapped_fields"} and _raw_field_has_incompatible_semantics(
             left_field, right_field
         ):
             unverified.append(name)
             alignments[name] = "unverified"
             continue
         labels = sorted(set(left_values) | set(right_values))
-        coordinate_pairs = _coordinate_pairs(left, right, selected_tolerance.coordinate)
+        coordinate_pairs = _coordinate_pairs(
+            left,
+            right,
+            selected_tolerance.coordinate,
+            location=str(left_field.get("location", "")),
+        )
         if (
             coordinate_pairs
-            and left_field.get("location") == right_field.get("location") == "node"
+            and left_field.get("location") == right_field.get("location")
+            and left_field.get("location") in {"node", "element_centroid"}
             and (
-                field_source != "fields"
+                field_source not in {"fields", "mapped_fields"}
                 or _pairs_cover_fields(coordinate_pairs, left_values, right_values)
             )
         ):
@@ -114,7 +124,11 @@ def compare_backend_results(
                 differences.extend(aligned[1])
                 max_abs = max(max_abs, aligned[2])
                 max_rel = max(max_rel, aligned[3])
-                alignments[name] = "node-coordinate"
+            alignments[name] = (
+                "element-centroid-coordinate"
+                if left_field.get("location") == "element_centroid"
+                else "node-coordinate"
+            )
             continue
         line_aligned = _line_coordinate_values(
             left,
@@ -128,7 +142,7 @@ def compare_backend_results(
         if (
             line_aligned is not None
             and left_field.get("location") == right_field.get("location") == "node"
-            and field_source != "fields"
+            and field_source not in {"fields", "mapped_fields"}
         ):
             line_values, line_alignment = line_aligned
             aligned = _compare_value_maps(name, line_values, selected_tolerance, line_alignment)
@@ -156,7 +170,7 @@ def compare_backend_results(
                 max_rel = max(max_rel, summary_result[3])
                 alignments[name] = "summary"
             continue
-        if field_source == "fields":
+        if field_source in {"fields", "mapped_fields"}:
             unverified.append(name)
             alignments[name] = "unverified"
             continue
@@ -373,12 +387,17 @@ def _root_resultant(
 
 
 def _coordinate_pairs(
-    left: dict[str, Any], right: dict[str, Any], tolerance: float
+    left: dict[str, Any],
+    right: dict[str, Any],
+    tolerance: float,
+    *,
+    location: str = "node",
 ) -> dict[str, str]:
-    """按节点坐标建立一一对应，禁止用不同网格的节点标签直接比较。"""
+    """按节点或单元质心坐标建立一一对应，禁止直接比较标签。"""
 
-    left_nodes = _node_coordinates(left.get("nodes"))
-    right_nodes = _node_coordinates(right.get("nodes"))
+    coordinate_key = "element_centroids" if location == "element_centroid" else "nodes"
+    left_nodes = _node_coordinates(left.get(coordinate_key))
+    right_nodes = _node_coordinates(right.get(coordinate_key))
     if not left_nodes or not right_nodes:
         return {}
     available = set(right_nodes)

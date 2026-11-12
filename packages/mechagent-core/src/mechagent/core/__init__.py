@@ -55,7 +55,7 @@ from mechagent.core.factory import (
 from mechagent.core.materials import BUILTIN_MATERIALS, MaterialDefinition, match_builtin_material
 from mechagent.core.mesher import AbstractMesher, MeshConfig, MeshResult
 from mechagent.core.postproc import PostProcessor
-from mechagent.core.results import attach_case_result_fields
+from mechagent.core.results import attach_case_result_fields, attach_mapped_result_fields
 from mechagent.core.rules import (
     RuleViolation,
     check_parameter_ranges,
@@ -101,6 +101,7 @@ __all__ = [
     "ComparisonTolerance",
     "compare_backend_results",
     "attach_case_result_fields",
+    "attach_mapped_result_fields",
     "RuleViolation",
     "SolverConfig",
     "SolverError",

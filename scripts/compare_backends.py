@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--absolute", type=float, default=1.0e-9)
     parser.add_argument(
         "--field-source",
-        choices=("requested_fields", "fields", "comparison_fields"),
+        choices=("requested_fields", "fields", "mapped_fields", "comparison_fields"),
         default="requested_fields",
         help="比较案例选择字段、后端原始场或统一语义字段。",
     )
@@ -35,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         right_backend=args.right_backend,
         tolerance=ComparisonTolerance(relative=args.relative, absolute=args.absolute),
         field_source=cast(
-            Literal["requested_fields", "fields", "comparison_fields"], args.field_source
+            Literal["requested_fields", "fields", "mapped_fields", "comparison_fields"],
+            args.field_source,
         ),
     )
     content = json.dumps(comparison.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n"

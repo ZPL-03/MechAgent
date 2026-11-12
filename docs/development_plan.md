@@ -67,7 +67,7 @@ schema v7 事务迁移。案例契约复用 `ModelParams`，补充单位、坐�
 - 固化便携 CI、Windows 真实求解、前端构建、包安装、文档构建、清理和证据校验门禁。
 - 生成 SBOM、许可证清单、构建元数据和可复核 SHA-256；发布 tag 与包版本必须一一对应。
 
-当前实现状态：案例 schema v1、API v1 入口、数据库 schema v7 迁移、作业主体/组织/项目隔离、持久主体目录、主体创建/停用/密钥轮换、Bearer API key 认证、项目级作业配额、内容寻址结果对象、可配置 S3 客户端、可校验 Studio 备份、恢复演练脚本、脱敏作业指标接口、worker 及可见子进程资源采集、CalculiX/Abaqus 线性静力多步执行、统一结果字段选择、CAD 拓扑摘要和坐标对应差异比较器已纳入代码与测试；仓库清理工具支持预览、活动作业/求解锁保护、Git 跟踪文件保护和常见缓存/一次性文件清理；SPDX 2.3 SBOM、构建 SHA-256 清单、基础构建 provenance、前端生产依赖漏洞审计和 Python 运行时外部依赖审计已纳入代码、测试与 CI 门禁；TC-01、TC-03、TC-04 的 Abaqus 真实适配器运行和位移场逐点比较证据已保存；Abaqus 双步运行的 ODB 多帧、节点坐标、积分点应力/应变、单元体积、应变能密度、节点反力、历史能量和逐步结果字段证据由 `scripts/run_abaqus_multistep.py` 生成并通过清单校验；本机实际 Studio 作业数据库的冷备份、恢复、完整性、作业 ID 保留和 RTO/RPO 演练证据位于 `mechagent_output/studio-recovery-evidence/manifest.json`，清单状态为 `passed`；集中身份提供商、跨主机对象存储权限与保留策略、外部 telemetry、跨主机磁盘配额采集、许可证人工审计、可信构建身份验证和已签名公开资产仍未达到完成条件。
+当前实现状态：案例 schema v1、API v1 入口、数据库 schema v7 迁移、作业主体/组织/项目隔离、持久主体目录、主体创建/停用/密钥轮换、Bearer API key 认证、项目级作业配额、内容寻址结果对象、可配置 S3 客户端、可校验 Studio 备份、恢复演练脚本、脱敏作业指标接口、worker 及可见子进程资源采集、CalculiX/Abaqus 线性静力多步执行、统一结果字段选择、CAD 拓扑摘要和坐标对应/单元质心差异比较器已纳入代码与测试；仓库清理工具支持预览、活动作业/求解锁保护、Git 跟踪文件保护和常见缓存/一次性文件清理；SPDX 2.3 SBOM、构建 SHA-256 清单、基础构建 provenance、前端生产依赖漏洞审计和 Python 运行时外部依赖审计已纳入代码、测试与 CI 门禁；TC-01、TC-03、TC-04 的 Abaqus 真实适配器运行、位移场逐点比较和统一单元质心字段比较证据已保存；Abaqus 双步运行的 ODB 多帧、节点坐标、积分点应力/应变、单元体积、应变能密度、节点反力、历史能量和逐步结果字段证据由 `scripts/run_abaqus_multistep.py` 生成并通过清单校验；本机实际 Studio 作业数据库的冷备份、恢复、完整性、作业 ID 保留和 RTO/RPO 演练证据位于 `mechagent_output/studio-recovery-evidence/manifest.json`，清单状态为 `passed`；集中身份提供商、跨主机对象存储权限与保留策略、外部 telemetry、跨主机磁盘配额采集、许可证人工审计、可信构建身份验证和已签名公开资产仍未达到完成条件。
 
 完成条件：干净环境可安装、可运行、可验证；文档、OpenAPI、配置、CLI 帮助和代码路由无漂移；没有高严重度未决缺陷。
 
@@ -148,14 +148,17 @@ STEP 网格、面到节点集合映射、C3D4 质量检查和 CalculiX 真实求
 - 差异报告记录单元、网格、边界、求解控制和后处理差异；跨后端结果只能在模型和误差阈值明确时比较。
 
 当前实现状态：Abaqus/Standard 已注册，支持当前结构静力族的输入生成、作业启动、ODB 多帧
-场量提取和多分析步输出；CalculiX 已提取位移、应力、反力和能量场；共享结果选择器、场量
-对齐和 `scripts/run_backend_comparison.py` 已提供跨后端差异报告。TC-01、TC-03、TC-04
-在本机 Abaqus/Standard 与 CalculiX 上完成真实运行。请求位移字段使用节点坐标或梁中心线对应，
-统一语义字段比较应力全场绝对最大分量、由各向同性线弹性本构重建的应变能密度摘要以及最大跨度
-方向支撑区域反力合力；相对误差阈值为 3%，绝对阈值为 0.005。证据位于
-`mechagent_output/backend-comparison-final/manifest.json`，三个案例的请求字段和统一语义字段
-均为 `passed`。原始场仍存在节点/积分点、梁截面展开和离散标签差异，`raw_fields` 对这些字段
-保留 `unverified` 或 `failed`，不能据此宣称逐节点应力、反力和能量场等价。Abaqus 双步 TC-01
+场量提取和多分析步输出；CalculiX 已提取位移、应力、反力和能量场；共享结果选择器、原始场
+保留、统一单元质心映射和 `scripts/run_backend_comparison.py` 已提供跨后端差异报告。TC-01、
+TC-03、TC-04 在本机 Abaqus/Standard 与 CalculiX 上完成真实运行。请求位移字段使用节点坐标或
+梁中心线对应；统一单元质心字段包含应力 `stress_sxx`、应变 `strain_exx`、体积 `volume`，实体
+案例还包含 `strain_energy_density`；统一语义字段比较应力全场绝对最大分量、由各向同性线弹性
+本构重建的应变能密度摘要以及最大跨度方向支撑区域反力合力。统一单元质心字段相对误差阈值为
+10%，统一语义摘要相对误差阈值为 3%，绝对阈值均为 0.005。证据位于
+`mechagent_output/backend-comparison-current/manifest.json`，三个案例的请求字段、
+统一单元质心字段和统一语义字段均为 `passed`。原始场仍存在节点/积分点、梁截面展开和离散标签
+差异，`raw_fields` 对这些字段保留 `unverified` 或 `failed`，不能据此宣称逐积分点应力、逐节点
+反力和原始能量场等价。Abaqus 双步 TC-01
 的完整场提取清单已通过，包含两个分析步和每步两个输出帧。应力、反力、能量的原始场映射、
 更广泛单元族、网格和工程案例仍需独立跨后端验收。
 

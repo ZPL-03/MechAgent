@@ -26,7 +26,7 @@ from mechagent.core.executor import (
 )
 from mechagent.core.models import AnalysisType, GeometryType, ModelParams, SimulationCase
 from mechagent.core.paths import safe_file_stem
-from mechagent.core.results import attach_case_result_fields
+from mechagent.core.results import attach_case_result_fields, attach_mapped_result_fields
 from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
 
 from .calculix import _beam_static_inp, _plate_static_inp, _solid_static_inp
@@ -232,6 +232,10 @@ class AbaqusAdapter(AbstractSolver):
         }
         if isinstance(fields.get("nodes"), dict):
             extracted["nodes"] = fields["nodes"]
+        if isinstance(fields.get("elements"), dict):
+            extracted["elements"] = fields["elements"]
+        if isinstance(fields.get("element_centroids"), dict):
+            extracted["element_centroids"] = fields["element_centroids"]
         return extracted
 
     def run_case(self, case: SimulationCase) -> dict[str, Any]:
@@ -255,6 +259,7 @@ class AbaqusAdapter(AbstractSolver):
         result = self.solve(input_file)
         extracted = self.extract_results(result)
         extracted = attach_case_result_fields(extracted, case)
+        extracted = attach_mapped_result_fields(extracted, case)
         extracted["load_steps"] = [step.model_dump(mode="json") for step in case.load_steps]
         extracted["result_fields"] = [field.model_dump(mode="json") for field in case.result_fields]
         extracted["step_count"] = len(case.load_steps)
@@ -459,15 +464,29 @@ try:
         steps.append({{"name": name, "frame": len(step.frames) - 1,
                       "fields": final_fields, "frames": frames, "history": history}})
     nodes = {{}}
+    elements = {{}}
+    element_centroids = {{}}
     for instance_name, instance in odb.rootAssembly.instances.items():
         for node in instance.nodes:
             label = str(int(node.label))
             if label in nodes:
                 raise RuntimeError("多个实例存在重复节点标签，无法生成无歧义的节点场。")
             nodes[label] = [float(value) for value in node.coordinates]
+        for element in instance.elements:
+            label = str(int(element.label))
+            if label in elements:
+                raise RuntimeError("多个实例存在重复单元标签，无法生成无歧义的单元场。")
+            connectivity = [str(int(value)) for value in element.connectivity]
+            elements[label] = connectivity
+            points = [nodes[node] for node in connectivity]
+            element_centroids[label] = [
+                sum(point[index] for point in points) / len(points)
+                for index in range(3)
+            ]
     with open({output_literal}, "w") as stream:
         json.dump(
-            {{"solver": "Abaqus/Standard", "steps": steps, "nodes": nodes}},
+            {{"solver": "Abaqus/Standard", "steps": steps, "nodes": nodes,
+              "elements": elements, "element_centroids": element_centroids}},
             stream,
             sort_keys=True,
         )

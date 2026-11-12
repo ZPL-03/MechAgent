@@ -31,11 +31,11 @@ MeshAgent 要求成功网格结果提供 `mesh_file`，并要求 `MeshResult.qua
 
 `CalculiXAdapter.run_case()` 支持 `SimulationCase` 的多个线性静力 `LoadStepSpec`。每个步骤的载荷比例、增量和输出间隔进入同一个输入文件，结果解析保留 `field_history`，并由统一结果选择器生成 `requested_fields` 与 `step_results`。旧 `run(ModelParams)` 入口仍保持单步兼容语义。
 
-`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成伪造体积字段。字段位置、单位和来源保留在结果 JSON 中，后端位置不同的场只能通过统一语义摘要比较。
+`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。字段位置、单位、来源和映射方式保留在结果 JSON 中，后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
 
 ## Abaqus/Standard 适配器
 
-`AbaqusAdapter` 已通过 `core.factory` 注册名 `abaqus`。适配器覆盖当前梁、矩形板和矩形实体结构静力输入模板，使用 Abaqus 原生 `*OUTPUT`、`*NODE OUTPUT`、`*ELEMENT OUTPUT` 和历史能量输出请求结果场；`run_case()` 支持线性静力多步，调用 `abaqus python` 读取 ODB 的所有输出帧，并将 `U`、`S`、`E`、`EVOL`、`SENER`、`RF` 和 `ENER` 归一到统一结果字段名称。积分点字段使用元素标签、积分点和截面点组成稳定键，避免不同积分点互相覆盖；节点坐标、逐帧场量和 `ALLIE/ALLSE/ALLWK/ALLPD` 历史能量同时保留。结果字段选择器随后按 `ResultFieldSpec` 计算分量、位移幅值和应力不变量，缺失必需场量会使执行失败。
+`AbaqusAdapter` 已通过 `core.factory` 注册名 `abaqus`。适配器覆盖当前梁、矩形板和矩形实体结构静力输入模板，使用 Abaqus 原生 `*OUTPUT`、`*NODE OUTPUT`、`*ELEMENT OUTPUT` 和历史能量输出请求结果场；`run_case()` 支持线性静力多步，调用 `abaqus python` 读取 ODB 的所有输出帧，并将 `U`、`S`、`E`、`EVOL`、`SENER`、`RF` 和 `ENER` 归一到统一结果字段名称。积分点字段使用元素标签、积分点和截面点组成稳定键，避免不同积分点互相覆盖；节点坐标、单元连接、单元质心、逐帧场量和 `ALLIE/ALLSE/ALLWK/ALLPD` 历史能量同时保留。结果字段选择器随后按 `ResultFieldSpec` 计算分量、位移幅值和应力不变量；统一结果层根据单元连接和坐标生成 `mapped_fields`，缺失必需场量会使执行失败。
 
 适配器检查 launcher、进程返回状态、ODB 文件、锁文件和 ODB 提取脚本结果。`SolverConfig` 或
 `solver.abaqus` 配置可提供本地并发槽位和只读许可证探针；探针失败或槽位等待超时会明确返回
@@ -100,4 +100,4 @@ A = b h
 
 位移参考为 `pL/E=0.000476190476 mm`，应力参考为 1 MPa。检查要求体积 10000 mm³、正节点/单元数、求解器 `.sta` 明确成功、ODB 解锁且位移与应力相对误差均不大于 1%。CAE `job.status` 与求解器完成来源分别记录，不能只依据启动器退出码判定成功。
 
-结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是双后端工程验收。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields` 和统一语义 `comparison_fields`；真实对比还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和两个后端的运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一语义字段才能作为跨后端物理量门禁。商业工具的安装与许可由使用者维护。
+结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是双后端工程验收。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`；真实对比还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和两个后端的运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一单元质心字段只表示明确的单元连接/坐标聚合，统一语义字段才能作为跨后端物理量门禁。商业工具的安装与许可由使用者维护。

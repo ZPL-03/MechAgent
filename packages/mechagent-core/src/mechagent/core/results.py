@@ -136,6 +136,215 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
     return extracted
 
 
+def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase) -> dict[str, Any]:
+    """生成具有明确空间语义的跨后端单元场。
+
+    后端 ``fields`` 保留求解器原生位置和标签。本函数只对能够由单元拓扑、
+    节点坐标和原始场值确定映射的字段生成 ``mapped_fields``：正应力/正应变
+    的第一分量、单元体积，以及实体单元的应变能密度。梁求解器的截面展开
+    节点可以生成轴向截面平均值，但不会伪装成完整截面场。
+    """
+
+    elements = _normalise_elements(extracted.get("elements"))
+    element_centroids = _normalise_coordinates(extracted.get("element_centroids"))
+    if not elements or not element_centroids:
+        return extracted
+    fields = extracted.get("fields")
+    if not isinstance(fields, Mapping):
+        return extracted
+
+    mapped: dict[str, Any] = {}
+    for name, quantity, component in (
+        ("stress_sxx", "stress", "sxx"),
+        ("strain_exx", "strain", "exx"),
+    ):
+        field = fields.get(quantity)
+        values = _map_field_to_elements(field, elements, extracted, component_index=0)
+        if values:
+            mapped[name] = {
+                "quantity": quantity,
+                "component": component,
+                "location": "element_centroid",
+                "unit": "MPa" if quantity == "stress" else "",
+                "values": values,
+                "mapping": "element-connectivity-mean-or-axis-station-mean",
+            }
+
+    volume = fields.get("volume")
+    volume_values: dict[str, float | list[float]] = _map_field_to_elements(
+        volume, elements, extracted
+    )
+    if not volume_values and case.model.geometry.type.value == "beam":
+        volume_values = dict(_beam_element_volumes(elements, extracted, case))
+    if volume_values:
+        mapped["volume"] = {
+            "quantity": "volume",
+            "location": "element_centroid",
+            "unit": "mm^3",
+            "values": volume_values,
+            "mapping": "element-label-or-connectivity",
+        }
+
+    # Abaqus exposes SENER at integration points; CalculiX exposes the same
+    # quantity at nodes for solid meshes. Beam section values have different
+    # conventions and remain outside this normalized field.
+    if case.model.geometry.type.value != "beam":
+        energy = fields.get("strain_energy_density")
+        energy_values = _map_field_to_elements(energy, elements, extracted)
+        if energy_values:
+            mapped["strain_energy_density"] = {
+                "quantity": "strain_energy_density",
+                "location": "element_centroid",
+                "unit": "N/mm^2",
+                "values": energy_values,
+                "mapping": "element-connectivity-mean-or-integration-point-mean",
+            }
+
+    if mapped:
+        extracted["mapped_fields"] = mapped
+        extracted["element_centroids"] = {
+            str(label): list(point) for label, point in sorted(element_centroids.items())
+        }
+    return extracted
+
+
+def _map_field_to_elements(
+    field: Any,
+    elements: dict[str, tuple[str, ...]],
+    extracted: Mapping[str, Any],
+    *,
+    component_index: int | None = None,
+) -> dict[str, float | list[float]]:
+    if not isinstance(field, Mapping) or not isinstance(field.get("values"), Mapping):
+        return {}
+    values = {str(label): value for label, value in field["values"].items()}
+    location = str(field.get("location", ""))
+    if location in {"element", "integration_point"}:
+        grouped: dict[str, list[Any]] = {}
+        for label, value in values.items():
+            grouped.setdefault(label.split("@", 1)[0], []).append(value)
+        result: dict[str, float | list[float]] = {}
+        for element_id in elements:
+            items = grouped.get(element_id)
+            if items:
+                result[element_id] = _mean_field_values(items, component_index)
+        return result
+    if location != "node":
+        return {}
+
+    result = {}
+    direct = all(node in values for nodes in elements.values() for node in nodes)
+    if direct:
+        for element_id, nodes in elements.items():
+            result[element_id] = _mean_field_values(
+                [values[node] for node in nodes], component_index
+            )
+        return result
+
+    # Beam FRD files may replace the input centerline nodes with section nodes.
+    # Average values at the nearest axial station and retain that limitation in
+    # the mapping metadata rather than pairing unrelated node labels.
+    coordinates = _normalise_coordinates(extracted.get("nodes"))
+    centroids = _normalise_coordinates(extracted.get("element_centroids"))
+    if not coordinates or not centroids:
+        return {}
+    axes = [
+        max(point[index] for point in coordinates.values())
+        - min(point[index] for point in coordinates.values())
+        for index in range(3)
+    ]
+    axis = max(range(3), key=lambda index: axes[index])
+    stations: dict[float, list[Any]] = {}
+    for label, value in values.items():
+        point = coordinates.get(label)
+        if point is not None:
+            stations.setdefault(round(point[axis], 8), []).append(value)
+    if not stations:
+        return {}
+    result = {}
+    for element_id in elements:
+        point = centroids.get(element_id)
+        if point is None:
+            continue
+        station = min(stations, key=lambda value: (abs(value - point[axis]), value))
+        result[element_id] = _mean_field_values(stations[station], component_index)
+    return result
+
+
+def _mean_field_values(values: Sequence[Any], component_index: int | None) -> float | list[float]:
+    if not values:
+        raise ValueError("结果场不能为空。")
+    vectors: list[list[float]] = []
+    for value in values:
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            vector = [float(item) for item in value]
+        else:
+            vector = [float(value)]
+        if not all(math.isfinite(item) for item in vector):
+            raise SolverError("结果场映射值必须是有限数字。")
+        vectors.append(vector)
+    width = len(vectors[0])
+    if any(len(vector) != width for vector in vectors):
+        raise SolverError("结果场映射的分量数量不一致。")
+    mean = [sum(vector[index] for vector in vectors) / len(vectors) for index in range(width)]
+    if component_index is not None:
+        if component_index >= len(mean):
+            raise SolverError("结果场映射缺少请求分量。")
+        return mean[component_index]
+    return mean[0] if width == 1 else mean
+
+
+def _beam_element_volumes(
+    elements: dict[str, tuple[str, ...]], extracted: Mapping[str, Any], case: SimulationCase
+) -> dict[str, float]:
+    # CalculiX keeps the original mesh coordinates under ``mesh_nodes`` while
+    # Abaqus ODB extraction exposes the same topology as ``nodes``.  Both are
+    # valid sources for the deterministic beam volume calculation.
+    nodes = _normalise_coordinates(extracted.get("mesh_nodes")) or _normalise_coordinates(
+        extracted.get("nodes")
+    )
+    dimensions = case.model.geometry.dimensions
+    width = dimensions.get("width")
+    height = dimensions.get("height")
+    if not nodes or width is None or height is None:
+        return {}
+    area = float(width) * float(height)
+    volumes: dict[str, float] = {}
+    for element_id, connectivity in elements.items():
+        points = [nodes[node] for node in connectivity if node in nodes]
+        if len(points) != len(connectivity) or len(points) < 2:
+            continue
+        length = math.sqrt(sum((points[1][index] - points[0][index]) ** 2 for index in range(3)))
+        volumes[element_id] = length * area
+    return volumes
+
+
+def _normalise_elements(value: Any) -> dict[str, tuple[str, ...]]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, tuple[str, ...]] = {}
+    for label, nodes in value.items():
+        if not isinstance(nodes, Sequence) or isinstance(nodes, (str, bytes)):
+            continue
+        normalized = tuple(str(node) for node in nodes)
+        if normalized:
+            result[str(label)] = normalized
+    return result
+
+
+def _normalise_coordinates(value: Any) -> dict[str, tuple[float, float, float]]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, tuple[float, float, float]] = {}
+    for label, point in value.items():
+        if not isinstance(point, Sequence) or isinstance(point, (str, bytes)) or len(point) != 3:
+            continue
+        coordinates = (float(point[0]), float(point[1]), float(point[2]))
+        if all(math.isfinite(item) for item in coordinates):
+            result[str(label)] = coordinates
+    return result
+
+
 def _step_result_specs(case: SimulationCase, step: LoadStepSpec | None) -> list[ResultFieldSpec]:
     """返回一个分析步声明的结果字段；空声明表示案例全部字段。"""
 

@@ -30,7 +30,7 @@ from mechagent.core.models import (
     SimulationCase,
 )
 from mechagent.core.paths import safe_file_stem
-from mechagent.core.results import attach_case_result_fields
+from mechagent.core.results import attach_case_result_fields, attach_mapped_result_fields
 from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
 
 _FRD_FLOAT_PATTERN = re.compile(r"[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[Ee][+-]\d{2,3})?")
@@ -146,6 +146,7 @@ class CalculiXAdapter(AbstractSolver):
         result = self.solve(input_file)
         extracted = self.extract_results(result)
         extracted = attach_case_result_fields(extracted, case)
+        extracted = attach_mapped_result_fields(extracted, case)
         extracted["load_steps"] = [step.model_dump(mode="json") for step in case.load_steps]
         extracted["result_fields"] = [field.model_dump(mode="json") for field in case.result_fields]
         extracted["step_count"] = len(case.load_steps)
@@ -227,21 +228,32 @@ class CalculiXAdapter(AbstractSolver):
         if not result.success:
             raise SolverError(result.error_message or "CalculiX 求解失败。")
         frd_file = _first_file_with_suffix(result.output_files, ".frd")
-        node_coordinates = _result_node_coordinates(result.output_files)
-        parsed = _parse_frd(frd_file, node_coordinates) if frd_file else {}
-        element_volumes = _result_element_volumes(result.output_files, node_coordinates)
+        mesh_nodes = _result_node_coordinates(result.output_files)
+        elements = _result_element_connectivity(result.output_files)
+        parsed = _parse_frd(frd_file, mesh_nodes) if frd_file else {}
+        element_volumes = _result_element_volumes(result.output_files, mesh_nodes)
         if element_volumes:
             parsed.setdefault("fields", {})["volume"] = {
                 "location": "element",
                 "unit": "mm^3",
                 "values": {str(label): value for label, value in element_volumes.items()},
             }
-        return {
+        result_payload = {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
             **parsed,
             **result.summary,
         }
+        if mesh_nodes:
+            result_payload["mesh_nodes"] = {
+                str(node): list(point) for node, point in sorted(mesh_nodes.items())
+            }
+        if elements:
+            result_payload["elements"] = {
+                str(label): list(nodes) for label, nodes in sorted(elements.items())
+            }
+            result_payload["element_centroids"] = _element_centroids(mesh_nodes, elements)
+        return result_payload
 
 
 def _beam_static_inp(model_params: ModelParams, mesh_file: Path | None = None) -> str:
@@ -1092,6 +1104,83 @@ def _result_node_coordinates(paths: list[Path]) -> dict[int, tuple[float, float,
         return _parse_nodes(input_file.read_text(encoding="utf-8").splitlines())
     except (OSError, ValueError):
         return {}
+
+
+def _result_element_connectivity(paths: list[Path]) -> dict[int, tuple[int, ...]]:
+    input_file = _first_file_with_suffix(paths, ".inp")
+    if input_file is None:
+        return {}
+    try:
+        return _parse_element_rows(input_file.read_text(encoding="utf-8").splitlines())
+    except (OSError, ValueError):
+        return {}
+
+
+def _parse_element_rows(lines: list[str]) -> dict[int, tuple[int, ...]]:
+    elements: dict[int, tuple[int, ...]] = {}
+    active = False
+    expected_nodes = 0
+    for raw in lines:
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("*ELEMENT"):
+            active = True
+            expected_nodes = _element_node_count(upper)
+            continue
+        if active and line.startswith("*"):
+            active = False
+            expected_nodes = 0
+            continue
+        if not active or not line or not expected_nodes:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < expected_nodes + 1:
+            continue
+        try:
+            element_id = int(parts[0])
+            connectivity = tuple(int(part) for part in parts[1 : expected_nodes + 1])
+        except ValueError:
+            continue
+        elements[element_id] = connectivity
+    return elements
+
+
+def _element_node_count(header: str) -> int:
+    match = re.search(r"TYPE\s*=\s*([A-Z0-9]+)", header)
+    if match is None:
+        return 0
+    element_type = match.group(1)
+    for prefix, count in (
+        ("C3D20", 20),
+        ("C3D15", 15),
+        ("C3D10", 10),
+        ("C3D8", 8),
+        ("C3D6", 6),
+        ("C3D4", 4),
+        ("S8", 8),
+        ("S6", 6),
+        ("S4", 4),
+        ("S3", 3),
+        ("B32", 3),
+        ("B31", 2),
+    ):
+        if element_type.startswith(prefix):
+            return count
+    return 0
+
+
+def _element_centroids(
+    nodes: dict[int, tuple[float, float, float]], elements: dict[int, tuple[int, ...]]
+) -> dict[str, list[float]]:
+    centroids: dict[str, list[float]] = {}
+    for element_id, connectivity in elements.items():
+        points = [nodes[node_id] for node_id in connectivity if node_id in nodes]
+        if len(points) != len(connectivity):
+            continue
+        centroids[str(element_id)] = [
+            sum(point[index] for point in points) / len(points) for index in range(3)
+        ]
+    return centroids
 
 
 def _result_element_volumes(

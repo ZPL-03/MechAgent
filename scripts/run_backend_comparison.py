@@ -62,12 +62,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=3600)
     parser.add_argument("--relative", type=float, default=1.0e-2)
     parser.add_argument("--absolute", type=float, default=1.0e-9)
+    parser.add_argument(
+        "--mapped-relative",
+        type=float,
+        default=1.0e-1,
+        help="统一单元质心场的相对误差阈值；默认 10%%，覆盖节点到质心投影误差。",
+    )
     args = parser.parse_args(argv)
     if (
         not math.isfinite(args.relative)
         or not math.isfinite(args.absolute)
         or args.relative < 0.0
         or args.absolute < 0.0
+        or not math.isfinite(args.mapped_relative)
+        or args.mapped_relative < 0.0
     ):
         parser.error("误差阈值必须是非负数。")
 
@@ -82,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir=args.output_dir,
                 timeout=args.timeout,
                 tolerance=ComparisonTolerance(relative=args.relative, absolute=args.absolute),
+                mapped_tolerance=ComparisonTolerance(
+                    relative=args.mapped_relative, absolute=args.absolute
+                ),
             )
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -111,6 +122,7 @@ def _run_case(
     output_dir: Path,
     timeout: int,
     tolerance: ComparisonTolerance,
+    mapped_tolerance: ComparisonTolerance,
 ) -> dict[str, object]:
     case = SimulationCase.from_model_params(
         _CASE_BUILDERS[case_id](),
@@ -193,10 +205,23 @@ def _run_case(
             tolerance=tolerance,
             field_source="comparison_fields",
         )
+        mapped_comparison = compare_backend_results(
+            left,
+            right,
+            left_backend="calculix",
+            right_backend="abaqus",
+            tolerance=mapped_tolerance,
+            field_source="mapped_fields",
+        )
         comparison = {
-            "status": _combined_status(requested_comparison.status, semantic_comparison.status),
+            "status": _combined_status(
+                requested_comparison.status,
+                semantic_comparison.status,
+                mapped_comparison.status,
+            ),
             "requested_fields": requested_comparison.model_dump(mode="json"),
             "raw_fields": raw_comparison.model_dump(mode="json"),
+            "mapped_fields": mapped_comparison.model_dump(mode="json"),
             "comparison_fields": semantic_comparison.model_dump(mode="json"),
         }
     return {
@@ -210,10 +235,10 @@ def _run_case(
     }
 
 
-def _combined_status(requested: str, raw: str) -> str:
-    if "failed" in {requested, raw}:
+def _combined_status(*statuses: str) -> str:
+    if "failed" in statuses:
         return "failed"
-    if "unverified" in {requested, raw}:
+    if "unverified" in statuses:
         return "unverified"
     return "passed"
 
