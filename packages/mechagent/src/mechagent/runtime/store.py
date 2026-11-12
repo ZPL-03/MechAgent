@@ -716,6 +716,29 @@ class JobStore:
             elif row[0] in ACTIVE:
                 connection.execute("UPDATE jobs SET status='cancelling' WHERE job_id=?", (job_id,))
 
+    def prune_artifacts(self, *, older_than: float, apply: bool = False) -> list[str]:
+        """列出或删除没有作业引用且早于阈值的结果对象。
+
+        维护操作在数据库写事务内读取引用并检查活动作业，避免清理与终态提交交叉执行。
+        默认只返回候选摘要；删除必须显式传入 ``apply=True``，且由对象存储后端执行。
+        """
+
+        with self.transaction() as connection:
+            active = connection.execute(
+                "SELECT 1 FROM jobs WHERE status IN "
+                "('queued','starting','running','cancelling') LIMIT 1"
+            ).fetchone()
+            if active is not None:
+                raise RuntimeError("存在未终态 Studio 作业，拒绝清理结果对象。")
+            rows = connection.execute(
+                "SELECT result_hash FROM jobs WHERE result_hash IS NOT NULL"
+            ).fetchall()
+            referenced = {str(row[0]) for row in rows}
+            prune = getattr(self.artifacts, "prune_unreferenced", None)
+            if not callable(prune):
+                raise TypeError("对象存储后端不支持结果对象保留清理。")
+            return list(prune(referenced, older_than=older_than, apply=apply))
+
     def finish(
         self,
         job_id: str,

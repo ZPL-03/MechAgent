@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +91,79 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     assert store.get_file(digest, destination).read_text(encoding="utf-8") == source.read_text(
         encoding="utf-8"
     )
+
+
+def test_local_artifact_pruning_keeps_referenced_objects(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database)
+    job = store.submit("kept", False, config, max_queued=2)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+    kept_digest = str(store.get(job["job_id"])["result_hash"])
+    orphan_digest = store.artifacts.put_bytes(b"orphan")
+    orphan_path = store.artifacts.path_for(orphan_digest)
+    old = (datetime.now(timezone.utc) - timedelta(days=10)).timestamp()
+    os.utime(orphan_path, (old, old))
+
+    candidates = store.prune_artifacts(older_than=time.time() - 86400)
+    assert candidates == [orphan_digest]
+    assert orphan_path.is_file()
+    assert store.artifacts.path_for(kept_digest).is_file()
+
+    assert store.prune_artifacts(older_than=time.time() - 86400, apply=True) == [orphan_digest]
+    assert not orphan_path.exists()
+    assert store.artifacts.path_for(kept_digest).is_file()
+
+
+def test_artifact_pruning_rejects_active_jobs(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database)
+    store.submit("active", False, config, max_queued=1)
+
+    with pytest.raises(RuntimeError, match="未终态"):
+        store.prune_artifacts(older_than=time.time() - 86400)
+
+
+def test_s3_artifact_pruning_uses_age_and_reference_protection() -> None:
+    digest_old = "a" * 64
+    digest_recent = "b" * 64
+
+    class FakeS3:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def list_objects_v2(self, **_kwargs: object) -> dict[str, object]:
+            return {
+                "IsTruncated": False,
+                "Contents": [
+                    {
+                        "Key": f"mechagent/objects/aa/{digest_old[2:]}",
+                        "LastModified": datetime.now(timezone.utc) - timedelta(days=10),
+                    },
+                    {
+                        "Key": f"mechagent/objects/bb/{digest_recent[2:]}",
+                        "LastModified": datetime.now(timezone.utc),
+                    },
+                ],
+            }
+
+        def delete_object(self, *, Bucket: str, Key: str) -> None:
+            self.deleted.append(f"{Bucket}/{Key}")
+
+    fake = FakeS3()
+    store = S3ArtifactStore("results", client=fake)
+    cutoff = datetime.now(timezone.utc).timestamp() - 86400
+
+    assert store.prune_unreferenced({digest_recent}, older_than=cutoff) == [digest_old]
+    assert fake.deleted == []
+    assert store.prune_unreferenced({digest_recent}, older_than=cutoff, apply=True) == [digest_old]
+    assert fake.deleted == [f"results/mechagent/objects/aa/{digest_old[2:]}"]
 
 
 def test_studio_backup_round_trip_and_tamper_detection(tmp_path: Path) -> None:

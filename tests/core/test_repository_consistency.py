@@ -178,6 +178,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "backup_studio.py",
         "restore_studio.py",
         "drill_studio_recovery.py",
+        "prune_artifacts.py",
         "check_wheel_install.py",
         "clean_artifacts.py",
     ):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -69,10 +70,75 @@ class ArtifactStore:
         path = self.path_for(digest)
         return path.is_file() and _sha256_file(path) == digest
 
+    def prune_unreferenced(
+        self,
+        referenced: set[str],
+        *,
+        older_than: float,
+        apply: bool = False,
+    ) -> list[str]:
+        """列出或删除早于阈值且没有数据库引用的对象。
+
+        ``apply=False`` 只返回候选摘要；调用方必须显式传入 ``apply=True`` 才会删除。
+        无法解析为摘要的临时文件会被保留并交由独立清理流程处理。
+        """
+
+        cutoff = _validate_prune_time(older_than)
+        normalized = _normalized_references(referenced)
+        candidates: list[str] = []
+        if not self.objects.is_dir():
+            return candidates
+        paths = list(self.objects.rglob("*"))
+        for path in paths:
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = path.relative_to(self.objects)
+            if len(relative.parts) != 2:
+                continue
+            digest = "".join(relative.parts)
+            if not _is_digest(digest) or digest in normalized:
+                continue
+            if path.stat().st_mtime >= cutoff:
+                continue
+            candidates.append(digest)
+            if apply:
+                path.unlink()
+                _remove_empty_parent(path.parent, self.objects)
+        return sorted(candidates)
+
 
 def _validate_digest(value: str) -> None:
     if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
         raise ValueError("对象摘要必须是 64 位小写 SHA-256。")
+
+
+def _is_digest(value: str) -> bool:
+    return len(value) == 64 and not any(char not in "0123456789abcdef" for char in value)
+
+
+def _normalized_references(referenced: set[str]) -> set[str]:
+    normalized = {str(value).strip().lower() for value in referenced}
+    invalid = sorted(value for value in normalized if not _is_digest(value))
+    if invalid:
+        raise ValueError("对象引用包含无效 SHA-256: " + ", ".join(invalid[:3]))
+    return normalized
+
+
+def _validate_prune_time(value: float) -> float:
+    cutoff = float(value)
+    if not math.isfinite(cutoff) or cutoff < 0:
+        raise ValueError("对象保留时间阈值必须是非负有限 Unix 时间戳。")
+    return cutoff
+
+
+def _remove_empty_parent(path: Path, root: Path) -> None:
+    current = path
+    while current != root and current.is_dir():
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 def _sha256_file(path: Path) -> str:
@@ -176,6 +242,49 @@ class S3ArtifactStore:
             destination.unlink(missing_ok=True)
             raise ValueError("S3 对象恢复后完整性校验失败。")
         return destination
+
+    def prune_unreferenced(
+        self,
+        referenced: set[str],
+        *,
+        older_than: float,
+        apply: bool = False,
+    ) -> list[str]:
+        """列出或删除早于阈值且没有数据库引用的 S3 对象。
+
+        该操作需要对象前缀的 list 权限；应用删除时还需要 delete 权限。默认只返回候选，
+        不会改变桶内容。
+        """
+
+        cutoff = _validate_prune_time(older_than)
+        normalized = _normalized_references(referenced)
+        object_prefix = f"{self.prefix}/objects/" if self.prefix else "objects/"
+        candidates: list[str] = []
+        continuation: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self.bucket, "Prefix": object_prefix}
+            if continuation:
+                kwargs["ContinuationToken"] = continuation
+            page = self.client.list_objects_v2(**kwargs)
+            for item in page.get("Contents", []) or []:
+                key = str(item.get("Key", ""))
+                relative = key.removeprefix(object_prefix)
+                parts = relative.split("/")
+                digest = "".join(parts) if len(parts) == 2 else ""
+                if not _is_digest(digest) or digest in normalized:
+                    continue
+                modified = item.get("LastModified")
+                if modified is None or float(modified.timestamp()) >= cutoff:
+                    continue
+                candidates.append(digest)
+                if apply:
+                    self.client.delete_object(Bucket=self.bucket, Key=key)
+            if not page.get("IsTruncated"):
+                break
+            continuation = str(page.get("NextContinuationToken", ""))
+            if not continuation:
+                raise RuntimeError("S3 对象列表缺少 NextContinuationToken。")
+        return sorted(candidates)
 
 
 def create_artifact_store(

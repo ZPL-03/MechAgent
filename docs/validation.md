@@ -169,6 +169,23 @@ S3 兼容对象存储通过 `pip install "mechagent[s3]"` 和 `studio.artifact_b
 访问密钥由 boto3 标准凭据链提供。当前仓库包含客户端、摘要校验和恢复接口，远端桶权限、跨主机
 备份保留和灾难恢复时间指标需要部署环境单独验收。
 
+结果对象保留清理按数据库中的 `result_hash` 引用保护对象，并拒绝在存在未终态作业时执行。默认
+只列出超过年龄阈值且无引用的对象；只有显式加入 `--apply` 才会删除。文件系统和 S3 使用同一
+清理契约，S3 实际部署还需要对象前缀的 list 权限和删除权限：
+
+```powershell
+python scripts/prune_artifacts.py `
+  --database mechagent_output/.studio/jobs.sqlite3 `
+  --older-than-days 30
+python scripts/prune_artifacts.py `
+  --database mechagent_output/.studio/jobs.sqlite3 `
+  --older-than-days 30 `
+  --apply
+```
+
+使用 S3 时增加 `--backend s3 --bucket <bucket> --prefix <prefix>`；桶权限和跨主机保留周期仍需在
+部署环境中执行真实验收。
+
 Python 运行时依赖审计的 JSON 报告作为发布证据上传；报告缺失或漏洞服务不可用时，审计门禁失败，发布清单不会伪造审计结果。
 
 ## 作业故障与证据校验
