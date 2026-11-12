@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import subprocess
 import sys
@@ -12,7 +13,12 @@ import pytest
 from pytest import MonkeyPatch
 
 import mechagent.core.adapters.calculix_mesh as calculix_mesh
-from mechagent.core.adapters import CalculiXAdapter, CalculiXInpMesher
+from mechagent.core.adapters import (
+    AbaqusAdapter,
+    AbaqusExecutionPolicy,
+    CalculiXAdapter,
+    CalculiXInpMesher,
+)
 from mechagent.core.adapters.calculix import _parse_frd_data_line
 from mechagent.core.exceptions import SolverError
 from mechagent.core.executor import (
@@ -177,6 +183,160 @@ def test_calculix_result_aliases_use_input_node_coordinates(tmp_path: Path) -> N
     assert extracted["tip_deflection_mm"] == pytest.approx(2.0)
     assert extracted["center_deflection_mm"] == pytest.approx(0.5)
     assert extracted["axial_displacement_mm"] == pytest.approx(0.25)
+    assert extracted["fields"]["displacement"]["values"]["2"] == [0.25, -2.0, 0.2]
+    assert extracted["nodes"]["2"] == [100.0, 0.0, 0.0]
+
+
+def test_calculix_extracts_reaction_and_energy_fields(tmp_path: Path) -> None:
+    input_file = tmp_path / "fields.inp"
+    input_file.write_text("*NODE\n1, 0, 0, 0\n*ELEMENT, TYPE=B31\n1, 1, 1\n", encoding="utf-8")
+    frd_file = tmp_path / "fields.frd"
+    frd_file.write_text(
+        "\n".join(
+            [
+                " -4  FORC        4    1",
+                _frd_disp_line(1, 0.0, 0.0, 12.5),
+                " -3",
+                " -4  ENER        1    1",
+                _frd_disp_line(1, 2.5, 0.0, 0.0),
+                " -3",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
+
+    extracted = adapter.extract_results(
+        SolverResult(success=True, wall_time=0.0, output_files=[input_file, frd_file])
+    )
+
+    assert extracted["fields"]["reaction_force"]["values"]["1"] == [0.0, 0.0, 12.5]
+    assert extracted["fields"]["energy"]["values"]["1"] == 2.5
+
+
+def test_abaqus_adapter_reports_unavailable_launcher(tmp_path: Path) -> None:
+    adapter = AbaqusAdapter(SolverConfig(solver_path="missing-abaqus", work_dir=tmp_path))
+    input_file = adapter.generate_input(tc03_model_params())
+
+    result = adapter.solve(input_file)
+
+    assert result.success is False
+    assert result.error_message is not None
+    assert "未找到 Abaqus" in result.error_message
+
+
+def test_abaqus_execution_policy_rejects_invalid_queue_size() -> None:
+    with pytest.raises(ValueError, match="max_concurrent"):
+        AbaqusExecutionPolicy(max_concurrent=0)
+
+
+def test_abaqus_input_requests_full_field_and_energy_output(tmp_path: Path) -> None:
+    adapter = AbaqusAdapter(SolverConfig(work_dir=tmp_path))
+
+    input_file = adapter.generate_input(tc01_model_params())
+    content = input_file.read_text(encoding="utf-8")
+
+    assert "S, E, EVOL, SENER" in content
+    assert "*OUTPUT, HISTORY, FREQUENCY=1" in content
+    assert "ALLIE, ALLSE, ALLWK, ALLPD" in content
+
+
+def test_abaqus_extracts_complete_field_labels_and_history(tmp_path: Path) -> None:
+    field_file = tmp_path / "case.fields.json"
+    field_file.write_text(
+        json.dumps(
+            {
+                "solver": "Abaqus/Standard",
+                "nodes": {"1": [0.0, 0.0, 0.0]},
+                "steps": [
+                    {
+                        "name": "step-1",
+                        "frame": 1,
+                        "history": {"ALLIE": [[0.0, 0.0], [1.0, 2.5]]},
+                        "fields": {
+                            "U": {"location": "node", "values": {"1": [1.0, 2.0, 0.0]}},
+                            "S": {
+                                "location": "integration_point",
+                                "values": {"1@ip1": [3.0, 0.0, 0.0]},
+                            },
+                            "E": {
+                                "location": "integration_point",
+                                "values": {"1@ip1": [0.01, 0.0, 0.0]},
+                            },
+                            "EVOL": {
+                                "location": "element",
+                                "unit": "mm^3",
+                                "values": {"1": 8000.0},
+                            },
+                            "SENER": {
+                                "location": "integration_point",
+                                "unit": "N/mm^2",
+                                "values": {"1@ip1": 0.5},
+                            },
+                            "ENER": {
+                                "location": "global",
+                                "unit": "N*mm",
+                                "values": {"ALLIE": 2.5},
+                            },
+                        },
+                        "frames": [
+                            {
+                                "frame_index": 0,
+                                "fields": {
+                                    "U": {
+                                        "location": "node",
+                                        "values": {"1": [0.0, 0.0, 0.0]},
+                                    },
+                                    "ENER": {
+                                        "location": "global",
+                                        "unit": "N*mm",
+                                        "values": {"ALLIE": 0.0},
+                                    },
+                                },
+                            },
+                            {
+                                "frame_index": 1,
+                                "fields": {
+                                    "U": {"location": "node", "values": {"1": [1.0, 2.0, 0.0]}},
+                                    "ENER": {
+                                        "location": "global",
+                                        "unit": "N*mm",
+                                        "values": {"ALLIE": 2.5},
+                                    },
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    adapter = AbaqusAdapter(SolverConfig(work_dir=tmp_path))
+
+    extracted = adapter.extract_results(
+        SolverResult(
+            success=True,
+            wall_time=0.0,
+            output_files=[field_file],
+            summary={"field_json": str(field_file)},
+        )
+    )
+
+    assert extracted["nodes"] == {"1": [0.0, 0.0, 0.0]}
+    assert set(extracted["fields"]) == {
+        "displacement",
+        "stress",
+        "strain",
+        "volume",
+        "strain_energy_density",
+        "energy",
+    }
+    assert len(extracted["fields"]["stress"]["values"]) == 1
+    assert extracted["fields"]["stress"]["values"]["1@ip1"] == [3.0, 0.0, 0.0]
+    assert extracted["fields"]["energy"]["values"] == {"ALLIE": 2.5}
+    assert len(extracted["field_history"]) == 2
 
 
 def test_calculix_frd_data_line_parser_accepts_common_numeric_formats() -> None:

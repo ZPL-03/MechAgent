@@ -35,6 +35,32 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def artifact_records(
+    directory: Path, *, manifest_name: str = "manifest.json"
+) -> list[dict[str, Any]]:
+    """列出目录内可复核文件的相对路径、大小和 SHA-256。"""
+
+    if directory.is_symlink():
+        raise ValueError(f"证据目录不能是符号链接: {directory}")
+    root = directory.resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(root)
+    records: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file() or path.name == manifest_name:
+            continue
+        if not path.resolve().is_relative_to(root):
+            continue
+        records.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+        )
+    return records
+
+
 def public_value(value: Any, secrets: tuple[str, ...] = ()) -> Any:
     """对公开结构中的文本递归脱敏。"""
     if isinstance(value, str):
@@ -49,20 +75,10 @@ def public_value(value: Any, secrets: tuple[str, ...] = ()) -> Any:
 def write_manifest(directory: Path, *, status: str, details: dict[str, Any]) -> Path:
     root = directory.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    artifacts = []
-    for path in sorted(root.rglob("*")):
-        # 不跟随目录外的符号链接，也不纳入原始日志和 LLM trace 内容。
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
-            continue
-        if path == root / "manifest.json" or path.name.endswith((".tmp", ".log")):
-            continue
-        artifacts.append(
-            {
-                "path": path.relative_to(root).as_posix(),
-                "size": path.stat().st_size,
-                "sha256": sha256(path),
-            }
-        )
+    # 不跟随目录外的符号链接，也不纳入原始日志和 LLM trace 内容。
+    artifacts = [
+        item for item in artifact_records(root) if not str(item["path"]).endswith((".tmp", ".log"))
+    ]
     packages = {}
     for name in ("mechagent", "mechagent-core", "gmsh", "pydantic", "langgraph"):
         try:
@@ -109,4 +125,15 @@ def verify_manifest(path: Path) -> list[str]:
         elif candidate.stat().st_size != item["size"] or sha256(candidate) != item["sha256"]:
             errors.append(f"hash_mismatch: {relative}")
         seen.add(relative)
+    for candidate in root.rglob("*"):
+        if (
+            candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.name == path.name
+            or candidate.name.endswith((".tmp", ".log"))
+        ):
+            continue
+        relative = candidate.relative_to(root).as_posix()
+        if relative not in seen:
+            errors.append(f"unlisted: {relative}")
     return errors

@@ -453,6 +453,7 @@ class MeshAgentOutput(BaseModel):
 
     mesh_result: MeshResult
     mesh_llm_trace: AgentLLMTrace
+    model_params: ModelParams | None = None
 
 
 class TaskRunRecord(BaseModel):

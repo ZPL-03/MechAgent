@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from mechagent.core.mesher import MeshResult
-from mechagent.core.models import ModelParams
+from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.orchestrator.models import (
     ErrorRecord,
@@ -40,6 +40,7 @@ class MechAgentState(TypedDict, total=False):
     active_tasks: list[TaskItem]
     work_dir: str
     model_params_list: list[ModelParams]
+    simulation_cases: list[SimulationCase]
     designer_traces: list[AgentLLMTrace]
     mesh_results: list[MeshResult]
     mesh_traces: list[AgentLLMTrace]

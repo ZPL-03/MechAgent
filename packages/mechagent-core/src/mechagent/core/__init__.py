@@ -1,15 +1,18 @@
 """MechAgent 工具抽象层公开接口。"""
 
+from mechagent.core.adapters import GmshCADInpMesher
 from mechagent.core.cad import (
     AbstractCADKernel,
     CADConfig,
     CADGeometryFeature,
     CADGeometrySummary,
     CADImportResult,
+    CADTopologyEntity,
     GeometryCandidate,
     RegionCandidate,
     geometry_candidate_from_summary,
 )
+from mechagent.core.compare import BackendComparison, ComparisonTolerance, compare_backend_results
 from mechagent.core.exceptions import (
     CADError,
     ExecutorError,
@@ -47,6 +50,7 @@ from mechagent.core.factory import (
 from mechagent.core.materials import BUILTIN_MATERIALS, MaterialDefinition, match_builtin_material
 from mechagent.core.mesher import AbstractMesher, MeshConfig, MeshResult
 from mechagent.core.postproc import PostProcessor
+from mechagent.core.results import attach_case_result_fields
 from mechagent.core.rules import (
     RuleViolation,
     check_parameter_ranges,
@@ -67,6 +71,7 @@ __all__ = [
     "CADGeometryFeature",
     "CADGeometrySummary",
     "CADImportResult",
+    "CADTopologyEntity",
     "ExecutorConfig",
     "GeometryCandidate",
     "RegionCandidate",
@@ -81,8 +86,13 @@ __all__ = [
     "MeshConfig",
     "MeshError",
     "MeshResult",
+    "GmshCADInpMesher",
     "PostProcError",
     "PostProcessor",
+    "BackendComparison",
+    "ComparisonTolerance",
+    "compare_backend_results",
+    "attach_case_result_fields",
     "RuleViolation",
     "SolverConfig",
     "SolverError",

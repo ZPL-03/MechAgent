@@ -8,7 +8,7 @@ from typing import Any
 
 from mechagent.config import MechAgentConfig
 from mechagent.core.mesher import MeshResult
-from mechagent.core.models import ModelParams
+from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.orchestrator.agents import (
     AnalystAgent,
     DesignerAgent,
@@ -163,6 +163,7 @@ def _designer_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, 
     designer = DesignerAgent(config)
     next_tasks: list[TaskItem] = []
     params: list[ModelParams] = []
+    simulation_cases: list[SimulationCase] = []
     traces: list[AgentLLMTrace] = []
     errors: list[ErrorRecord] = []
     failed_records: list[TaskRunRecord] = []
@@ -173,6 +174,7 @@ def _designer_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, 
             confidence = output.simulation_case.provenance["geometry"].confidence
             next_tasks.append(task.model_copy(update={"execution_confidence": confidence}))
             params.append(output.model_params)
+            simulation_cases.append(output.simulation_case)
             traces.append(output.designer_llm_trace)
         except Exception as exc:
             error = ErrorRecord.from_exception("designer", exc, task)
@@ -188,6 +190,7 @@ def _designer_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, 
     result: dict[str, Any] = {
         "active_tasks": next_tasks,
         "model_params_list": params,
+        "simulation_cases": simulation_cases,
         "designer_traces": traces,
     }
     _append_failures(result, state, errors, failed_records)
@@ -251,7 +254,7 @@ def _mesh_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, Any]
             )
             continue
         next_tasks.append(task)
-        next_params.append(params)
+        next_params.append(output.model_params or params)
         if designer_trace is not None:
             next_designer_traces.append(designer_trace)
         results.append(output.mesh_result)
@@ -286,6 +289,7 @@ def _solver_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, An
     next_mesh_results: list[MeshResult] = []
     next_designer_traces: list[AgentLLMTrace] = []
     next_mesh_traces: list[AgentLLMTrace] = []
+    simulation_cases = state.get("simulation_cases", [])
     results: list[SolverRunSummary] = []
     errors: list[ErrorRecord] = []
     failed_records: list[TaskRunRecord] = []
@@ -300,11 +304,14 @@ def _solver_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, An
         task_item = _task_item(task)
         model_params = _model_params(params)
         mesh_result = _mesh_result(mesh)
+        simulation_case = simulation_cases[index] if index < len(simulation_cases) else None
         designer_trace = _designer_trace(state, index)
         mesh_trace = _mesh_trace(state, index)
         solver_agent = SolverAgent(config, _task_work_dir(state, task_item))
         try:
-            results.append(solver_agent.solve(task_item, model_params, mesh_result))
+            results.append(
+                solver_agent.solve(task_item, model_params, mesh_result, simulation_case)
+            )
         except Exception as exc:
             error = ErrorRecord.from_exception("solver", exc, task_item)
             errors.append(error)

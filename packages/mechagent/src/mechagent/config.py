@@ -92,6 +92,16 @@ class CalculiXSettings(BaseModel):
     timeout: int = Field(default=3600, ge=1)
 
 
+class AbaqusSettings(BaseModel):
+    """Abaqus/Standard launcher 配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = r"D:\Abaqus2023\Commands\abaqus.bat"
+    num_cpus: int = Field(default=1, ge=1)
+    timeout: int = Field(default=3600, ge=1)
+
+
 class SolverSettings(BaseModel):
     """求解器配置。
 
@@ -114,6 +124,7 @@ class SolverSettings(BaseModel):
 
     default: str = "calculix"
     calculix: CalculiXSettings = Field(default_factory=CalculiXSettings)
+    abaqus: AbaqusSettings = Field(default_factory=AbaqusSettings)
 
     @field_validator("default")
     @classmethod
@@ -341,17 +352,112 @@ class OutputSettings(BaseModel):
         return normalized
 
 
+class AuthPrincipalSettings(BaseModel):
+    """Studio API key 目录中的一个主体；只保存 SHA-256 摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str = Field(min_length=1, max_length=128)
+    api_key_sha256: str
+    organization: str = Field(default="local", min_length=1, max_length=128)
+    roles: list[str] = Field(default_factory=lambda: ["viewer"])
+    projects: list[str] = Field(default_factory=lambda: ["default"])
+
+    @field_validator("api_key_sha256")
+    @classmethod
+    def _digest_must_be_sha256(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+            raise ValueError("auth_principals.api_key_sha256 必须是 64 位 SHA-256。")
+        return normalized
+
+    @field_validator("roles")
+    @classmethod
+    def _roles_must_be_known(cls, value: list[str]) -> list[str]:
+        normalized = sorted({item.strip().lower() for item in value})
+        if not normalized or any(item not in {"admin", "runner", "viewer"} for item in normalized):
+            raise ValueError("auth_principals.roles 只能包含 admin、runner 或 viewer。")
+        return normalized
+
+    @field_validator("projects")
+    @classmethod
+    def _projects_must_not_be_blank(cls, value: list[str]) -> list[str]:
+        normalized = sorted({item.strip() for item in value})
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("auth_principals.projects 必须包含非空项目标识。")
+        return normalized
+
+
 class StudioSettings(BaseModel):
     """本机持久队列；相对数据库路径以 Studio 启动目录为基准。"""
 
     model_config = ConfigDict(extra="forbid")
 
     database: Path = Path("mechagent_output/.studio/jobs.sqlite3")
+    artifact_root: Path | None = None
+    artifact_backend: str = "filesystem"
+    artifact_s3_bucket: str = ""
+    artifact_s3_prefix: str = "mechagent"
     max_workers: int = Field(default=2, ge=1, le=32)
     max_queued: int = Field(default=32, ge=1, le=10000)
+    max_active_jobs_per_project: int = Field(default=8, ge=1, le=10000)
+    max_result_bytes: int = Field(default=100 * 1024 * 1024, ge=1024, le=10 * 1024**3)
     startup_timeout: int = Field(default=60, ge=5)
     heartbeat_timeout: int = Field(default=30, ge=5)
     job_timeout: int = Field(default=7200, ge=10)
+    auth_required: bool = False
+    auth_api_key_sha256: str = ""
+    auth_subject: str = Field(default="local", min_length=1, max_length=128)
+    auth_roles: list[str] = Field(default_factory=lambda: ["admin"])
+    auth_projects: list[str] = Field(default_factory=lambda: ["default"])
+    auth_principals: list[AuthPrincipalSettings] = Field(default_factory=list)
+
+    @field_validator("auth_api_key_sha256")
+    @classmethod
+    def _auth_digest_must_be_sha256(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized and (
+            len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized)
+        ):
+            raise ValueError("studio.auth_api_key_sha256 必须是 64 位 SHA-256。")
+        return normalized
+
+    @field_validator("auth_roles")
+    @classmethod
+    def _auth_roles_must_be_known(cls, value: list[str]) -> list[str]:
+        allowed = {"admin", "runner", "viewer"}
+        normalized = [item.strip().lower() for item in value]
+        if not normalized or any(item not in allowed for item in normalized):
+            raise ValueError("studio.auth_roles 只能包含 admin、runner 或 viewer。")
+        return sorted(set(normalized))
+
+    @field_validator("auth_projects")
+    @classmethod
+    def _auth_projects_must_not_be_blank(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("studio.auth_projects 必须包含非空项目标识。")
+        return sorted(set(normalized))
+
+    @model_validator(mode="after")
+    def _required_auth_must_have_key(self) -> "StudioSettings":
+        if self.auth_required and not self.auth_api_key_sha256 and not self.auth_principals:
+            raise ValueError(
+                "studio.auth_required=true 时必须配置 studio.auth_api_key_sha256 "
+                "或 auth_principals。"
+            )
+        digests = [item.api_key_sha256 for item in self.auth_principals]
+        if len(digests) != len(set(digests)):
+            raise ValueError("studio.auth_principals 不能重复使用 API key 摘要。")
+        return self
+
+    @model_validator(mode="after")
+    def _artifact_backend_must_be_configured(self) -> "StudioSettings":
+        if self.artifact_backend not in {"filesystem", "s3"}:
+            raise ValueError("studio.artifact_backend 只能是 filesystem 或 s3。")
+        if self.artifact_backend == "s3" and not self.artifact_s3_bucket.strip():
+            raise ValueError("studio.artifact_backend=s3 时必须配置 studio.artifact_s3_bucket。")
+        return self
 
 
 class MechAgentConfig(BaseModel):

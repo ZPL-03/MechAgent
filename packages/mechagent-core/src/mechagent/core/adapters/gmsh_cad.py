@@ -6,12 +6,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import gmsh
 
-from mechagent.core.cad import AbstractCADKernel, CADGeometrySummary
+from mechagent.core.cad import (
+    AbstractCADKernel,
+    CADGeometrySummary,
+    CADTopologyEntity,
+    RegionCandidate,
+)
 from mechagent.core.exceptions import CADError
 
 _FORMAT_BY_SUFFIX = {
@@ -106,8 +114,19 @@ class GmshCADKernel(AbstractCADKernel):
             edges = gmsh.model.getEntities(1)
             volume = sum(gmsh.model.occ.getMass(3, tag) for _dim, tag in solids)
             area = sum(gmsh.model.occ.getMass(2, tag) for _dim, tag in faces)
+            topology = _topology_entities(solids, faces, edges)
+            region_candidates = _face_region_candidates(topology, bbox)
+            topology_digest = hashlib.sha256(
+                json.dumps(
+                    [entity.model_dump(mode="json") for entity in topology],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
             return CADGeometrySummary(
                 source_format=source_format,
+                source_sha256=_sha256_file(source),
+                topology_digest=topology_digest,
                 bbox_min=(bbox[0], bbox[1], bbox[2]),
                 bbox_max=(bbox[3], bbox[4], bbox[5]),
                 volume=max(float(volume), 0.0),
@@ -115,7 +134,9 @@ class GmshCADKernel(AbstractCADKernel):
                 solid_count=len(solids),
                 face_count=len(faces),
                 edge_count=len(edges),
-                watertight=len(solids) > 0,
+                watertight=_is_watertight(faces),
+                topology_entities=topology,
+                region_candidates=region_candidates,
             )
         except CADError:
             raise
@@ -124,3 +145,136 @@ class GmshCADKernel(AbstractCADKernel):
             raise CADError(msg) from exc
         finally:
             gmsh.finalize()
+
+
+def _topology_entities(
+    solids: list[tuple[int, int]],
+    faces: list[tuple[int, int]],
+    edges: list[tuple[int, int]],
+) -> list[CADTopologyEntity]:
+    entities: list[CADTopologyEntity] = []
+    stable_ids: dict[tuple[int, int], str] = {}
+    for dimension, native_entities in ((3, solids), (2, faces), (1, edges)):
+        dimension_value = cast(Literal[1, 2, 3], dimension)
+        rows: list[tuple[tuple[float, ...], int, float]] = []
+        for _dim, tag in native_entities:
+            box = gmsh.model.getBoundingBox(dimension_value, tag)
+            measure = float(gmsh.model.occ.getMass(dimension_value, tag))
+            rows.append((tuple(round(value, 9) for value in box), tag, measure))
+        normalized_rows: list[tuple[tuple[float, ...], int, float, str]] = []
+        for index, (box, tag, measure) in enumerate(sorted(rows), start=1):
+            stable_id = _stable_topology_id(dimension, box, measure, index)
+            stable_ids[(dimension, tag)] = stable_id
+            normalized_rows.append((box, tag, measure, stable_id))
+        for box, tag, measure, stable_id in normalized_rows:
+            bbox_min = (box[0], box[1], box[2])
+            bbox_max = (box[3], box[4], box[5])
+            center = (
+                (bbox_min[0] + bbox_max[0]) / 2,
+                (bbox_min[1] + bbox_max[1]) / 2,
+                (bbox_min[2] + bbox_max[2]) / 2,
+            )
+            entities.append(
+                CADTopologyEntity(
+                    stable_id=stable_id,
+                    dimension=dimension_value,
+                    native_tag=tag,
+                    bbox_min=bbox_min,
+                    bbox_max=bbox_max,
+                    center=center,
+                    measure=max(measure, 0.0),
+                )
+            )
+    children_by_id: dict[str, list[str]] = {entity.stable_id: [] for entity in entities}
+    for entity in entities:
+        if entity.dimension <= 1:
+            continue
+        boundary = gmsh.model.getBoundary(
+            [(entity.dimension, entity.native_tag)], oriented=False, recursive=False
+        )
+        children_by_id[entity.stable_id] = sorted(
+            {
+                stable_ids[(int(dimension), abs(int(tag)))]
+                for dimension, tag in boundary
+                if (int(dimension), abs(int(tag))) in stable_ids
+            }
+        )
+    return [
+        entity.model_copy(update={"children": children_by_id[entity.stable_id]})
+        for entity in entities
+    ]
+
+
+def _is_watertight(faces: list[tuple[int, int]]) -> bool:
+    """判断面边界是否闭合；实体数量本身不能证明形体水密。"""
+
+    if not faces:
+        return False
+    edge_use: Counter[int] = Counter()
+    for _dimension, tag in faces:
+        for boundary_dimension, boundary_tag in gmsh.model.getBoundary(
+            [(2, tag)], oriented=False, recursive=False
+        ):
+            if boundary_dimension == 1:
+                edge_use[abs(int(boundary_tag))] += 1
+    return bool(edge_use) and all(count == 2 for count in edge_use.values())
+
+
+def _stable_topology_id(dimension: int, box: tuple[float, ...], measure: float, index: int) -> str:
+    payload = json.dumps(
+        {"dimension": dimension, "bbox": box, "measure": round(measure, 9)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"topology-{dimension}d-{hashlib.sha256(payload).hexdigest()[:16]}-{index:04d}"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _face_region_candidates(
+    topology: list[CADTopologyEntity], bbox: tuple[float, float, float, float, float, float]
+) -> list[RegionCandidate]:
+    faces = [entity for entity in topology if entity.dimension == 2]
+    if not faces:
+        return []
+    bounds = ((bbox[0], bbox[3]), (bbox[1], bbox[4]), (bbox[2], bbox[5]))
+    candidates: list[RegionCandidate] = []
+    for axis, (low, high) in zip(("x", "y", "z"), bounds, strict=True):
+        extent = max(high - low, 1.0e-12)
+        for side, target in (("min", low), ("max", high)):
+            distances = sorted(
+                ((abs(entity.center["xyz".index(axis)] - target), entity) for entity in faces),
+                key=lambda item: item[0],
+            )
+            distance, entity = distances[0]
+            tied = [
+                item
+                for item_distance, item in distances
+                if abs(item_distance - distance) <= extent * 1.0e-8
+            ]
+            status: Literal["mapped", "ambiguous", "unresolved"] = (
+                "mapped" if len(tied) == 1 and distance <= extent * 1.0e-6 else "ambiguous"
+            )
+            confidence = max(0.0, 1.0 - distance / extent) if status == "mapped" else 0.0
+            center = list(entity.center)
+            center["xyz".index(axis)] = target
+            center_tuple = (float(center[0]), float(center[1]), float(center[2]))
+            candidates.append(
+                RegionCandidate(
+                    name=f"{axis}_{side}",
+                    axis=axis,
+                    side=side,
+                    center=center_tuple,
+                    area=entity.measure,
+                    topology_ids=[item.stable_id for item in tied],
+                    confidence=confidence,
+                    status=status,
+                )
+            )
+    return candidates

@@ -113,6 +113,13 @@ class SequentialWorkflow:
                 emit_progress("mesh", "running", _stage_message("mesh", "running"))
                 mesh_output = mesh_agent.generate_with_trace(model_params, task)
                 mesh_result = mesh_output.mesh_result
+                if mesh_output.model_params is not None:
+                    model_params = mesh_output.model_params
+                    record.model_params = model_params
+                    if record.simulation_case is not None:
+                        record.simulation_case = record.simulation_case.model_copy(
+                            update={"model": model_params}
+                        )
                 record.mesh_result = mesh_result
                 record.mesh_llm_trace = mesh_output.mesh_llm_trace
                 if not mesh_result.success:
@@ -121,7 +128,12 @@ class SequentialWorkflow:
                 emit_progress("mesh", "complete", _stage_message("mesh", "complete"))
                 current_node = "solver"
                 emit_progress("solver", "running", _stage_message("solver", "running"))
-                solver_result = solver_agent.solve(task, model_params, mesh_result)
+                solver_result = solver_agent.solve(
+                    task,
+                    model_params,
+                    mesh_result,
+                    record.simulation_case,
+                )
                 record.solver_result = solver_result
                 emit_progress("solver", "complete", _stage_message("solver", "complete"))
                 current_node = "postproc"

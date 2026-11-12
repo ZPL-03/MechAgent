@@ -107,6 +107,7 @@ class GeometryAgent:
                 error_message=result.error_message,
             )
         candidate = geometry_candidate_from_summary(result.summary)
+        candidate = candidate.model_copy(update={"source_path": str(source.resolve())})
         return GeometryAnalysis(
             success=True,
             source=source,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 from collections.abc import Sequence
+from itertools import combinations
 from math import sqrt
 from pathlib import Path
 from typing import Any, Optional
@@ -26,8 +27,10 @@ from mechagent.core.models import (
     LoadType,
     MaterialType,
     ModelParams,
+    SimulationCase,
 )
 from mechagent.core.paths import safe_file_stem
+from mechagent.core.results import attach_case_result_fields
 from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
 
 _FRD_FLOAT_PATTERN = re.compile(r"[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[Ee][+-]\d{2,3})?")
@@ -90,6 +93,13 @@ class CalculiXAdapter(AbstractSolver):
             '.inp'
         """
 
+        content = self._input_content(model_params)
+        case_id = safe_file_stem(model_params.case_id, "RUN_calculix")
+        inp_path = self.config.work_dir / f"{case_id}.inp"
+        inp_path.write_text(content, encoding="utf-8")
+        return inp_path
+
+    def _input_content(self, model_params: ModelParams) -> str:
         if model_params.analysis.type is not AnalysisType.STATIC:
             msg = f"CalculiXAdapter 不支持分析类型 {model_params.analysis.type.value}。"
             raise SolverError(msg)
@@ -107,11 +117,39 @@ class CalculiXAdapter(AbstractSolver):
         else:
             msg = f"CalculiXAdapter 不支持 {model_params.geometry.type.value} 几何输入生成。"
             raise SolverError(msg)
+        return content
 
-        case_id = safe_file_stem(model_params.case_id, "RUN_calculix")
-        inp_path = self.config.work_dir / f"{case_id}.inp"
-        inp_path.write_text(content, encoding="utf-8")
-        return inp_path
+    def run_case(self, case: SimulationCase) -> dict[str, Any]:
+        """执行 CalculiX 线性静力多步案例并返回完整节点场。
+
+        每个 `LoadStepSpec` 生成一个 CalculiX `*STEP`，按案例顺序在同一输入文件
+        中提交。线性静力步的载荷比例作用于案例载荷；结果字段保存每个输出步的
+        节点位移和应力场。未声明或不受支持的分析步在提交前失败。
+        """
+
+        case.ensure_execution_ready()
+        if not case.load_steps:
+            raise SolverError("案例至少需要一个分析步。")
+        models = [case.to_step_model_params(step.step_id) for step in case.load_steps]
+        if any(step.analysis is not AnalysisType.STATIC or step.nlgeom for step in case.load_steps):
+            raise SolverError("CalculiX 多步执行当前只支持线性静力分析。")
+        contents = [self._input_content(model) for model in models]
+        prefix, _ = contents[0].split("*STEP", 1)
+        sections = ["*STEP" + content.split("*STEP", 1)[1] for content in contents]
+        sections = [
+            _configure_static_step(section, step.duration, step.increments)
+            for section, step in zip(sections, case.load_steps, strict=True)
+        ]
+        case_id = safe_file_stem(case.case_id or case.model.case_id, "RUN_calculix")
+        input_file = self.config.work_dir / f"{case_id}.inp"
+        input_file.write_text(prefix + "".join(sections), encoding="utf-8")
+        result = self.solve(input_file)
+        extracted = self.extract_results(result)
+        extracted = attach_case_result_fields(extracted, case)
+        extracted["load_steps"] = [step.model_dump(mode="json") for step in case.load_steps]
+        extracted["result_fields"] = [field.model_dump(mode="json") for field in case.result_fields]
+        extracted["step_count"] = len(case.load_steps)
+        return extracted
 
     def solve(self, input_file: Path) -> SolverResult:
         """调用 `ccx` 执行求解。
@@ -259,9 +297,9 @@ def _beam_static_inp(model_params: ModelParams, mesh_file: Path | None = None) -
         "*CLOAD",
         *load_lines,
         "*NODE FILE",
-        "U",
+        "U, RF",
         "*EL FILE",
-        "S",
+        "S, ENER",
         "*END STEP",
         "",
     ]
@@ -327,7 +365,7 @@ def _plate_static_inp(model_params: ModelParams, mesh_file: Path | None = None) 
 
     lines.extend(_plate_nodal_load_lines(nodes, elements, pressure_load))
 
-    lines.extend(["*NODE FILE", "U", "*EL FILE", "S", "*END STEP", ""])
+    lines.extend(["*NODE FILE", "U, RF", "*EL FILE", "S, ENER", "*END STEP", ""])
     return "\n".join(lines)
 
 
@@ -341,36 +379,64 @@ def _solid_static_inp(model_params: ModelParams, mesh_file: Path | None = None) 
     poisson_ratio = model_params.material.nu
     if mesh_file:
         mesh_lines, nodes, _ = _read_mesh_sections(mesh_file)
-        solid_elements = _parse_hex_elements(mesh_lines)
+        solid_elements = _parse_solid_elements(mesh_lines)
         if not solid_elements:
-            msg = f"实体网格文件缺少 C3D8 单元: {mesh_file}"
+            msg = f"实体网格文件缺少 C3D8/C3D4 单元: {mesh_file}"
             raise SolverError(msg)
     else:
-        mesh_lines, nodes, solid_elements = _regular_solid_mesh(
+        mesh_lines, nodes, regular_elements = _regular_solid_mesh(
             length,
             width,
             height,
             model_params.mesh.seed_size,
         )
+        solid_elements = [tuple(element) for element in regular_elements]
 
-    x_values = [point[0] for point in nodes.values()]
-    min_x = min(x_values)
-    max_x = max(x_values)
-    root_nodes = _node_ids_on_axis(nodes, axis=0, target=min_x)
     load = _first_load_spec(model_params, LoadType.PRESSURE)
     if load is None:
         load = _first_load_spec(model_params, LoadType.FORCE)
     if load is None:
         msg = "实体静力分析缺少 pressure 或 force 端面载荷。"
         raise SolverError(msg)
-    load_lines = _solid_end_face_load_lines(nodes, solid_elements, load, target_x=max_x)
+    node_sets = _parse_node_sets(mesh_lines)
+    cad_mesh = model_params.metadata.get("geometry_source") == "cad"
+    if mesh_file and cad_mesh:
+        root_nodes = node_sets.get("ROOT", [])
+        load_region = _mesh_set_name(load.region)
+        load_nodes = node_sets.get(load_region, [])
+        if not root_nodes or not load_nodes:
+            missing_sets = ", ".join(
+                name
+                for name, values in (("ROOT", root_nodes), (load_region, load_nodes))
+                if not values
+            )
+            raise SolverError("CAD 直接网格缺少边界或载荷区域节点集合: " + missing_sets)
+        load_lines = _solid_end_face_load_lines(
+            nodes,
+            solid_elements,
+            load,
+            target_x=None,
+            target_nodes=set(load_nodes),
+        )
+    else:
+        x_values = [point[0] for point in nodes.values()]
+        min_x = min(x_values)
+        max_x = max(x_values)
+        root_nodes = _node_ids_on_axis(nodes, axis=0, target=min_x)
+        load_lines = _solid_end_face_load_lines(
+            nodes, solid_elements, load, target_x=max_x, target_nodes=None
+        )
 
+    root_set_lines = (
+        []
+        if mesh_file and cad_mesh and node_sets.get("ROOT")
+        else ["*NSET, NSET=ROOT", *_format_id_rows(root_nodes)]
+    )
     lines = [
         "*HEADING",
         "MechAgent static solid",
         *mesh_lines,
-        "*NSET, NSET=ROOT",
-        *_format_id_rows(root_nodes),
+        *root_set_lines,
         "*MATERIAL, NAME=MAT",
         "*ELASTIC",
         f"{elastic_modulus:.12g}, {poisson_ratio:.12g}",
@@ -382,9 +448,9 @@ def _solid_static_inp(model_params: ModelParams, mesh_file: Path | None = None) 
         "*CLOAD",
         *load_lines,
         "*NODE FILE",
-        "U",
+        "U, RF",
         "*EL FILE",
-        "S",
+        "S, ENER",
         "*END STEP",
         "",
     ]
@@ -561,8 +627,8 @@ def _ensure_supported_solid_case(model_params: ModelParams) -> None:
         ("length", "width", "height"),
         "CalculiX 实体静力路径",
     )
-    if model_params.mesh.element_type is not ElementType.C3D8R:
-        msg = "CalculiX 实体静力路径支持 C3D8R 单元。"
+    if model_params.mesh.element_type not in {ElementType.C3D8R, ElementType.C3D4}:
+        msg = "CalculiX 实体静力路径支持 C3D8R 或 C3D4 单元。"
         raise SolverError(msg)
     if not _has_bc(
         model_params,
@@ -737,6 +803,62 @@ def _parse_hex_elements(lines: list[str]) -> list[tuple[int, int, int, int, int,
     return elements
 
 
+def _parse_solid_elements(lines: list[str]) -> list[tuple[int, ...]]:
+    elements: list[tuple[int, ...]] = []
+    active = False
+    expected_nodes = 0
+    for raw in lines:
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("*ELEMENT"):
+            active = "C3D8" in upper or "C3D4" in upper
+            expected_nodes = 8 if "C3D8" in upper else 4 if "C3D4" in upper else 0
+            continue
+        if active and line.startswith("*"):
+            active = False
+            expected_nodes = 0
+            continue
+        if not active or not line:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if expected_nodes and len(parts) >= expected_nodes + 1:
+            elements.append(tuple(int(part) for part in parts[1 : expected_nodes + 1]))
+    return elements
+
+
+def _parse_node_sets(lines: list[str]) -> dict[str, list[int]]:
+    result: dict[str, list[int]] = {}
+    active_name: str | None = None
+    generate = False
+    for raw in lines:
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("*NSET"):
+            match = re.search(r"NSET\s*=\s*([^,\s]+)", upper)
+            active_name = match.group(1) if match else None
+            generate = "GENERATE" in upper
+            if active_name:
+                result.setdefault(active_name, [])
+            continue
+        if line.startswith("*"):
+            active_name = None
+            generate = False
+            continue
+        if not active_name or not line:
+            continue
+        values = [int(part.strip()) for part in line.split(",") if part.strip()]
+        if generate and len(values) >= 2:
+            step = values[2] if len(values) > 2 else 1
+            result[active_name].extend(range(values[0], values[1] + 1, step))
+        else:
+            result[active_name].extend(values)
+    return {name: sorted(set(values)) for name, values in result.items()}
+
+
+def _mesh_set_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", _region_key(value)).upper()
+
+
 def _node_ids_on_axis(
     nodes: dict[int, tuple[float, float, float]],
     axis: int,
@@ -785,19 +907,34 @@ def _solid_end_face_load_lines(
     nodes: dict[int, tuple[float, float, float]],
     elements: Sequence[Sequence[int]],
     load: LoadSpec,
-    target_x: float,
+    target_x: float | None,
+    target_nodes: set[int] | None,
 ) -> list[str]:
     dof, sign = _load_dof_and_sign(load)
     face_loads = dict.fromkeys(nodes, 0.0)
     face_areas: dict[int, float] = dict.fromkeys(nodes, 0.0)
     for element in elements:
-        if len(element) < 8:
+        if len(element) < 4:
             continue
-        end_face = (element[1], element[2], element[6], element[5])
-        if all(_is_close(nodes[node_id][0], target_x, target_x) for node_id in end_face):
-            area = _quad_area([nodes[node_id] for node_id in end_face])
+        faces: list[tuple[int, ...]]
+        if len(element) == 8:
+            faces = [(element[1], element[2], element[6], element[5])]
+        elif len(element) == 4:
+            faces = [tuple(face) for face in combinations(element, 3)]
+        else:
+            continue
+        for end_face in faces:
+            on_target = (
+                all(node_id in target_nodes for node_id in end_face)
+                if target_nodes is not None
+                else target_x is not None
+                and all(_is_close(nodes[node_id][0], target_x, target_x) for node_id in end_face)
+            )
+            if not on_target:
+                continue
+            area = _polygon_area([nodes[node_id] for node_id in end_face])
             for node_id in end_face:
-                face_areas[node_id] += area / 4.0
+                face_areas[node_id] += area / len(end_face)
 
     total_area = sum(face_areas.values())
     if total_area <= 0:
@@ -916,6 +1053,16 @@ def _first_load_spec(params: ModelParams, load_type: LoadType) -> LoadSpec | Non
     return None
 
 
+def _configure_static_step(section: str, duration: float, increments: int) -> str:
+    """把分析步的时间和增量写入 CalculiX `*STATIC` 数据行。"""
+
+    increment = duration / increments
+    replacement = f"*STATIC\n{increment:.12g}, {duration:.12g}, {increment:.12g}, {duration:.12g}\n"
+    if "*STATIC\n" not in section:
+        raise SolverError("生成的 CalculiX 分析步缺少 *STATIC。")
+    return section.replace("*STATIC\n", replacement, 1)
+
+
 def _resolve_executable(executable: str) -> str | None:
     path = Path(executable)
     if path.exists():
@@ -944,15 +1091,51 @@ def _parse_frd(
     path: Path,
     node_coordinates: dict[int, tuple[float, float, float]] | None = None,
 ) -> dict[str, Any]:
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    frd_coordinates = _parse_frd_coordinates(lines)
+    if frd_coordinates:
+        node_coordinates = frd_coordinates
+    displacement_frames: list[dict[int, tuple[float, float, float]]] = []
+    stress_frames: list[dict[int, tuple[float, float, float, float, float, float]]] = []
+    reaction_frames: list[dict[int, tuple[float, float, float]]] = []
+    energy_frames: list[dict[int, float]] = []
     displacements: dict[int, tuple[float, float, float]] = {}
     stresses: dict[int, tuple[float, float, float, float, float, float]] = {}
+    reactions: dict[int, tuple[float, float, float]] = {}
+    energies: dict[int, float] = {}
     mode: str | None = None
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+
+    def flush() -> None:
+        nonlocal displacements, stresses, reactions, energies
+        if displacements:
+            displacement_frames.append(displacements)
+            displacements = {}
+        if stresses:
+            stress_frames.append(stresses)
+            stresses = {}
+        if reactions:
+            reaction_frames.append(reactions)
+            reactions = {}
+        if energies:
+            energy_frames.append(energies)
+            energies = {}
+
+    for line in lines:
         if line.startswith(" -4  DISP"):
+            flush()
             mode = "disp"
             continue
         if line.startswith(" -4  STRESS"):
+            flush()
             mode = "stress"
+            continue
+        if line.startswith(" -4  FORC"):
+            flush()
+            mode = "reaction"
+            continue
+        if line.startswith(" -4  ENER"):
+            flush()
+            mode = "energy"
             continue
         if line.startswith(" -3"):
             mode = None
@@ -974,6 +1157,19 @@ def _parse_frd(
                 values[5],
                 values[6],
             )
+        if mode == "reaction" and len(values) >= 4:
+            reactions[node] = (values[1], values[2], values[3])
+        if mode == "energy" and len(values) >= 2:
+            energies[node] = values[1]
+    flush()
+    if displacement_frames:
+        displacements = displacement_frames[-1]
+    if stress_frames:
+        stresses = stress_frames[-1]
+    if reaction_frames:
+        reactions = reaction_frames[-1]
+    if energy_frames:
+        energies = energy_frames[-1]
     result: dict[str, Any] = {}
     if displacements:
         max_u1 = max((abs(value[0]) for value in displacements.values()), default=0.0)
@@ -1015,11 +1211,109 @@ def _parse_frd(
             result["tip_deflection_mm"] = max_u2
             result["center_deflection_mm"] = max_u3
             result["axial_displacement_mm"] = max_u1
+        result.setdefault("fields", {})["displacement"] = {
+            "location": "node",
+            "unit": "mm",
+            "components": ["ux", "uy", "uz"],
+            "values": {str(node): list(values) for node, values in displacements.items()},
+        }
     if stresses:
         max_sxx = max((abs(value[0]) for value in stresses.values()), default=0.0)
         result["max_stress_mpa"] = max_sxx
         result["stress_node_count"] = len(stresses)
+        result.setdefault("fields", {})["stress"] = {
+            "location": "node",
+            "unit": "MPa",
+            "components": ["sxx", "syy", "szz", "sxy", "syz", "sxz"],
+            "values": {str(node): list(values) for node, values in stresses.items()},
+        }
+    if reactions:
+        result.setdefault("fields", {})["reaction_force"] = {
+            "location": "node",
+            "unit": "N",
+            "components": ["rf1", "rf2", "rf3"],
+            "values": {str(node): list(values) for node, values in reactions.items()},
+        }
+    if energies:
+        result.setdefault("fields", {})["energy"] = {
+            "location": "element",
+            "unit": "N*mm",
+            "components": ["energy"],
+            "values": {str(node): value for node, value in energies.items()},
+        }
+    if node_coordinates:
+        result["nodes"] = {
+            str(node): list(point) for node, point in sorted(node_coordinates.items())
+        }
+    history: list[dict[str, Any]] = []
+    for index in range(
+        max(
+            len(displacement_frames),
+            len(stress_frames),
+            len(reaction_frames),
+            len(energy_frames),
+        )
+    ):
+        frame: dict[str, Any] = {"step_index": index + 1}
+        if index < len(displacement_frames):
+            frame["displacement"] = {
+                "location": "node",
+                "unit": "mm",
+                "components": ["ux", "uy", "uz"],
+                "values": {
+                    str(node): list(values) for node, values in displacement_frames[index].items()
+                },
+            }
+        if index < len(stress_frames):
+            frame["stress"] = {
+                "location": "node",
+                "unit": "MPa",
+                "components": ["sxx", "syy", "szz", "sxy", "syz", "sxz"],
+                "values": {
+                    str(node): list(values) for node, values in stress_frames[index].items()
+                },
+            }
+        if index < len(reaction_frames):
+            frame["reaction_force"] = {
+                "location": "node",
+                "unit": "N",
+                "components": ["rf1", "rf2", "rf3"],
+                "values": {
+                    str(node): list(values) for node, values in reaction_frames[index].items()
+                },
+            }
+        if index < len(energy_frames):
+            frame["energy"] = {
+                "location": "element",
+                "unit": "N*mm",
+                "components": ["energy"],
+                "values": {str(node): value for node, value in energy_frames[index].items()},
+            }
+        history.append(frame)
+    if history:
+        result["field_history"] = history
     return result
+
+
+def _parse_frd_coordinates(lines: list[str]) -> dict[int, tuple[float, float, float]]:
+    """解析 FRD 的 `2C` 节点坐标记录，覆盖梁单元展开后的内部节点。"""
+
+    coordinates: dict[int, tuple[float, float, float]] = {}
+    active = False
+    for line in lines:
+        if line.startswith("    2C"):
+            active = True
+            continue
+        if active and line.startswith(" -3"):
+            break
+        if not active or not line.startswith(" -1"):
+            continue
+        parsed = _parse_frd_data_line(line[3:])
+        if parsed is None or len(parsed[1]) < 4:
+            continue
+        node, values = parsed
+        coordinates[node] = (values[1], values[2], values[3])
+    return coordinates
 
 
 def _max_abs_component_on_axis(

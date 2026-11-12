@@ -59,6 +59,7 @@ class ElementType(str, Enum):
     B31 = "B31"
     S4 = "S4"
     S4R = "S4R"
+    C3D4 = "C3D4"
     C3D8R = "C3D8R"
     CPS4 = "CPS4"
 

@@ -9,6 +9,9 @@ from pytest import MonkeyPatch
 
 from mechagent import MechAgent
 from mechagent.core import validation as validation_module
+from mechagent.core.adapters.calculix import CalculiXAdapter
+from mechagent.core.models import LoadStepSpec, SimulationCase
+from mechagent.core.solver import SolverConfig
 from mechagent.core.validation import (
     BenchmarkResult,
     axial_bar_end_displacement,
@@ -75,6 +78,42 @@ def test_tc05_solid_axial_force_error_below_eight_percent() -> None:
     assert result.case_id == "TC-05"
     assert result.relative_error < 0.08
     assert result.passed
+
+
+@pytest.mark.real_solver
+def test_calculix_executes_multiple_static_steps_and_returns_field_history(
+    tmp_path: Path,
+) -> None:
+    params = tc01_model_params()
+    case = SimulationCase.from_model_params(params, provenance_confidence=1.0)
+    case = case.model_copy(
+        update={
+            "load_steps": [
+                case.load_steps[0],
+                LoadStepSpec(
+                    step_id="step-2",
+                    sequence=2,
+                    analysis=params.analysis.type,
+                    load_scale=0.5,
+                    result_fields=["displacement"],
+                ),
+            ]
+        }
+    )
+    adapter = CalculiXAdapter(
+        SolverConfig(solver_path=_solver_path(), work_dir=tmp_path, timeout=120)
+    )
+
+    result = adapter.run_case(case)
+
+    assert result["success"] is True
+    assert result["step_count"] == 2
+    assert len(result["field_history"]) == 2
+    first = result["field_history"][0]["displacement"]["values"]
+    second = result["field_history"][1]["displacement"]["values"]
+    assert len(first) == len(second) > 0
+    assert abs(second["905"][1]) == pytest.approx(abs(first["905"][1]) * 0.5, rel=1.0e-4)
+    assert result["fields"]["displacement"]["location"] == "node"
 
 
 @pytest.mark.real_solver

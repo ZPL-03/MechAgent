@@ -234,7 +234,23 @@ def parse_static_model_params_from_geometry(
 
     request = build_static_request_from_geometry(candidate, completion)
     params = parse_static_model_params(request)
-    return params.model_copy(update={"metadata": {**params.metadata, "geometry_source": "cad"}})
+    cad_geometry = {
+        "source_format": candidate.source_format,
+        "source_path": candidate.source_path,
+        "source_sha256": candidate.source_sha256,
+        "topology_digest": candidate.topology_digest,
+        "watertight": candidate.watertight,
+        "bbox_min": list(candidate.bbox_min),
+        "bbox_max": list(candidate.bbox_max),
+        "region_candidates": [item.model_dump(mode="json") for item in candidate.region_candidates],
+        "topology_entities": [item.model_dump(mode="json") for item in candidate.topology_entities],
+    }
+    metadata = {
+        **params.metadata,
+        "geometry_source": "cad",
+        "cad_geometry": cad_geometry,
+    }
+    return params.model_copy(update={"metadata": metadata})
 
 
 def _format_length(value: float) -> str:

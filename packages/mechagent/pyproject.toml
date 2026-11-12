@@ -48,6 +48,9 @@ dev = [
 docs = [
   "mkdocs-material>=9",
 ]
+s3 = [
+  "boto3>=1.34,<2",
+]
 
 [project.scripts]
 mechagent = "mechagent.cli:app"

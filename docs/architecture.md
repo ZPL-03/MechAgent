@@ -56,11 +56,11 @@ Agent 编排层
   CalculiX / Gmsh / OpenAI 兼容 LLM
 ```
 
-编排层通过能力注册项和工厂函数创建求解器和网格器。core 工厂提供 `register_solver()`、`unregister_solver()`、`register_mesher()`、`unregister_mesher()`、`create_solver()`、`create_mesher()`，默认注册 CalculiX 求解器与 `calculix-inp` 网格器。`SimulationCapability.solver_name` 与 `SimulationCapability.mesher_name` 可绑定能力默认工具；未声明时使用配置中的 `solver.default` 与 `mesher.default`。配置默认工具和能力默认工具均按工厂注册名称校验；能力默认工具在注册时规范化为工厂注册名。`knowledge` 不反向引用 `orchestrator`。Agent 间结构化数据使用 Pydantic v2 模型。
+编排层通过能力注册项和工厂函数创建求解器和网格器。core 工厂提供 `register_solver()`、`unregister_solver()`、`register_mesher()`、`unregister_mesher()`、`create_solver()`、`create_mesher()`，默认注册 CalculiX 与 Abaqus 求解器、`calculix-inp` 参数化网格器和 `gmsh-cad-inp` CAD 实体网格器。配置默认网格器仍为 `calculix-inp`；`gmsh-cad-inp` 仅用于具备受控 CAD 源摘要的三维实体。`SimulationCapability.solver_name` 与 `SimulationCapability.mesher_name` 可绑定能力默认工具；未声明时使用配置中的 `solver.default` 与 `mesher.default`。配置默认工具和能力默认工具均按工厂注册名称校验；能力默认工具在注册时规范化为工厂注册名。`knowledge` 不反向引用 `orchestrator`。Agent 间结构化数据使用 Pydantic v2 模型。
 
 后处理使用 `PostProcessor`，材料使用内置目录；二者没有独立工厂注册 API。求解器、网格器、CAD 内核和执行器采用注册/工厂/配置模式。除求解器（`AbstractSolver`）与网格器（`AbstractMesher`）外，core 提供 CAD 内核抽象 `AbstractCADKernel`（`load -> repair -> summarize` 模板，产出 `CADGeometrySummary` 与 `CADImportResult`）和作业执行器抽象 `AbstractJobExecutor`（`submit / status / result / cancel` 契约与 `run` 模板，内置同步 `LocalCommandExecutor` 默认后端）。对应工厂为 `register_cad_kernel()`/`create_cad_kernel()` 与 `register_executor()`/`create_executor()`，配置项为 `cad.default` 与 `executor.default`（默认 `local`）。
 
-CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积与实体/面/边数量；`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、由包围盒六面派生边界/载荷区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams`。该基础链路适用于可由包围盒和薄度/细长比可靠归类的形体；通用几何修复、特征识别、装配体、自动区域语义映射和远程/HPC/容器执行器属于后续物理域与平台化能力，进入发布边界前满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
+CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积、实体/面/边数量、源文件摘要和稳定拓扑关系；`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、保留拓扑实体和六向区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams`。案例提升时，`SimulationCase` 按唯一方向候选将受支持的工程区域映射到面/边拓扑 ID；歧义或未解析区域以 `unknown` 保留并在执行前拒绝。`gmsh-cad-inp` 已把受控三维 STEP/IGES/BREP 的拓扑面/边映射为 C3D4 网格节点集合，并在区域缺失时失败；当前真实证据覆盖确定性实体和带贯穿圆孔实体。通用几何修复、特征识别、装配体、复杂薄壁件和远程/HPC/容器执行器仍需独立满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
 
 ## 核心 Schema
 
@@ -91,10 +91,11 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `solver_control`：可选迭代、容差和时间步字段；具体后端未声明支持时不得自行解释。
 
 旧 `ModelParams` 案例在读取时会补齐一个默认分析步和主位移结果请求。`to_model_params()`
-会把分析步和结果字段写入兼容模型的公开 `metadata`；只有单个、未缩放且与
-`ModelParams.analysis` 一致的分析步可以投影到当前求解器接口。多步、非单位载荷比例或
-不一致分析设置会在投影前报错，避免静默丢失契约字段。结果字段请求描述后处理目标，
-具体字段是否由某个求解器提供仍由能力注册项和适配器契约决定。
+会把分析步和结果字段写入兼容模型的公开 `metadata`；旧入口只表达单个、未缩放且与
+`ModelParams.analysis` 一致的分析步。CalculiX 与 Abaqus/Standard 适配器通过
+`AbstractSolver.run_case()` 按案例顺序生成多个线性静力步，并保留逐步场量；不一致分析设置
+仍在执行前报错，避免静默丢失契约字段。结果字段请求描述后处理目标，具体字段是否由某个
+求解器提供仍由能力注册项和适配器契约决定。
 
 `ModelParams.to_simulation_case()` 和 `SimulationCase.to_model_params()` 是兼容转换
 入口。当前结构静力工作流在 Designer 输出后生成案例摘要，求解器仍接收兼容的
@@ -141,7 +142,7 @@ Studio 的运行层位于应用包 `runtime/`，不替代 core 的工具执行�
 
 状态依次为 `queued → starting → running → succeeded/failed`，取消经过 `cancelling → cancelled`；未登记或失联的执行进程为 `interrupted`。取消先于结果提交时，worker 不得覆盖取消状态。进程身份使用 PID 与创建时间核验；Windows worker 先加入带 `KILL_ON_JOB_CLOSE` 的 Job Object，再登记身份和执行工作，隔离失败不开始求解。Windows 下 worker 异常退出会终止其后代。POSIX 使用独立进程组处理主动取消；worker 被外部单独强杀后的孤儿回收尚无平台验证，不作完整进程树恢复承诺。
 
-`studio` 配置定义数据库路径、并发、排队、启动登记、心跳和总执行时限。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 2。v1 队列结构可在事务内迁移到 v2；v2 使用 `schema_migrations` 记录已应用版本，并为历史作业补充配置哈希字段。缺少原配置文件的历史作业保留未验证哈希，worker 会拒绝执行并要求显式重新提交。未知未来版本拒绝打开。队列和结果没有自动删除策略；归档由维护者管理。
+`studio` 配置定义数据库路径、并发、排队、启动登记、心跳、总执行时限、认证主体、角色和项目范围。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 5。v1 队列结构可在事务内迁移到 v5；v2 保存配置文件哈希，v3 保存作业主体和项目归属，v4 保存结果字节数，v5 保存 worker 及可见子进程的 CPU 时间与峰值常驻内存。缺少原配置文件的历史作业保留未验证哈希，worker 会拒绝执行并要求显式重新提交。未知未来版本拒绝打开。结果写入同目录的内容寻址对象存储并按 SHA-256 校验；冷备份要求停止调度器且所有任务终态，备份清单会校验数据库、作业目录和对象存储。队列和结果没有自动删除策略，归档由维护者管理。
 
 每个 Studio 作业使用数据库同目录下的 `jobs/<job_id>/`，其中 `runs/` 保存 SDK 运行、`result.json` 保存公开响应、`manifest.json` 保存清单。原始 `worker.log` 仅作本地故障诊断，不通过 API 公开，也不纳入清单；日志目录仍应按工程数据管理。队列保存请求、配置路径及其源文件哈希，不保存展开后的密钥。worker 执行前校验配置文件哈希，配置变化导致显式失败；`.env` 与进程环境在 worker 启动时解析，环境变更不在源文件哈希覆盖范围内。
 

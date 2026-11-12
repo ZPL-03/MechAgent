@@ -16,6 +16,7 @@ from mechagent.core.cad import (
 )
 from mechagent.core.models import GeometryType
 from mechagent.orchestrator.agents import GeometryAgent
+from mechagent.orchestrator.agents.mesh import MeshAgent
 from mechagent.orchestrator.static_parser import (
     build_static_request_from_geometry,
     parse_static_model_params_from_geometry,
@@ -96,6 +97,57 @@ def test_geometry_agent_to_model_params_from_step(tmp_path: Path) -> None:
     assert params.case_id == "STATIC-BEAM"
     assert params.geometry.dimensions["length"] == 1000.0
     assert params.metadata["geometry_source"] == "cad"
+
+
+def test_cad_topology_regions_reach_execution_case(tmp_path: Path) -> None:
+    step = tmp_path / "beam.step"
+    _write_box_step(step, 1000.0, 40.0, 40.0)
+
+    params = GeometryAgent(MechAgentConfig(), tmp_path).to_model_params(
+        step, "材料钢，一端固支，端部向下1000N集中力"
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+
+    assert case.regions["root"].kind == "topology"
+    assert case.regions["root"].stable_id.startswith("topology-")
+    assert case.regions["root"].topology_ids
+    assert case.regions["tip"].kind == "topology"
+    assert case.execution_ready is True
+
+
+def test_cad_region_without_unique_topology_is_not_executable() -> None:
+    params = parse_static_model_params_from_geometry(
+        _candidate((1000.0, 40.0, 40.0)),
+        "材料钢，一端固支，端部向下1000N集中力",
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+
+    assert case.regions["root"].kind == "unknown"
+    assert case.execution_ready is False
+    assert any("未完成拓扑或语义映射" in item for item in case.execution_readiness().blockers)
+
+
+def test_cad_solid_direct_mesh_preserves_region_node_sets(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    output = MeshAgent(config, tmp_path / "mesh").generate_with_trace(params)
+
+    assert output.model_params is not None
+    assert output.model_params.mesh.element_type.value == "C3D4"
+    assert output.mesh_result.success is True
+    assert output.mesh_result.metadata["direct_cad"] is True
+    assert output.mesh_result.metadata["region_node_sets"]["root"]
+    assert output.mesh_result.metadata["region_node_sets"]["end_face"]
+    assert output.mesh_result.mesh_file is not None
+    mesh_text = output.mesh_result.mesh_file.read_text(encoding="utf-8")
+    assert "*ELEMENT, TYPE=C3D4" in mesh_text
+    assert "*NSET, NSET=ROOT" in mesh_text
+    assert "*NSET, NSET=END_FACE" in mesh_text
 
 
 @pytest.mark.real_solver

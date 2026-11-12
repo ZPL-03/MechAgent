@@ -97,8 +97,8 @@ def test_documentation_navigation_contains_every_topic_once() -> None:
 
 
 def test_tool_documentation_matches_builtin_registration() -> None:
-    assert registered_solvers() == ("calculix",)
-    assert registered_meshers() == ("calculix-inp",)
+    assert registered_solvers() == ("abaqus", "calculix")
+    assert registered_meshers() == ("calculix-inp", "gmsh-cad-inp")
     assert registered_cad_kernels() == ("gmsh-occ",)
     assert registered_executors() == ("local",)
     architecture = read("docs/architecture.md")
@@ -111,7 +111,7 @@ def test_tool_documentation_matches_builtin_registration() -> None:
         assert name in architecture
     assert "没有独立工厂注册 API" in architecture
     assert "独立" in read("docs/solver_mesh.md")
-    assert "尚未注册" in read("README.md")
+    assert "Abaqus" in read("README.md")
 
 
 def test_case_catalogue_matches_natural_language_validation_inputs() -> None:
@@ -126,6 +126,7 @@ def test_case_catalogue_matches_natural_language_validation_inputs() -> None:
 
 def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
     workflow = read(".github/workflows/pr.yml")
+    release_workflow = read(".github/workflows/release.yml")
     commands = [
         'python-version: "3.10"',
         'node-version: "22"',
@@ -148,6 +149,9 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "python scripts/clean_artifacts.py",
     ]
     assert all(command in workflow for command in commands)
+    assert "sigstore/cosign-installer" in release_workflow
+    assert "id-token: write" in release_workflow
+    assert "--certificate-identity" in release_workflow
     for forbidden in (
         "D:/anaconda3",
         "self-hosted",
@@ -167,6 +171,13 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "run_natural_language_cases.py",
         "run_llm_smoke.py",
         "run_abaqus_smoke.py",
+        "run_abaqus_multistep.py",
+        "run_cad_topology_case.py",
+        "run_backend_comparison.py",
+        "compare_backends.py",
+        "backup_studio.py",
+        "restore_studio.py",
+        "drill_studio_recovery.py",
         "check_wheel_install.py",
         "clean_artifacts.py",
     ):

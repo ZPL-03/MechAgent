@@ -22,6 +22,8 @@ def main(argv: list[str] | None = None) -> int:
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
+        ".backup.*",
+        ".restore.*",
         "*.egg-info",
         "build",
         "dist",
@@ -30,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     targets.extend(
         REPO_ROOT / name
         for name in (
+            ".tmp",
             ".playwright-cli",
             ".playwright-mcp",
             "output/playwright",

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mechagent.core.defaults import DEFAULT_CALCULIX_PATH
 from mechagent.core.exceptions import SolverError
-from mechagent.core.models import ModelParams
+from mechagent.core.models import ModelParams, SimulationCase
 
 
 class SolverConfig(BaseModel):
@@ -192,3 +192,14 @@ class AbstractSolver(ABC):
         extracted = self.extract_results(result)
         extracted.setdefault("wall_time_s", time.perf_counter() - start)
         return extracted
+
+    def run_case(self, case: SimulationCase) -> dict[str, Any]:
+        """执行版本化案例。
+
+        适配器可覆盖此方法以实现真实的多分析步和结果字段输出。默认实现只
+        接受可无损投影到旧 `ModelParams` 接口的单步案例，遇到未表达的契约
+        字段时显式失败，避免静默丢失分析步或场量请求。
+        """
+
+        case.ensure_execution_ready()
+        return self.run(case.to_model_params())

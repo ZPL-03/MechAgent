@@ -18,11 +18,19 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent import MechAgent, __version__
-from mechagent.config import StudioSettings
+from mechagent.config import MechAgentConfig, StudioSettings
 from mechagent.diagnostics import run_environment_diagnostics
 from mechagent.evidence import verify_manifest, write_manifest
 from mechagent.examples import example_payloads
 from mechagent.orchestrator.capabilities import all_capabilities
+from mechagent.runtime.artifacts import create_artifact_store
+from mechagent.runtime.auth import (
+    ApiKeyAuthenticator,
+    AuthenticationError,
+    AuthorizationError,
+    Principal,
+    ensure_authorized,
+)
 from mechagent.runtime.manager import JobManager
 from mechagent.runtime.store import (
     TERMINAL,
@@ -41,6 +49,12 @@ class StudioRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request: str = Field(default="", max_length=20000, description="自然语言仿真请求。")
     use_llm_agents: bool = Field(default=False, description="是否启用远端参数补全链路。")
+    project_id: str = Field(
+        default="default",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
 
 
 def create_studio_app(
@@ -48,13 +62,50 @@ def create_studio_app(
 ) -> FastAPI:
     """创建本机单用户 ASGI 应用；生命周期启动持久队列调度。"""
     config_path = config
+    if studio_settings is not None:
+        configured_settings = studio_settings
+    elif config_path.is_file():
+        configured_settings = MechAgent.from_config(config_path).config.studio
+    else:
+        configured_settings = MechAgentConfig().studio
+    configured_principal = Principal(
+        subject=configured_settings.auth_subject,
+        roles=frozenset(configured_settings.auth_roles),
+        project_ids=frozenset(configured_settings.auth_projects),
+    )
+    directory = tuple(
+        (
+            item.api_key_sha256,
+            Principal(
+                subject=item.subject,
+                roles=frozenset(item.roles),
+                project_ids=frozenset(item.projects),
+                organization=item.organization,
+            ),
+        )
+        for item in configured_settings.auth_principals
+    )
+    authenticator = ApiKeyAuthenticator(configured_settings.auth_api_key_sha256, directory)
     manager: JobManager | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal manager
-        settings = studio_settings or MechAgent.from_config(config_path).config.studio
-        manager = JobManager(JobStore(settings.database), settings)
+        settings = configured_settings
+        manager = JobManager(
+            JobStore(
+                settings.database,
+                artifact_store=create_artifact_store(
+                    settings.artifact_backend,
+                    root=settings.artifact_root or settings.database.parent / "objects",
+                    bucket=settings.artifact_s3_bucket,
+                    prefix=settings.artifact_s3_prefix,
+                ),
+                max_active_jobs_per_project=settings.max_active_jobs_per_project,
+                max_result_bytes=settings.max_result_bytes,
+            ),
+            settings,
+        )
         manager.start()
         try:
             yield
@@ -73,6 +124,26 @@ def create_studio_app(
     async def api_compatibility_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        if (
+            configured_settings.auth_required
+            and request.url.path.startswith("/api")
+            and request.url.path not in {"/api/health", "/api/docs", "/api/openapi.json"}
+        ):
+            authorization = request.headers.get("Authorization", "")
+            token = (
+                authorization[7:].strip() if authorization.lower().startswith("bearer ") else None
+            )
+            try:
+                request.state.principal = authenticator.authenticate(token, configured_principal)
+            except AuthenticationError as exc:
+                return Response(
+                    content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
+                    status_code=401,
+                    media_type="application/json",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        else:
+            request.state.principal = configured_principal
         response = await call_next(request)
         path = request.url.path
         if path.startswith("/api/v1/"):
@@ -88,11 +159,40 @@ def create_studio_app(
             raise HTTPException(503, "作业调度器未启动。")
         return manager
 
-    def read(job_id: str) -> dict[str, Any]:
+    def principal(request: Request) -> Principal:
+        return getattr(request.state, "principal", configured_principal)
+
+    def authorize(request: Request, action: str, project_id: str) -> Principal:
+        current = principal(request)
         try:
-            return runtime().store.get(job_id)
+            ensure_authorized(current, action, project_id)
+        except AuthorizationError as exc:
+            if manager is not None:
+                manager.store.audit(
+                    subject=current.subject,
+                    action=action,
+                    project_id=project_id,
+                    outcome="denied",
+                    details={"path": request.url.path},
+                )
+            raise HTTPException(403, str(exc)) from exc
+        if manager is not None:
+            manager.store.audit(
+                subject=current.subject,
+                action=action,
+                project_id=project_id,
+                outcome="allowed",
+                details={"path": request.url.path},
+            )
+        return current
+
+    def read(job_id: str, request: Request) -> dict[str, Any]:
+        try:
+            job = runtime().store.get(job_id)
         except KeyError as exc:
             raise HTTPException(404, "作业不存在。") from exc
+        authorize(request, "read", str(job["project_id"]))
+        return job
 
     def payload(job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
         try:
@@ -101,12 +201,13 @@ def create_studio_app(
             raise HTTPException(409, str(exc)) from exc
 
     def submit(
-        body: StudioRunRequest, key: str | None, parent: str | None = None
+        body: StudioRunRequest, request: Request, key: str | None, parent: str | None = None
     ) -> dict[str, Any]:
         request_text = body.request.strip()
         if not request_text:
             raise HTTPException(400, "请求不能为空。")
         dispatcher = runtime()
+        current = authorize(request, "submit", body.project_id)
         if dispatcher.error:
             raise HTTPException(503, dispatcher.error)
         try:
@@ -117,6 +218,8 @@ def create_studio_app(
                 max_queued=dispatcher.settings.max_queued,
                 idempotency_key=key,
                 parent_job_id=parent,
+                owner=current.subject,
+                project_id=body.project_id,
             )
         except IdempotencyError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -165,14 +268,15 @@ def create_studio_app(
     @app.post("/api/run")
     def run_simulation(
         body: StudioRunRequest,
+        request: Request,
         idempotency_key: str | None = Header(None, min_length=1, max_length=128),
     ) -> dict[str, Any]:
-        job = submit(body, idempotency_key)
+        job = submit(body, request, idempotency_key)
         while job["status"] not in TERMINAL:
             if runtime().error:
                 raise HTTPException(503, runtime().error)
             time.sleep(0.25)
-            job = read(job["job_id"])
+            job = read(job["job_id"], request)
         return payload(job)["result"] or {
             "success": False,
             "error": job["error"],
@@ -181,10 +285,11 @@ def create_studio_app(
         }
 
     @app.post("/api/inspect")
-    def inspect_simulation(body: StudioRunRequest) -> dict[str, Any]:
+    def inspect_simulation(body: StudioRunRequest, request: Request) -> dict[str, Any]:
         request_text = body.request.strip()
         if not request_text:
             raise HTTPException(400, "请求不能为空。")
+        authorize(request, "inspect", body.project_id)
         return (
             MechAgent.from_config(config_path)
             .inspect(
@@ -197,30 +302,68 @@ def create_studio_app(
     @app.post("/api/jobs", status_code=202)
     def create_job(
         body: StudioRunRequest,
+        request: Request,
         idempotency_key: str | None = Header(None, min_length=1, max_length=128),
     ) -> dict[str, Any]:
-        return payload(submit(body, idempotency_key))
+        return payload(submit(body, request, idempotency_key))
 
     @app.get("/api/jobs/{job_id}")
-    def read_job(job_id: str) -> dict[str, Any]:
-        return payload(read(job_id))
+    def read_job(job_id: str, request: Request) -> dict[str, Any]:
+        return payload(read(job_id, request))
 
     @app.get("/api/jobs")
     def list_jobs(
-        limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)
+        request: Request,
+        project_id: str = Query("default", min_length=1, max_length=128),
+        limit: int = Query(50, ge=1, le=100),
+        offset: int = Query(0, ge=0),
     ) -> dict[str, Any]:
+        current = authorize(request, "read", project_id)
+        owner = None if "admin" in current.roles else current.subject
         return {
             "jobs": [
                 payload(item, include_result=False)
-                for item in runtime().store.list_jobs(limit=limit, offset=offset)
+                for item in runtime().store.list_jobs(
+                    limit=limit,
+                    offset=offset,
+                    owner=owner,
+                    project_id=project_id,
+                )
             ]
         }
 
+    @app.get("/api/audit")
+    def audit_events(
+        request: Request,
+        project_id: str = Query("default", min_length=1, max_length=128),
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        current = authorize(request, "inspect", project_id)
+        if "admin" not in current.roles:
+            raise HTTPException(403, "只有 admin 可以读取审计事件。")
+        return {"events": runtime().store.list_audit_events(limit=limit, project_id=project_id)}
+
+    @app.get("/api/metrics")
+    def metrics(
+        request: Request,
+        project_id: str | None = Query(None, min_length=1, max_length=128),
+    ) -> dict[str, Any]:
+        """返回受项目权限约束的脱敏作业、结果、证据和 worker 资源指标。"""
+
+        current = principal(request)
+        if project_id is None:
+            authorize(request, "inspect", "*")
+            return {"metrics": runtime().store.metrics()}
+        authorize(request, "inspect", project_id)
+        owner = None if "admin" in current.roles else current.subject
+        return {"metrics": runtime().store.metrics(project_id=project_id, owner=owner)}
+
     @app.post("/api/jobs/{job_id}/cancel", status_code=202)
-    def cancel_job(job_id: str) -> dict[str, Any]:
-        read(job_id)
+    def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
+        job = read(job_id, request)
+        authorize(request, "cancel", str(job["project_id"]))
         runtime().store.cancel(job_id)
-        job = read(job_id)
+        job = read(job_id, request)
         if job["status"] == "cancelled":
             write_manifest(
                 runtime().store.directory(job_id),
@@ -231,22 +374,30 @@ def create_studio_app(
 
     @app.post("/api/jobs/{job_id}/retry", status_code=202)
     def retry_job(
-        job_id: str, idempotency_key: str | None = Header(None, min_length=1, max_length=128)
+        job_id: str,
+        request: Request,
+        idempotency_key: str | None = Header(None, min_length=1, max_length=128),
     ) -> dict[str, Any]:
-        job = read(job_id)
+        job = read(job_id, request)
+        authorize(request, "retry", str(job["project_id"]))
         if job["status"] not in TERMINAL:
             raise HTTPException(409, "只有终态作业可以重试。")
         return payload(
             submit(
-                StudioRunRequest(request=job["request"], use_llm_agents=job["use_llm_agents"]),
+                StudioRunRequest(
+                    request=job["request"],
+                    use_llm_agents=job["use_llm_agents"],
+                    project_id=job["project_id"],
+                ),
+                request,
                 idempotency_key,
                 job_id,
             )
         )
 
     @app.get("/api/jobs/{job_id}/evidence")
-    def job_evidence(job_id: str) -> dict[str, Any]:
-        job = read(job_id)
+    def job_evidence(job_id: str, request: Request) -> dict[str, Any]:
+        job = read(job_id, request)
         if job["status"] not in TERMINAL:
             raise HTTPException(409, "作业尚未结束。")
         path = runtime().store.directory(job_id) / "manifest.json"
@@ -261,21 +412,32 @@ def create_studio_app(
 
     # v1 是稳定客户端边界；旧 /api 路径保留兼容期并通过响应头声明迁移终点。
     _versioned_routes = (
-        ("/api/v1/health", health, ["GET"]),
-        ("/api/v1/diagnostics", diagnostics, ["GET"]),
-        ("/api/v1/capabilities", capabilities, ["GET"]),
-        ("/api/v1/examples", examples, ["GET"]),
-        ("/api/v1/run", run_simulation, ["POST"]),
-        ("/api/v1/inspect", inspect_simulation, ["POST"]),
-        ("/api/v1/jobs", create_job, ["POST"]),
-        ("/api/v1/jobs/{job_id}", read_job, ["GET"]),
-        ("/api/v1/jobs", list_jobs, ["GET"]),
-        ("/api/v1/jobs/{job_id}/cancel", cancel_job, ["POST"]),
-        ("/api/v1/jobs/{job_id}/retry", retry_job, ["POST"]),
-        ("/api/v1/jobs/{job_id}/evidence", job_evidence, ["GET"]),
+        ("/api/v1/health", health, ["GET"], None),
+        ("/api/v1/diagnostics", diagnostics, ["GET"], None),
+        ("/api/v1/capabilities", capabilities, ["GET"], None),
+        ("/api/v1/examples", examples, ["GET"], None),
+        ("/api/v1/run", run_simulation, ["POST"], None),
+        ("/api/v1/inspect", inspect_simulation, ["POST"], None),
+        ("/api/v1/jobs", create_job, ["POST"], 202),
+        ("/api/v1/jobs/{job_id}", read_job, ["GET"], None),
+        ("/api/v1/jobs", list_jobs, ["GET"], None),
+        ("/api/v1/audit", audit_events, ["GET"], None),
+        ("/api/v1/metrics", metrics, ["GET"], None),
+        ("/api/v1/jobs/{job_id}/cancel", cancel_job, ["POST"], 202),
+        ("/api/v1/jobs/{job_id}/retry", retry_job, ["POST"], 202),
+        ("/api/v1/jobs/{job_id}/evidence", job_evidence, ["GET"], None),
     )
-    for path, endpoint, methods in _versioned_routes:
-        app.add_api_route(path, endpoint, methods=methods, include_in_schema=True)
+    for path, endpoint, methods, status_code in _versioned_routes:
+        if status_code is None:
+            app.add_api_route(path, endpoint, methods=methods, include_in_schema=True)
+        else:
+            app.add_api_route(
+                path,
+                endpoint,
+                methods=methods,
+                include_in_schema=True,
+                status_code=status_code,
+            )
 
     @app.get("/{full_path:path}")
     def serve_studio(full_path: str) -> Response:

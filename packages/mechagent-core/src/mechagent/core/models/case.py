@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Literal
 
@@ -188,6 +189,7 @@ class RegionSpec(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     kind: Literal["named", "topology", "mesh_set", "coordinate", "unknown"] = "named"
     stable_id: str = Field(default="", max_length=256)
+    topology_ids: list[str] = Field(default_factory=list, max_length=4096)
     provenance: Provenance
 
 
@@ -219,14 +221,17 @@ class ResultFieldSpec(BaseModel):
     quantity: str = Field(min_length=1, max_length=64)
     location: Literal["node", "element", "integration_point", "global"]
     component: str | None = Field(default=None, max_length=32)
-    invariant: Literal[
-        "mises",
-        "max_principal",
-        "min_principal",
-        "tresca",
-        "magnitude",
-        "trace",
-    ] | None = None
+    invariant: (
+        Literal[
+            "mises",
+            "max_principal",
+            "min_principal",
+            "tresca",
+            "magnitude",
+            "trace",
+        ]
+        | None
+    ) = None
     unit: str = Field(default="", max_length=32)
     required: bool = True
 
@@ -401,11 +406,16 @@ class SimulationCase(BaseModel):
                 minimum_confidence,
             )
         for region_name in sorted(self.regions):
+            region = self.regions[region_name]
+            if region.kind == "unknown":
+                blockers.append(f"regions.{region_name} 未完成拓扑或语义映射")
+            elif region.kind == "topology" and (not region.stable_id or not region.topology_ids):
+                blockers.append(f"regions.{region_name} 缺少可执行拓扑 ID")
             _collect_confidence_blocker(
                 blockers,
                 confidences,
                 f"regions.{region_name}.provenance",
-                self.regions[region_name].provenance.confidence,
+                region.provenance.confidence,
                 minimum_confidence,
             )
         return ExecutionReadiness(
@@ -466,13 +476,11 @@ class SimulationCase(BaseModel):
         region_names.extend(item.region for item in model.bcs)
         for region in region_names:
             if region not in regions:
-                regions[region] = RegionSpec(
-                    name=region,
-                    provenance=Provenance(
-                        source=provenance_source,
-                        reference="ModelParams.region",
-                        confidence=provenance_confidence,
-                    ),
+                regions[region] = _region_spec_from_model_metadata(
+                    region,
+                    model,
+                    default_source=provenance_source,
+                    default_confidence=provenance_confidence,
                 )
         request = (
             RequestProvenance(
@@ -531,8 +539,7 @@ class SimulationCase(BaseModel):
         projection_blockers = self._legacy_projection_blockers()
         if projection_blockers:
             raise ValueError(
-                "当前 ModelParams 兼容转换器无法表达案例分析步："
-                + "；".join(projection_blockers)
+                "当前 ModelParams 兼容转换器无法表达案例分析步：" + "；".join(projection_blockers)
             )
 
         model = self.units.to_canonical_model(self.model)
@@ -559,6 +566,41 @@ class SimulationCase(BaseModel):
         metadata["load_steps"] = [step.model_dump(mode="json") for step in self.load_steps]
         metadata["result_fields"] = [field.model_dump(mode="json") for field in self.result_fields]
         return model.model_copy(update={"metadata": metadata})
+
+    def to_step_model_params(self, step_id: str) -> ModelParams:
+        """将一个分析步投影为求解器使用的单位和载荷模型。
+
+        该入口保留分析步的载荷比例和工况选择，供支持多步执行的适配器使用。
+        它不会把多步案例伪装成单步 `ModelParams`；调用方必须按分析步顺序提交
+        并保存每一步的运行结果。
+        """
+
+        step = next((item for item in self.load_steps if item.step_id == step_id), None)
+        if step is None:
+            raise KeyError(step_id)
+        if step.analysis != self.model.analysis.type:
+            raise ValueError("分析步类型与案例 ModelParams.analysis.type 不一致。")
+        if step.nlgeom != self.model.analysis.nlgeom:
+            raise ValueError("分析步几何非线性与案例 ModelParams.analysis.nlgeom 不一致。")
+        model = self.units.to_canonical_model(self.model)
+        loads = [
+            load.model_copy(update={"magnitude": load.magnitude * step.load_scale})
+            for load in model.loads
+        ]
+        metadata = dict(model.metadata)
+        metadata["case_schema_version"] = self.schema_version
+        metadata["load_step"] = step.model_dump(mode="json")
+        metadata["result_fields"] = [field.model_dump(mode="json") for field in self.result_fields]
+        return model.model_copy(
+            update={
+                "loads": loads,
+                "load_case": step.load_case or model.load_case,
+                "analysis": model.analysis.model_copy(
+                    update={"type": step.analysis, "nlgeom": step.nlgeom}
+                ),
+                "metadata": metadata,
+            }
+        )
 
     def _legacy_projection_blockers(self) -> list[str]:
         if len(self.load_steps) != 1:
@@ -593,6 +635,118 @@ def _collect_confidence_blocker(
     confidences.append(confidence)
     if confidence < minimum_confidence:
         blockers.append(f"{field_name}.confidence={confidence:.3f} 低于 {minimum_confidence:.3f}")
+
+
+def _region_spec_from_model_metadata(
+    region_name: str,
+    model: ModelParams,
+    *,
+    default_source: Literal["user", "parser", "llm", "default", "file", "import", "legacy"],
+    default_confidence: float | None,
+) -> RegionSpec:
+    """把 CAD 候选区域提升为可执行或明确不可执行的案例区域。"""
+
+    cad_geometry = model.metadata.get("cad_geometry")
+    if not isinstance(cad_geometry, dict):
+        return RegionSpec(
+            name=region_name,
+            provenance=Provenance(
+                source=default_source,
+                reference="ModelParams.region",
+                confidence=default_confidence,
+            ),
+        )
+
+    candidates = cad_geometry.get("region_candidates")
+    if not isinstance(candidates, list):
+        return _unresolved_region_spec(region_name, "cad_geometry.region_candidates 缺失")
+
+    alias = {
+        "root": "x_min",
+        "fixed_end": "x_min",
+        "left_end": "x_min",
+        "tip": "x_max",
+        "loaded_end": "x_max",
+        "right_end": "x_max",
+        "end_face": "x_max",
+        "free_end": "x_max",
+        "top_surface": "z_max",
+        "top": "z_max",
+        "bottom_surface": "z_min",
+        "bottom": "z_min",
+    }.get(region_name, region_name)
+    candidate = next(
+        (item for item in candidates if isinstance(item, dict) and item.get("name") == alias),
+        None,
+    )
+    if candidate is not None:
+        status = candidate.get("status")
+        topology_ids = candidate.get("topology_ids")
+        confidence = candidate.get("confidence")
+        if (
+            status == "mapped"
+            and isinstance(topology_ids, list)
+            and topology_ids
+            and all(isinstance(item, str) and item for item in topology_ids)
+            and isinstance(confidence, (int, float))
+            and math.isfinite(float(confidence))
+            and float(confidence) >= MIN_EXECUTION_CONFIDENCE
+        ):
+            stable_id = (
+                str(topology_ids[0]) if len(topology_ids) == 1 else _topology_set_id(topology_ids)
+            )
+            return RegionSpec(
+                name=region_name,
+                kind="topology",
+                stable_id=stable_id,
+                topology_ids=list(topology_ids),
+                provenance=Provenance(
+                    source="import",
+                    reference=f"cad.region_candidates.{alias}",
+                    confidence=float(confidence),
+                ),
+            )
+        return _unresolved_region_spec(
+            region_name, f"cad.region_candidates.{alias} 状态为 {status}"
+        )
+
+    if region_name == "all_edges":
+        topology_entities = cad_geometry.get("topology_entities")
+        edge_ids: list[str] = []
+        if isinstance(topology_entities, list):
+            for item in topology_entities:
+                if not isinstance(item, dict) or item.get("dimension") != 1:
+                    continue
+                edge_stable_id = item.get("stable_id")
+                if isinstance(edge_stable_id, str) and edge_stable_id:
+                    edge_ids.append(edge_stable_id)
+        if edge_ids:
+            return RegionSpec(
+                name=region_name,
+                kind="topology",
+                stable_id=_topology_set_id(edge_ids),
+                topology_ids=sorted(set(edge_ids)),
+                provenance=Provenance(
+                    source="import",
+                    reference="cad.topology_entities.dimension=1",
+                    confidence=1.0,
+                ),
+            )
+
+    return _unresolved_region_spec(region_name, "没有唯一且可执行的 CAD 拓扑映射")
+
+
+def _unresolved_region_spec(region_name: str, reason: str) -> RegionSpec:
+    return RegionSpec(
+        name=region_name,
+        kind="unknown",
+        provenance=Provenance(source="import", reference=reason, confidence=0.0),
+    )
+
+
+def _topology_set_id(topology_ids: list[str]) -> str:
+    payload = "\n".join(sorted(set(topology_ids))).encode("utf-8")
+    return "topology-set-" + hashlib.sha256(payload).hexdigest()[:32]
 
 
 def _default_result_field() -> ResultFieldSpec:

@@ -61,18 +61,22 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `POST /api/v1/jobs` | 创建请求作业，返回作业标识 |
 | `GET /api/v1/jobs/{job_id}` | 作业状态、事件与终态结果 |
 | `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果 |
+| `GET /api/v1/audit` | admin 读取当前项目主体操作审计事件，`limit` 为 1–1000 |
+| `GET /api/v1/metrics` | 受项目权限约束的脱敏作业、结果、证据和 worker 资源指标；admin 不带 `project_id` 时读取全局范围 |
 | `POST /api/v1/jobs/{job_id}/cancel` | 登记取消；终态请求保持终态 |
 | `POST /api/v1/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
 | `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
 | `POST /api/v1/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
 
+旧兼容入口包含同一路径的 `/api/metrics`，其响应头声明弃用周期。
+
 每个 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
-幂等语义与队列限制一致；认证、项目隔离和配额仍属于后续平台阶段，当前服务面向本机单用户。
+幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，项目范围决定可见作业；密钥只以 SHA-256 摘要写入配置。该实现是单主体本机访问控制，不提供组织目录、动态用户管理或分布式配额。
 兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、
 `GET /api/examples`、`POST /api/inspect`、`POST /api/jobs`、`GET /api/jobs/{job_id}`、
-`GET /api/jobs`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
+`GET /api/jobs`、`GET /api/audit`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
 `GET /api/jobs/{job_id}/evidence` 和 `POST /api/run`。
 
 `POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
 
-Studio 使用 SQLite WAL 本机持久队列，面向单机单用户，不提供多用户身份、权限管理、分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份、权限与网络边界设计。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。
+Studio 使用 SQLite WAL 本机持久队列，支持配置主体、角色和项目范围，不提供分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份目录、网络边界和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。

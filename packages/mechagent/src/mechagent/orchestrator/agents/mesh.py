@@ -90,7 +90,15 @@ class MeshAgent:
             ),
         )
         model_for_mesh, trace = _apply_llm_mesh_strategy(model_params, trace)
-        mesher_name = self._mesher_name(task)
+        mesher_name = self._mesher_name(model_for_mesh, task)
+        if mesher_name == "gmsh-cad-inp":
+            model_for_mesh = model_for_mesh.model_copy(
+                update={
+                    "mesh": model_for_mesh.mesh.model_copy(
+                        update={"element_type": ElementType.C3D4}
+                    )
+                }
+            )
         mesher = create_mesher(
             mesher_name,
             MeshConfig(
@@ -109,13 +117,27 @@ class MeshAgent:
             result = result.model_copy(
                 update={"metadata": {**result.metadata, "mesh_strategy_source": "llm"}}
             )
-        return MeshAgentOutput(mesh_result=result, mesh_llm_trace=trace)
+        return MeshAgentOutput(
+            mesh_result=result,
+            mesh_llm_trace=trace,
+            model_params=model_for_mesh,
+        )
 
-    def _mesher_name(self, task: TaskItem | None) -> str:
+    def _mesher_name(self, model_params: ModelParams, task: TaskItem | None) -> str:
         if task is not None and task.capability_id:
             capability = get_capability(task.capability_id)
             if capability.mesher_name:
                 return capability.mesher_name
+        cad_geometry = model_params.metadata.get("cad_geometry")
+        if (
+            self.config.mesher.default == "calculix-inp"
+            and model_params.metadata.get("geometry_source") == "cad"
+            and isinstance(cad_geometry, dict)
+            and isinstance(cad_geometry.get("source_path"), str)
+            and cad_geometry.get("source_path")
+            and model_params.geometry.type.value == "solid"
+        ):
+            return "gmsh-cad-inp"
         return self.config.mesher.default
 
 

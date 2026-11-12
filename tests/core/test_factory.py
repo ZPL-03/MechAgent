@@ -28,6 +28,13 @@ def test_create_calculix_solver() -> None:
     assert "calculix" in registered_solvers()
 
 
+def test_create_abaqus_solver() -> None:
+    solver = create_solver("abaqus", SolverConfig())
+
+    assert solver.__class__.__name__ == "AbaqusAdapter"
+    assert "abaqus" in registered_solvers()
+
+
 def test_create_solver_lookup_is_case_and_space_tolerant() -> None:
     solver = create_solver(" CALCULIX ", SolverConfig())
 

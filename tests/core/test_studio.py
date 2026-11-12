@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import sys
 from pathlib import Path
@@ -15,7 +16,7 @@ from pytest import CaptureFixture, MonkeyPatch
 from typer.testing import CliRunner
 
 from mechagent.cli import app
-from mechagent.config import StudioSettings
+from mechagent.config import AuthPrincipalSettings, StudioSettings
 from mechagent.ui.server import (
     _browser_url,
     _studio_entry_url,
@@ -40,6 +41,104 @@ def test_studio_health_endpoint_reports_config(tmp_path: Path) -> None:
     assert payload["config"] == str(config_path)
     assert payload["python_executable"] == sys.executable
     assert isinstance(payload["static_ready"], bool)
+
+
+def test_studio_authentication_and_project_isolation(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    token = "test-api-key"
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        auth_required=True,
+        auth_api_key_sha256=hashlib.sha256(token.encode()).hexdigest(),
+        auth_subject="alice",
+        auth_roles=["runner"],
+        auth_projects=["project-a"],
+    )
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        assert client.get("/api/capabilities").status_code == 401
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/capabilities", headers=headers).status_code == 200
+        denied = client.post(
+            "/api/jobs",
+            headers=headers,
+            json={"request": "unsupported", "project_id": "project-b"},
+        )
+        assert denied.status_code == 403
+        submitted = client.post(
+            "/api/jobs",
+            headers=headers,
+            json={"request": "unsupported", "project_id": "project-a"},
+        )
+        assert submitted.status_code == 202
+        jobs = client.get("/api/jobs?project_id=project-a", headers=headers)
+        assert jobs.status_code == 200
+        assert jobs.json()["jobs"][0]["project_id"] == "project-a"
+        assert client.get("/api/audit?project_id=project-a", headers=headers).status_code == 403
+
+    admin_settings = settings.model_copy(update={"auth_roles": ["admin"]})
+    with TestClient(create_studio_app(config_path, studio_settings=admin_settings)) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/audit?project_id=project-a", headers=headers).status_code == 200
+
+
+def test_studio_metrics_are_scoped_and_persistent_without_request_data(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    token = "metrics-api-key"
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        auth_required=True,
+        auth_api_key_sha256=digest,
+        auth_subject="alice",
+        auth_roles=["runner"],
+        auth_projects=["project-a"],
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        submitted = client.post(
+            "/api/v1/jobs",
+            headers=headers,
+            json={"request": "包含不应出现在指标中的请求文本", "project_id": "project-a"},
+        )
+        assert submitted.status_code == 202
+        scoped = client.get("/api/v1/metrics?project_id=project-a", headers=headers)
+        assert scoped.status_code == 200
+        metrics = scoped.json()["metrics"]
+        assert metrics["scope"] == {"project_id": "project-a", "owner": "alice"}
+        assert metrics["jobs"]["total"] >= 1
+        assert "包含不应出现在指标中的请求文本" not in scoped.text
+        assert client.get("/api/v1/metrics", headers=headers).status_code == 403
+
+    admin = settings.model_copy(update={"auth_roles": ["admin"], "auth_projects": ["default"]})
+    with TestClient(create_studio_app(config_path, studio_settings=admin)) as client:
+        all_metrics = client.get("/api/v1/metrics", headers=headers)
+        assert all_metrics.status_code == 200
+        assert all_metrics.json()["metrics"]["jobs"]["total"] >= 1
+
+
+def test_studio_principal_directory_selects_subject_and_scope(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    token = "directory-api-key"
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        auth_required=True,
+        auth_principals=[
+            AuthPrincipalSettings(
+                subject="bob",
+                api_key_sha256=hashlib.sha256(token.encode()).hexdigest(),
+                organization="engineering",
+                roles=["viewer"],
+                projects=["project-b"],
+            )
+        ],
+    )
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/jobs?project_id=project-b", headers=headers).status_code == 200
+        assert client.get("/api/jobs?project_id=project-a", headers=headers).status_code == 403
 
 
 def test_studio_v1_routes_are_stable_and_legacy_routes_are_deprecated(tmp_path: Path) -> None:

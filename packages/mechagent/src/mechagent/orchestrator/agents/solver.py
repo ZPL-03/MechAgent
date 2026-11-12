@@ -7,7 +7,7 @@ from pathlib import Path
 from mechagent.config import MechAgentConfig
 from mechagent.core.factory import create_solver
 from mechagent.core.mesher import MeshResult
-from mechagent.core.models import ModelParams
+from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.core.solver import SolverConfig
 from mechagent.orchestrator.capabilities import get_capability
 from mechagent.orchestrator.evaluation import ResultEvaluationContext
@@ -44,6 +44,7 @@ class SolverAgent:
         task: TaskItem,
         model_params: ModelParams,
         mesh_result: MeshResult | None = None,
+        simulation_case: SimulationCase | None = None,
     ) -> SolverRunSummary:
         """执行求解。
 
@@ -78,7 +79,11 @@ class SolverAgent:
             solver_name,
             self._solver_config(solver_name),
         )
-        result = solver.run(model_params)
+        if simulation_case is not None:
+            simulation_case = simulation_case.model_copy(update={"model": model_params})
+            result = solver.run_case(simulation_case)
+        else:
+            result = solver.run(model_params)
         trace = self.advisor.advise(
             "SolverAgent",
             "检查求解器选择、输入模型和求解结果一致性",
@@ -131,5 +136,13 @@ class SolverAgent:
                 work_dir=self.work_dir,
                 num_cpus=calculix.num_cpus,
                 timeout=calculix.timeout,
+            )
+        if solver_name.lower() == "abaqus":
+            abaqus = self.config.solver.abaqus
+            return SolverConfig(
+                solver_path=abaqus.path,
+                work_dir=self.work_dir,
+                num_cpus=abaqus.num_cpus,
+                timeout=abaqus.timeout,
             )
         return SolverConfig(work_dir=self.work_dir)

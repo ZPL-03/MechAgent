@@ -19,6 +19,37 @@ from mechagent.runtime.store import JobStore
 from mechagent.ui.visualization import visualizations_from_summary
 
 
+def _collect_process_resources() -> dict[str, float | int]:
+    """采集 worker 及当前可见子进程的累计 CPU 时间和峰值常驻内存。"""
+
+    process = psutil.Process()
+    try:
+        processes = [process, *process.children(recursive=True)]
+    except psutil.Error:
+        processes = [process]
+    cpu_user = 0.0
+    cpu_system = 0.0
+    peak_rss = 0
+    measured = False
+    for candidate in processes:
+        try:
+            times = candidate.cpu_times()
+            memory = candidate.memory_info()
+        except psutil.Error:
+            continue
+        cpu_user += max(0.0, float(times.user))
+        cpu_system += max(0.0, float(times.system))
+        peak_rss = max(peak_rss, int(memory.rss))
+        measured = True
+    if not measured:
+        return {}
+    return {
+        "cpu_user_seconds": cpu_user,
+        "cpu_system_seconds": cpu_system,
+        "peak_rss_bytes": peak_rss,
+    }
+
+
 def execute(store: JobStore, job_id: str, token: str) -> None:
     started = time.perf_counter()
     job = store.get(job_id)
@@ -81,7 +112,15 @@ def execute(store: JobStore, job_id: str, token: str) -> None:
     try:
         atomic_json(directory / "result.json", response)
         write_manifest(directory, status=status, details={"job_id": job_id, "error_code": code})
-        store.finish(job_id, token, status, error=error, error_code=code, result=response)
+        store.finish(
+            job_id,
+            token,
+            status,
+            error=error,
+            error_code=code,
+            result=response,
+            resources=_collect_process_resources(),
+        )
     finally:
         stop.set()
         thread.join(timeout=5)

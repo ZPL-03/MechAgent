@@ -47,6 +47,7 @@ npm --prefix apps/mechagent-studio run build
 | --- | --- | --- |
 | CalculiX | `D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe` | 已配置 |
 | Gmsh | Python 包 `gmsh` | 已安装 |
+| Abaqus/Standard | `D:/Abaqus2023/Commands/abaqus.bat` | 适配器已注册；需本机许可证 |
 
 `config/mechagent.yaml` 使用 `${CALCULIX_CCX:-ccx}`。本机 `.env` 提供
 `CALCULIX_CCX=D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe`，不依赖系统 PATH。
@@ -136,13 +137,13 @@ Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库
 
 ## Abaqus 本机检查
 
-安装 Abaqus/CAE 与 Standard 并具备可用许可后执行：
+安装 Abaqus/CAE 与 Standard 并具备可用许可后执行独立基准：
 
 ```powershell
 python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 ```
 
-启动器路径由 `--abaqus` 指定，不写入项目默认求解配置。检查使用 Abaqus 自带 Python 运行几何、网格、求解与 ODB 提取；外层脚本使用项目 Python。该检查不将 Abaqus 注册为 Studio、CLI run 或 SDK run 的生产后端，范围见[工具说明](solver_mesh.md)。
+启动器路径由 `--abaqus` 指定。检查使用 Abaqus 自带 Python 运行几何、网格、求解与 ODB 提取；外层脚本使用项目 Python。平台适配器通过 `solver.default: abaqus` 和 `solver.abaqus.path` 配置，真实多步运行需另行保存 ODB 场量和双后端差异证据，范围见[工具说明](solver_mesh.md)。
 
 ## Studio 运行配置
 
@@ -156,11 +157,16 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 | `startup_timeout` | 60 s | 至少 5 s，worker 身份登记期限 |
 | `heartbeat_timeout` | 30 s | 至少 5 s，worker 每秒发送心跳 |
 | `job_timeout` | 7200 s | 至少 10 s，从领取开始计时，包含初始化、求解和证据写入 |
+| `auth_required` | false | 是否要求 Bearer API key；健康检查仍可匿名读取 |
+| `auth_api_key_sha256` | 空 | 64 位小写 SHA-256；不保存明文密钥 |
+| `auth_subject` | `local` | 审计主体标识 |
+| `auth_roles` | `admin` | `admin`、`runner` 或 `viewer` |
+| `auth_projects` | `default` | 主体可访问的项目标识 |
 
 每个 worker 的求解器 CPU 配置仍由工具配置控制；并发数与每个求解器的核数共同决定资源占用。SDK/CLI 直接运行不受 Studio 并发限制。
 
 worker 使用当前 Python 环境重新导入内置能力和工具。父进程中临时调用注册函数的插件不会自动传播到独立 worker；此类插件可使用 SDK，Studio 插件发现与打包入口尚无发布契约。配置文件在提交后变化会阻止该任务执行，显式重试读取当前配置。运行目录、状态语义与备份要求见[架构](architecture.md)。
 
-SQLite 数据库由 `JobStore` 在启动时执行事务迁移。当前 schema 为 2，迁移记录保存在
+SQLite 数据库由 `JobStore` 在启动时执行事务迁移。当前 schema 为 5，迁移记录保存在
 `schema_migrations` 表；启动时发现高于当前版本的数据库会拒绝打开。备份数据库时须在
 服务停止且所有作业处于终态后复制数据库文件、WAL 文件和同目录 `jobs/` 产物。

@@ -11,7 +11,7 @@ import math
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -83,6 +83,21 @@ class CADGeometryFeature(BaseModel):
     location: Optional[tuple[float, float, float]] = None
 
 
+class CADTopologyEntity(BaseModel):
+    """可追踪的 CAD 拓扑实体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stable_id: str = Field(min_length=1, max_length=128)
+    dimension: Literal[1, 2, 3]
+    native_tag: int = Field(gt=0)
+    bbox_min: tuple[float, float, float]
+    bbox_max: tuple[float, float, float]
+    center: tuple[float, float, float]
+    measure: float = Field(ge=0)
+    children: list[str] = Field(default_factory=list)
+
+
 class CADGeometrySummary(BaseModel):
     """CAD 几何摘要。
 
@@ -122,6 +137,8 @@ class CADGeometrySummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_format: str
+    source_sha256: str = ""
+    topology_digest: str = ""
     units: str = "mm"
     bbox_min: tuple[float, float, float]
     bbox_max: tuple[float, float, float]
@@ -132,6 +149,8 @@ class CADGeometrySummary(BaseModel):
     edge_count: int = Field(ge=0)
     watertight: bool = True
     features: list[CADGeometryFeature] = Field(default_factory=list)
+    topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
+    region_candidates: list["RegionCandidate"] = Field(default_factory=list)
 
     @field_validator("volume", "surface_area")
     @classmethod
@@ -347,6 +366,12 @@ class RegionCandidate(BaseModel):
     side: str
     center: tuple[float, float, float]
     area: float = Field(ge=0)
+    topology_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    status: Literal["mapped", "ambiguous", "unresolved"] = "unresolved"
+
+
+CADGeometrySummary.model_rebuild()
 
 
 class GeometryCandidate(BaseModel):
@@ -392,6 +417,12 @@ class GeometryCandidate(BaseModel):
     bbox_min: tuple[float, float, float]
     bbox_max: tuple[float, float, float]
     region_candidates: list[RegionCandidate] = Field(default_factory=list)
+    source_format: str = ""
+    source_path: str = ""
+    source_sha256: str = ""
+    topology_digest: str = ""
+    watertight: bool | None = None
+    topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
 
 
@@ -425,7 +456,21 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
         (summary.bbox_min[2] + summary.bbox_max[2]) / 2,
     )
     axes = (("x", 0, dx), ("y", 1, dy), ("z", 2, dz))
-    regions: list[RegionCandidate] = []
+    regions: list[RegionCandidate] = list(summary.region_candidates)
+    if regions:
+        return GeometryCandidate(
+            geometry_type=_infer_geometry_type(dx, dy, dz),
+            dimensions={"length": dx, "width": dy, "height": dz},
+            bbox_min=summary.bbox_min,
+            bbox_max=summary.bbox_max,
+            region_candidates=regions,
+            source_format=summary.source_format,
+            source_sha256=summary.source_sha256,
+            topology_digest=summary.topology_digest,
+            watertight=summary.watertight,
+            topology_entities=summary.topology_entities,
+            missing_fields=["material", "loads", "bcs"],
+        )
     for axis, index, _extent in axes:
         face_area = 1.0
         for other_axis, _other_index, other_extent in axes:
@@ -450,6 +495,11 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
         bbox_min=summary.bbox_min,
         bbox_max=summary.bbox_max,
         region_candidates=regions,
+        source_format=summary.source_format,
+        source_sha256=summary.source_sha256,
+        topology_digest=summary.topology_digest,
+        watertight=summary.watertight,
+        topology_entities=summary.topology_entities,
         missing_fields=["material", "loads", "bcs"],
     )
 

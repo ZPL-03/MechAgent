@@ -18,8 +18,13 @@ from typer.testing import CliRunner
 
 from mechagent.app import MechAgent
 from mechagent.cli import app
-from mechagent.config import MechAgentConfig, StudioSettings, config_to_public_dict
-from mechagent.evidence import verify_manifest, write_manifest
+from mechagent.config import (
+    AuthPrincipalSettings,
+    MechAgentConfig,
+    StudioSettings,
+    config_to_public_dict,
+)
+from mechagent.evidence import artifact_records, verify_manifest, write_manifest
 from mechagent.runtime.manager import JobManager
 from mechagent.runtime.process import identified_process, stop_process
 from mechagent.runtime.store import IdempotencyError, JobStore, QueueFullError
@@ -35,6 +40,33 @@ def submit(store: JobStore, **kwargs: Any) -> dict[str, Any]:
     return store.submit(
         "不支持的仿真请求", False, store.database.parent / "config.yaml", max_queued=5, **kwargs
     )
+
+
+def test_studio_auth_required_rejects_missing_or_malformed_digest() -> None:
+    with pytest.raises(ValueError, match="auth_required=true"):
+        StudioSettings(auth_required=True)
+    with pytest.raises(ValueError, match="64 位 SHA-256"):
+        StudioSettings(auth_api_key_sha256="secret")
+
+
+def test_studio_auth_directory_and_s3_settings_require_explicit_scope() -> None:
+    settings = StudioSettings(
+        auth_required=True,
+        auth_principals=[
+            AuthPrincipalSettings(
+                subject="alice",
+                api_key_sha256="a" * 64,
+                organization="org-a",
+                roles=["runner"],
+                projects=["project-a"],
+            )
+        ],
+        artifact_backend="s3",
+        artifact_s3_bucket="results",
+    )
+    assert settings.auth_principals[0].organization == "org-a"
+    with pytest.raises(ValueError, match="artifact_s3_bucket"):
+        StudioSettings(artifact_backend="s3")
 
 
 def test_concurrent_idempotency_and_capacity(store: JobStore) -> None:
@@ -92,11 +124,38 @@ def test_event_retention_and_result_integrity(store: JobStore) -> None:
     )
     for index in range(260):
         store.event(job["job_id"], job["token"], {"index": index})
-    assert store.finish(job["job_id"], job["token"], "succeeded", result={"success": True})
+    assert store.finish(
+        job["job_id"],
+        job["token"],
+        "succeeded",
+        result={"success": True},
+        resources={"cpu_user_seconds": 1.25, "cpu_system_seconds": 0.5, "peak_rss_bytes": 4096},
+    )
     payload = store.payload(store.get(job["job_id"]))
     assert len(payload["events"]) == 256
     assert payload["events"][0]["index"] == 4
     assert payload["result"]["success"]
+    assert payload["result_bytes"] > 0
+    assert payload["resources"] == {
+        "cpu_user_seconds": 1.25,
+        "cpu_system_seconds": 0.5,
+        "peak_rss_bytes": 4096,
+    }
+    write_manifest(
+        store.directory(job["job_id"]), status="succeeded", details={"job_id": job["job_id"]}
+    )
+    metrics = store.metrics()
+    assert metrics["jobs"]["by_status"]["succeeded"] == 1
+    assert metrics["results"]["object_count"] == 1
+    assert metrics["results"]["bytes"] == payload["result_bytes"]
+    assert metrics["resources"] == {
+        "measurement_scope": "worker_process_and_available_descendants",
+        "measured_jobs": 1,
+        "cpu_user_seconds": 1.25,
+        "cpu_system_seconds": 0.5,
+        "peak_rss_bytes": 4096,
+    }
+    assert metrics["evidence"] == {"checked": 1, "valid": 1, "invalid": 0, "missing": 0}
     (store.directory(job["job_id"]) / "result.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="完整性"):
         store.payload(store.get(job["job_id"]))
@@ -143,7 +202,7 @@ def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) ->
 
     store = JobStore(database)
     with store.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
     migrated = store.get("legacy-job")
     assert migrated["config_hash"]
@@ -270,6 +329,31 @@ def test_manifest_detects_changes_missing_files_and_escape(tmp_path: Path) -> No
     manifest["artifacts"][0]["path"] = "../outside"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     assert verify_manifest(path) == ["invalid_path: ../outside"]
+
+
+def test_manifest_detects_unlisted_files(tmp_path: Path) -> None:
+    (tmp_path / "input.inp").write_text("*NODE", encoding="utf-8")
+    path = write_manifest(tmp_path, status="succeeded", details={})
+    (tmp_path / "unexpected.bin").write_bytes(b"unexpected")
+
+    assert verify_manifest(path) == ["unlisted: unexpected.bin"]
+
+
+def test_artifact_records_hashes_nested_files_and_excludes_manifest(tmp_path: Path) -> None:
+    nested = tmp_path / "nested" / "result.bin"
+    nested.parent.mkdir()
+    nested.write_bytes(b"result")
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+
+    records = artifact_records(tmp_path)
+
+    assert records == [
+        {
+            "path": "nested/result.bin",
+            "size": 6,
+            "sha256": "f6a214f7a5fcda0c2cee9660b7fc29f5649e3c68aad48e20e950137c98913a68",
+        }
+    ]
 
 
 def test_sdk_failure_manifest_and_config_do_not_expose_secrets(tmp_path: Path) -> None:

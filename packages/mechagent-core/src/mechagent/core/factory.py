@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from mechagent.core.adapters import CalculiXAdapter, CalculiXInpMesher, GmshCADKernel
+from mechagent.core.adapters import (
+    AbaqusAdapter,
+    CalculiXAdapter,
+    CalculiXInpMesher,
+    GmshCADInpMesher,
+    GmshCADKernel,
+)
 from mechagent.core.cad import AbstractCADKernel, CADConfig
 from mechagent.core.executor import AbstractJobExecutor, ExecutorConfig, LocalCommandExecutor
 from mechagent.core.mesher import AbstractMesher, MeshConfig
@@ -336,6 +342,8 @@ def _registration_name(name: str) -> str:
 
 
 register_solver("calculix", CalculiXAdapter)
+register_solver("abaqus", AbaqusAdapter)
 register_mesher("calculix-inp", CalculiXInpMesher)
+register_mesher("gmsh-cad-inp", GmshCADInpMesher)
 register_cad_kernel("gmsh-occ", GmshCADKernel)
 register_executor("local", LocalCommandExecutor)

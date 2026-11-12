@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from scripts import (
     check_wheel_install,
     generate_sbom,
     natural_language_cases,
+    run_abaqus_multistep,
+    run_backend_comparison,
     run_benchmarks,
     run_llm_smoke,
     run_natural_language_cases,
@@ -18,6 +21,118 @@ from scripts import (
 
 from mechagent.config import MechAgentConfig, OutputSettings
 from mechagent.core.validation import BenchmarkResult
+from mechagent.evidence import verify_manifest
+
+
+def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
+    result = {
+        "success": True,
+        "nodes": {"1": [0.0, 0.0, 0.0]},
+        "fields": {
+            "displacement": {"values": {"1": 1.0}},
+            "stress": {"values": {"1@ip1": 1.0}},
+            "strain": {"values": {"1@ip1": 1.0}},
+            "volume": {"values": {"1": 1.0}},
+            "energy": {"values": {"ALLIE": 1.0}},
+        },
+        "requested_fields": {
+            "displacement": {"values": {"1": 1.0}},
+            "stress_sxx": {"values": {"1@ip1": 1.0}},
+            "strain": {"values": {"1@ip1": 1.0}},
+            "volume": {"values": {"1": 1.0}},
+            "energy": {"values": {"ALLIE": 1.0}},
+        },
+        "step_results": [
+            {
+                "fields": {
+                    "displacement": {},
+                    "stress_sxx": {},
+                    "strain": {},
+                    "volume": {},
+                    "energy": {},
+                }
+            },
+            {
+                "fields": {
+                    "displacement": {},
+                    "stress_sxx": {},
+                    "strain": {},
+                    "volume": {},
+                    "energy": {},
+                }
+            },
+        ],
+        "field_history": [{}, {}, {}, {}],
+        "steps": [
+            {
+                "name": "step-1",
+                "frames": [{}, {}],
+                "fields": {
+                    "U": {"values": {"1": 1.0}},
+                    "S": {"values": {"1@ip1": 1.0}},
+                    "E": {"values": {"1@ip1": 1.0}},
+                    "EVOL": {"values": {"1": 1.0}},
+                    "ENER": {"values": {"ALLIE": 1.0}},
+                },
+                "history": {"ALLIE": []},
+            },
+            {
+                "name": "step-2",
+                "frames": [{}, {}],
+                "fields": {
+                    "U": {"values": {"1": 1.0}},
+                    "S": {"values": {"1@ip1": 1.0}},
+                    "E": {"values": {"1@ip1": 1.0}},
+                    "EVOL": {"values": {"1": 1.0}},
+                    "ENER": {"values": {"ALLIE": 1.0}},
+                },
+                "history": {"ALLIE": []},
+            },
+        ],
+        "output_files": ["case.com", "case.inp"],
+        "field_json": "case.fields.json",
+        "odb": "case.odb",
+    }
+
+    summary = run_abaqus_multistep._summary(result, "digest")
+
+    assert summary["status"] == "passed"
+    assert summary["input"] == "case.inp"
+    assert summary["requested_field_counts"] == {
+        "displacement": 1,
+        "stress_sxx": 1,
+        "strain": 1,
+        "volume": 1,
+        "energy": 1,
+    }
+
+
+def test_backend_comparison_script_writes_verifiable_manifest(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    def fake_run_case(*args: object, **_kwargs: object) -> dict[str, object]:
+        return {"case_id": str(args[0]), "status": "passed"}
+
+    monkeypatch.setattr(run_backend_comparison, "_run_case", fake_run_case)
+
+    assert (
+        run_backend_comparison.main(
+            [
+                "--case-id",
+                "TC-01",
+                "--calculix",
+                "ccx",
+                "--abaqus",
+                "abaqus",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    manifest = tmp_path / "manifest.json"
+    assert verify_manifest(manifest) == []
+    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "passed"
 
 
 def test_run_benchmarks_script_uses_configured_output_dir(
