@@ -67,7 +67,7 @@ schema v7 事务迁移。案例契约复用 `ModelParams`，补充单位、坐�
 - 固化便携 CI、Windows 真实求解、前端构建、包安装、文档构建、清理和证据校验门禁。
 - 生成 SBOM、许可证清单、构建元数据和可复核 SHA-256；发布 tag 与包版本必须一一对应。
 
-当前实现状态：案例 schema v1、API v1 入口、数据库 schema v7 迁移、作业主体/组织/项目隔离、持久主体目录、主体创建/停用/密钥轮换、Bearer API key 认证、项目级作业配额、内容寻址结果对象、可配置 S3 客户端、可校验 Studio 备份、恢复演练脚本、脱敏作业指标接口、worker 及可见子进程资源采集、CalculiX/Abaqus 线性静力多步执行、统一结果字段选择、CAD 拓扑摘要和坐标对应差异比较器已纳入代码与测试；SPDX 2.3 SBOM、构建 SHA-256 清单、基础构建 provenance、前端生产依赖漏洞审计和 Python 运行时外部依赖审计已纳入代码、测试与 CI 门禁；TC-01、TC-03、TC-04 的 Abaqus 真实适配器运行和位移场逐点比较证据已保存；Abaqus 双步运行的 ODB 多帧、节点坐标、积分点应力/应变、单元体积、应变能密度、节点反力、历史能量和逐步结果字段证据由 `scripts/run_abaqus_multistep.py` 生成并通过清单校验；本机实际 Studio 作业数据库的冷备份、恢复、完整性、作业 ID 保留和 RTO/RPO 演练证据位于 `mechagent_output/studio-recovery-evidence/manifest.json`，清单状态为 `passed`；集中身份提供商、跨主机对象存储权限与保留策略、外部 telemetry、跨主机磁盘配额采集、许可证人工审计、可信构建身份验证和已签名公开资产仍未达到完成条件。
+当前实现状态：案例 schema v1、API v1 入口、数据库 schema v7 迁移、作业主体/组织/项目隔离、持久主体目录、主体创建/停用/密钥轮换、Bearer API key 认证、项目级作业配额、内容寻址结果对象、可配置 S3 客户端、可校验 Studio 备份、恢复演练脚本、脱敏作业指标接口、worker 及可见子进程资源采集、CalculiX/Abaqus 线性静力多步执行、统一结果字段选择、CAD 拓扑摘要和坐标对应差异比较器已纳入代码与测试；仓库清理工具支持预览、活动作业/求解锁保护、Git 跟踪文件保护和常见缓存/一次性文件清理；SPDX 2.3 SBOM、构建 SHA-256 清单、基础构建 provenance、前端生产依赖漏洞审计和 Python 运行时外部依赖审计已纳入代码、测试与 CI 门禁；TC-01、TC-03、TC-04 的 Abaqus 真实适配器运行和位移场逐点比较证据已保存；Abaqus 双步运行的 ODB 多帧、节点坐标、积分点应力/应变、单元体积、应变能密度、节点反力、历史能量和逐步结果字段证据由 `scripts/run_abaqus_multistep.py` 生成并通过清单校验；本机实际 Studio 作业数据库的冷备份、恢复、完整性、作业 ID 保留和 RTO/RPO 演练证据位于 `mechagent_output/studio-recovery-evidence/manifest.json`，清单状态为 `passed`；集中身份提供商、跨主机对象存储权限与保留策略、外部 telemetry、跨主机磁盘配额采集、许可证人工审计、可信构建身份验证和已签名公开资产仍未达到完成条件。
 
 完成条件：干净环境可安装、可运行、可验证；文档、OpenAPI、配置、CLI 帮助和代码路由无漂移；没有高严重度未决缺陷。
 
