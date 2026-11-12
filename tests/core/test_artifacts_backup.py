@@ -193,6 +193,8 @@ def test_recovery_drill_records_rto_rpo_and_restores_jobs(tmp_path: Path) -> Non
         "rto_within_target": True,
     }
     assert Path(report["report"]).is_file()
+    assert not list((tmp_path / "drill").rglob("*.sqlite3-wal"))
+    assert not list((tmp_path / "drill").rglob("*.sqlite3-shm"))
 
 
 def test_recovery_drill_reports_failed_rto_without_hiding_evidence(tmp_path: Path) -> None:

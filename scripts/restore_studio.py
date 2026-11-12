@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from mechagent.runtime.backup import restore_studio, verify_backup
@@ -32,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.destination is None:
         parser.error("恢复模式必须提供 --destination。")
     database = restore_studio(args.backup, args.destination)
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
         jobs = int(connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
     if integrity != "ok":

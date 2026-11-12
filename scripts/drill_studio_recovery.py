@@ -6,6 +6,7 @@ import argparse
 import json
 import sqlite3
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ def _database_snapshot(database: Path) -> dict[str, Any]:
 
     if database.is_symlink() or not database.is_file():
         raise FileNotFoundError(database)
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
         if integrity != "ok":
             raise RuntimeError(f"数据库完整性检查失败: {integrity}")
