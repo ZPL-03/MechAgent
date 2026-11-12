@@ -201,6 +201,12 @@ def test_calculix_extracts_reaction_and_energy_fields(tmp_path: Path) -> None:
                 " -4  ENER        1    1",
                 _frd_disp_line(1, 2.5, 0.0, 0.0),
                 " -3",
+                " -4  TOSTRAIN    6    1",
+                _frd_disp_line(1, 1.0, 2.0, 3.0),
+                " -3",
+                " -4  VOLUME      1    1",
+                _frd_disp_line(1, 4.0, 0.0, 0.0),
+                " -3",
             ]
         ),
         encoding="utf-8",
@@ -213,6 +219,41 @@ def test_calculix_extracts_reaction_and_energy_fields(tmp_path: Path) -> None:
 
     assert extracted["fields"]["reaction_force"]["values"]["1"] == [0.0, 0.0, 12.5]
     assert extracted["fields"]["energy"]["values"]["1"] == 2.5
+    assert extracted["fields"]["strain_energy_density"]["values"]["1"] == 2.5
+    assert extracted["fields"]["strain"]["values"]["1"] == [1.0, 2.0, 3.0]
+    assert extracted["fields"]["volume"]["values"]["1"] == 4.0
+
+
+def test_calculix_reconstructs_hex_element_volume_when_frd_has_no_evol(tmp_path: Path) -> None:
+    input_file = tmp_path / "solid.inp"
+    input_file.write_text(
+        "\n".join(
+            [
+                "*NODE",
+                "1, 0, 0, 0",
+                "2, 1, 0, 0",
+                "3, 1, 1, 0",
+                "4, 0, 1, 0",
+                "5, 0, 0, 1",
+                "6, 1, 0, 1",
+                "7, 1, 1, 1",
+                "8, 0, 1, 1",
+                "*ELEMENT, TYPE=C3D8, ELSET=EALL",
+                "1, 1, 2, 3, 4, 5, 6, 7, 8",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    frd_file = tmp_path / "solid.frd"
+    frd_file.write_text("", encoding="utf-8")
+    adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
+
+    extracted = adapter.extract_results(
+        SolverResult(success=True, wall_time=0.0, output_files=[input_file, frd_file])
+    )
+
+    assert extracted["fields"]["volume"]["location"] == "element"
+    assert extracted["fields"]["volume"]["values"] == {"1": pytest.approx(1.0)}
 
 
 def test_abaqus_adapter_reports_unavailable_launcher(tmp_path: Path) -> None:

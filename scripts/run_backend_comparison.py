@@ -20,7 +20,11 @@ for source in (
 
 from mechagent.core.adapters.abaqus import AbaqusAdapter  # noqa: E402
 from mechagent.core.adapters.calculix import CalculiXAdapter  # noqa: E402
-from mechagent.core.compare import ComparisonTolerance, compare_backend_results  # noqa: E402
+from mechagent.core.compare import (  # noqa: E402
+    ComparisonTolerance,
+    compare_backend_results,
+    derive_comparison_fields,
+)
 from mechagent.core.models import ModelParams, SimulationCase  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.core.validation import (  # noqa: E402
@@ -150,13 +154,51 @@ def _run_case(
             "right_error": right.get("error") or right.get("error_message"),
         }
     else:
-        comparison = compare_backend_results(
+        requested_comparison = compare_backend_results(
             left,
             right,
             left_backend="calculix",
             right_backend="abaqus",
             tolerance=tolerance,
-        ).model_dump(mode="json")
+        )
+        raw_comparison = compare_backend_results(
+            left,
+            right,
+            left_backend="calculix",
+            right_backend="abaqus",
+            tolerance=tolerance,
+            field_source="fields",
+        )
+        left["comparison_fields"] = derive_comparison_fields(
+            left,
+            elastic_modulus=case.model.material.E,
+            poisson_ratio=case.model.material.nu,
+        )
+        right["comparison_fields"] = derive_comparison_fields(
+            right,
+            elastic_modulus=case.model.material.E,
+            poisson_ratio=case.model.material.nu,
+        )
+        (left_dir / "result.json").write_text(
+            json.dumps(left, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        (right_dir / "result.json").write_text(
+            json.dumps(right, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        semantic_comparison = compare_backend_results(
+            left,
+            right,
+            left_backend="calculix",
+            right_backend="abaqus",
+            tolerance=tolerance,
+            field_source="comparison_fields",
+        )
+        comparison = {
+            "status": _combined_status(requested_comparison.status, semantic_comparison.status),
+            "requested_fields": requested_comparison.model_dump(mode="json"),
+            "raw_fields": raw_comparison.model_dump(mode="json"),
+            "comparison_fields": semantic_comparison.model_dump(mode="json"),
+        }
     return {
         "case_id": case_id,
         "case_digest": case_digest,
@@ -166,6 +208,14 @@ def _run_case(
         "comparison": comparison,
         "status": comparison["status"],
     }
+
+
+def _combined_status(requested: str, raw: str) -> str:
+    if "failed" in {requested, raw}:
+        return "failed"
+    if "unverified" in {requested, raw}:
+        return "unverified"
+    return "passed"
 
 
 if __name__ == "__main__":

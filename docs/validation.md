@@ -28,7 +28,7 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYY
 ```powershell
 python -m mechagent.cli verify-evidence mechagent_output/benchmarks/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/abaqus-multistep-evidence/manifest.json
-python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-current/manifest.json
+python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-final/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-hole-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/studio-recovery-evidence/manifest.json
@@ -118,8 +118,10 @@ python scripts/build_release_manifest.py --output dist/mechagent-release-manifes
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key
 # GitHub OIDC keyless 模式
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
-# 两个后端结果均来自同一 SimulationCase 且请求字段一致时执行
+# 两个后端结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 comparison_fields 或 fields
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --output dist/backend-comparison.json
+# 比较统一语义字段
+python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --field-source comparison_fields --output dist/backend-comparison-semantic.json
 # 在本机真实运行同一案例并保存输入摘要、两个后端结果和比较清单
 python scripts/run_backend_comparison.py --case-id TC-01 --case-id TC-03 --case-id TC-04 --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --abaqus D:/Abaqus2023/Commands/abaqus.bat --relative 0.03 --absolute 0.005 --output-dir mechagent_output/backend-comparison
 # 在同一 SimulationCase 上验证 Abaqus 多步执行、完整场量和逐步结果字段
@@ -133,15 +135,15 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 591 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 595 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
 
 `scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单可作为发布前许可证审计输入，不替代许可证人工确认。
 
 `scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；它不提供签名、作者身份或可信构建服务证明。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
 
-`scripts/compare_backends.py` 比较两个结果中已经提取并声明的 `requested_fields`；优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合，无法对应时才使用字段摘要。对于位移幅值，梁类映射从原始位移向量按轴向位置平均重建中心线值，避免把截面转动造成的展开节点位移与中心线节点混比。输出对齐方式、缺失字段、绝对误差和相对误差。缺少可比较字段时状态为 `unverified`；字段或误差超出阈值时状态为 `failed`。该工具不证明两个输入模型、网格、边界和求解控制完全相同；`scripts/run_backend_comparison.py` 负责在同一 `SimulationCase` 上运行两个后端并保存案例摘要、结果和比较清单。
+`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一语义字段由应力本构、全场极值和支撑区域合力推导，比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一语义字段和比较清单。
 
-本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的位移场逐点比较均通过。清单分别记录 `line-coordinate-centerline`、`node-coordinate` 和 `line-coordinate-centerline` 对齐方式；阈值为相对误差 3% 或绝对误差 0.005 mm，最大绝对误差分别为 0.003084 mm、0.0002334 mm 和 0.001560 mm。TC-03 的最大相对误差出现在接近零的节点，仍由绝对误差阈值约束。该证据验证三个案例的位移字段适配器闭环，不代表应力、反力、能量、其他单元、其他网格或其他物理域均可跨后端比较。
+本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段和统一语义字段比较均通过。证据位于 `mechagent_output/backend-comparison-final/manifest.json`，位移使用 `line-coordinate-centerline`、`node-coordinate` 和 `line-coordinate-centerline` 对齐，阈值为相对误差 3% 或绝对误差 0.005 mm；统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力。原始场比较仍记录节点/积分点、截面展开和反力离散分布造成的 `unverified` 或 `failed`，因此该证据不证明逐节点应力、反力和能量场等价，也不扩大到其他单元、其他网格或其他物理域。
 
 适配器测试覆盖许可证探针非零返回、许可证槽位等待超时和配置校验；这些是注入执行器的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。
 

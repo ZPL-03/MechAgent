@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from mechagent.core.compare import ComparisonTolerance, compare_backend_results
+from mechagent.core.compare import (
+    ComparisonTolerance,
+    compare_backend_results,
+    derive_comparison_fields,
+)
 
 
 def test_backend_comparison_passes_within_tolerance() -> None:
@@ -151,3 +155,73 @@ def test_backend_comparison_reconstructs_beam_centerline_from_raw_vectors() -> N
     assert result.status == "passed"
     assert result.alignment == {"displacement": "line-coordinate-centerline"}
     assert result.differences == []
+
+
+def test_backend_comparison_marks_raw_fields_at_different_locations_unverified() -> None:
+    result = compare_backend_results(
+        {
+            "fields": {
+                "stress": {
+                    "location": "node",
+                    "values": {"1": [10.0, -2.0], "2": [4.0, 1.0]},
+                },
+                "energy": {"location": "element", "values": {"1": 12.0}},
+            }
+        },
+        {
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "values": {"10@ip1": [10.0001, -2.0], "11@ip1": [4.0, 1.0]},
+                },
+                "energy": {"location": "global", "values": {"ALLIE": 12.0001}},
+            }
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-3),
+        field_source="fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.field_source == "fields"
+    assert result.unverified_fields == ["energy", "stress"]
+    assert result.alignment == {"energy": "unverified", "stress": "unverified"}
+
+
+def test_derived_comparison_fields_use_common_physical_semantics() -> None:
+    left = {
+        "nodes": {"1": [0.0, 0.0, 0.0]},
+        "fields": {
+            "stress": {"values": {"1": [10.0, 0.0, 0.0, 0.0, 0.0, 0.0]}},
+            "reaction_force": {"values": {"1": [-100.0, 0.0, 0.0]}},
+        },
+    }
+    right = {
+        "nodes": {"10": [0.0, 0.0, 0.0]},
+        "fields": {
+            "stress": {"values": {"10@ip1": [10.0001, 0.0, 0.0, 0.0, 0.0, 0.0]}},
+            "reaction_force": {"values": {"10": [-100.0001, 0.0, 0.0]}},
+        },
+    }
+    left["comparison_fields"] = derive_comparison_fields(
+        left, elastic_modulus=210000.0, poisson_ratio=0.3
+    )
+    right["comparison_fields"] = derive_comparison_fields(
+        right, elastic_modulus=210000.0, poisson_ratio=0.3
+    )
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-3),
+        field_source="comparison_fields",
+    )
+
+    assert result.status == "passed"
+    assert set(result.alignment) == {
+        "reaction_resultant",
+        "strain_energy_density",
+        "stress_max_abs",
+    }

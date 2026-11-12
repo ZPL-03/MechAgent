@@ -26,8 +26,10 @@ class BackendComparison(BaseModel):
     status: Literal["passed", "failed", "unverified"]
     left_backend: str
     right_backend: str
+    field_source: Literal["requested_fields", "fields", "comparison_fields"] = "requested_fields"
     compared_fields: list[str] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
+    unverified_fields: list[str] = Field(default_factory=list)
     alignment: dict[str, str] = Field(default_factory=dict)
     max_absolute_error: float = Field(default=0.0, ge=0.0)
     max_relative_error: float = Field(default=0.0, ge=0.0)
@@ -42,22 +44,30 @@ def compare_backend_results(
     left_backend: str,
     right_backend: str,
     tolerance: ComparisonTolerance | None = None,
+    field_source: Literal["requested_fields", "fields", "comparison_fields"] = "requested_fields",
 ) -> BackendComparison:
-    """比较两个适配器的 ``requested_fields``，并保留缺失与误差明细。"""
+    """比较两个适配器的声明字段或原始场，并保留缺失与误差明细。
+
+    ``requested_fields`` 适合验证案例契约选择器；``fields`` 用于后端原始场的
+    交叉检查。原始场只有在位置、单位和离散映射可证明一致时才逐值比较；
+    其他场标记为 ``unverified``，统一物理语义应通过 ``comparison_fields`` 提供。
+    """
 
     selected_tolerance = tolerance or ComparisonTolerance()
-    left_fields = left.get("requested_fields")
-    right_fields = right.get("requested_fields")
+    left_fields = left.get(field_source)
+    right_fields = right.get(field_source)
     if not isinstance(left_fields, dict) or not isinstance(right_fields, dict):
         return BackendComparison(
             status="unverified",
             left_backend=left_backend,
             right_backend=right_backend,
+            field_source=field_source,
             tolerance=selected_tolerance,
-            differences=[{"reason": "requested_fields 缺失"}],
+            differences=[{"reason": f"{field_source} 缺失"}],
         )
     names = sorted(set(left_fields) | set(right_fields))
     missing: list[str] = []
+    unverified: list[str] = []
     compared: list[str] = []
     differences: list[dict[str, Any]] = []
     alignments: dict[str, str] = {}
@@ -74,9 +84,22 @@ def compare_backend_results(
         if not isinstance(left_values, dict) or not isinstance(right_values, dict):
             missing.append(name)
             continue
+        if field_source == "fields" and _raw_field_has_incompatible_semantics(
+            left_field, right_field
+        ):
+            unverified.append(name)
+            alignments[name] = "unverified"
+            continue
         labels = sorted(set(left_values) | set(right_values))
         coordinate_pairs = _coordinate_pairs(left, right, selected_tolerance.coordinate)
-        if coordinate_pairs and left_field.get("location") == right_field.get("location") == "node":
+        if (
+            coordinate_pairs
+            and left_field.get("location") == right_field.get("location") == "node"
+            and (
+                field_source != "fields"
+                or _pairs_cover_fields(coordinate_pairs, left_values, right_values)
+            )
+        ):
             aligned = _compare_aligned_values(
                 name,
                 left_values,
@@ -105,6 +128,7 @@ def compare_backend_results(
         if (
             line_aligned is not None
             and left_field.get("location") == right_field.get("location") == "node"
+            and field_source != "fields"
         ):
             line_values, line_alignment = line_aligned
             aligned = _compare_value_maps(name, line_values, selected_tolerance, line_alignment)
@@ -132,6 +156,11 @@ def compare_backend_results(
                 max_rel = max(max_rel, summary_result[3])
                 alignments[name] = "summary"
             continue
+        if field_source == "fields":
+            unverified.append(name)
+            alignments[name] = "unverified"
+            continue
+        direct_compared = False
         for label in labels:
             if label not in left_values or label not in right_values:
                 missing.append(f"{name}[{label}]")
@@ -142,6 +171,7 @@ def compare_backend_results(
                 missing.append(f"{name}[{label}]")
                 continue
             compared.append(f"{name}[{label}]")
+            direct_compared = True
             for index, (left_item, right_item) in enumerate(
                 zip(left_value, right_value, strict=True)
             ):
@@ -165,23 +195,179 @@ def compare_backend_results(
                             "relative_error": relative,
                         }
                     )
+        if direct_compared:
+            alignments[name] = "direct"
     status: Literal["passed", "failed", "unverified"] = "passed"
     if not compared:
         status = "unverified"
     elif missing or differences:
         status = "failed"
+    elif unverified:
+        status = "unverified"
     return BackendComparison(
         status=status,
         left_backend=left_backend,
         right_backend=right_backend,
+        field_source=field_source,
         compared_fields=compared,
         missing_fields=sorted(set(missing)),
+        unverified_fields=sorted(set(unverified)),
         alignment=alignments,
         max_absolute_error=max_abs,
         max_relative_error=max_rel,
         tolerance=selected_tolerance,
         differences=differences,
     )
+
+
+def _raw_field_has_incompatible_semantics(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """判断原始场是否缺少可证明的离散位置一致性。
+
+    原始场只在同一位置、同一单位时允许继续比较；节点场的坐标对应由上层
+    分支处理，并要求映射覆盖两侧场值。不同位置的场必须通过
+    ``comparison_fields`` 提供统一语义摘要，不能把标签或全场统计量强行配对。
+    """
+
+    left_location = str(left.get("location", ""))
+    right_location = str(right.get("location", ""))
+    if left_location != right_location:
+        return True
+    left_unit = str(left.get("unit", ""))
+    right_unit = str(right.get("unit", ""))
+    return left_unit != right_unit
+
+
+def _pairs_cover_fields(
+    pairs: dict[str, str], left_values: dict[str, Any], right_values: dict[str, Any]
+) -> bool:
+    """要求原始节点场的坐标映射覆盖两侧实际场值。"""
+
+    return set(left_values).issubset(pairs) and set(right_values).issubset(set(pairs.values()))
+
+
+def derive_comparison_fields(
+    result: dict[str, Any], *, elastic_modulus: float, poisson_ratio: float
+) -> dict[str, dict[str, Any]]:
+    """从两个后端均可得到的原始场生成统一语义比较字段。
+
+    返回的应力字段为全场绝对最大分量，能量字段按各向同性线弹性本构从
+    应力重建应变能密度摘要，反力字段为最大跨度方向根部区域的合力。每个
+    字段都保留来源和推导说明；缺少必要原始场时不生成字段，由比较器报告
+    ``unverified``。
+    """
+
+    if not math.isfinite(elastic_modulus) or elastic_modulus <= 0.0:
+        raise ValueError("elastic_modulus 必须是正的有限数。")
+    if not math.isfinite(poisson_ratio) or not -1.0 < poisson_ratio < 0.5:
+        raise ValueError("poisson_ratio 必须位于 (-1, 0.5)。")
+    fields = result.get("fields")
+    if not isinstance(fields, dict):
+        return {}
+    derived: dict[str, dict[str, Any]] = {}
+    stress = fields.get("stress")
+    stress_values = stress.get("values") if isinstance(stress, dict) else None
+    stress_vectors = _finite_vectors(stress_values)
+    if stress_vectors:
+        stress_numbers = [item for vector in stress_vectors.values() for item in vector]
+        derived["stress_max_abs"] = {
+            "location": "global",
+            "unit": "MPa",
+            "values": {"max_abs": max(abs(item) for item in stress_numbers)},
+            "summary": {"max_abs": max(abs(item) for item in stress_numbers)},
+            "source": "fields.stress",
+            "derivation": "全场应力分量绝对最大值",
+        }
+        energy_density = [_strain_energy_density(vector, elastic_modulus, poisson_ratio)
+                          for vector in stress_vectors.values()]
+        derived["strain_energy_density"] = {
+            "location": "global",
+            "unit": "N/mm^2",
+            "values": {
+                "max_abs": max(energy_density),
+                "mean": sum(energy_density) / len(energy_density),
+            },
+            "summary": {
+                "max_abs": max(energy_density),
+                "mean": sum(energy_density) / len(energy_density),
+            },
+            "source": "fields.stress",
+            "derivation": "各向同性线弹性本构的 0.5*sigma:epsilon",
+        }
+    reaction = fields.get("reaction_force")
+    reaction_values = reaction.get("values") if isinstance(reaction, dict) else None
+    nodes = _node_coordinates(result.get("nodes"))
+    reaction_vectors = _finite_vectors(reaction_values)
+    root = _root_resultant(reaction_vectors, nodes)
+    if root is not None:
+        derived["reaction_resultant"] = {
+            "location": "support_boundary",
+            "unit": "N",
+            "values": {"fx": root[0], "fy": root[1], "fz": root[2]},
+            "source": "fields.reaction_force + nodes",
+            "derivation": "最大跨度方向最小坐标边界区域反力合力",
+        }
+    return derived
+
+
+def _finite_vectors(values: Any) -> dict[str, tuple[float, ...]]:
+    if not isinstance(values, dict):
+        return {}
+    vectors: dict[str, tuple[float, ...]] = {}
+    for label, value in values.items():
+        if not isinstance(value, (list, tuple)):
+            continue
+        try:
+            vector = tuple(float(item) for item in value)
+        except (TypeError, ValueError):
+            continue
+        if vector and all(math.isfinite(item) for item in vector):
+            vectors[str(label)] = vector
+    return vectors
+
+
+def _strain_energy_density(
+    stress: tuple[float, ...], elastic_modulus: float, poisson_ratio: float
+) -> float:
+    if len(stress) < 3:
+        raise ValueError("应力场至少需要三个正应力分量。")
+    sxx, syy, szz = stress[:3]
+    shear = stress[3:6]
+    value = (
+        sxx * sxx
+        + syy * syy
+        + szz * szz
+        - 2.0 * poisson_ratio * (sxx * syy + syy * szz + szz * sxx)
+    ) / (2.0 * elastic_modulus)
+    if len(shear) == 3:
+        value += (1.0 + poisson_ratio) / elastic_modulus * sum(item * item for item in shear)
+    if value < -1.0e-12:
+        raise ValueError("重建的应变能密度不能为负。")
+    return max(0.0, value)
+
+
+def _root_resultant(
+    vectors: dict[str, tuple[float, ...]], nodes: dict[str, tuple[float, float, float]]
+) -> tuple[float, float, float] | None:
+    if not vectors or not nodes:
+        return None
+    common = set(vectors) & set(nodes)
+    if not common:
+        return None
+    spans = [
+        max(nodes[label][index] for label in common) - min(nodes[label][index] for label in common)
+        for index in range(3)
+    ]
+    axis = max(range(3), key=lambda index: spans[index])
+    minimum = min(nodes[label][axis] for label in common)
+    tolerance = max(1.0e-8, max(spans) * 1.0e-8)
+    labels = [label for label in common if abs(nodes[label][axis] - minimum) <= tolerance]
+    if not labels:
+        return None
+    sums = [
+        sum(vectors[label][index] for label in labels if len(vectors[label]) > index)
+        for index in range(3)
+    ]
+    return (sums[0], sums[1], sums[2])
 
 
 def _coordinate_pairs(

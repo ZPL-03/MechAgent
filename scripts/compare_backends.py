@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Literal, cast
 
 from mechagent.core.compare import ComparisonTolerance, compare_backend_results
 
@@ -17,6 +18,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--right-backend", required=True)
     parser.add_argument("--relative", type=float, default=1.0e-3)
     parser.add_argument("--absolute", type=float, default=1.0e-9)
+    parser.add_argument(
+        "--field-source",
+        choices=("requested_fields", "fields", "comparison_fields"),
+        default="requested_fields",
+        help="比较案例选择字段、后端原始场或统一语义字段。",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     left = json.loads(args.left.read_text(encoding="utf-8"))
@@ -27,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
         left_backend=args.left_backend,
         right_backend=args.right_backend,
         tolerance=ComparisonTolerance(relative=args.relative, absolute=args.absolute),
+        field_source=cast(
+            Literal["requested_fields", "fields", "comparison_fields"], args.field_source
+        ),
     )
     content = json.dumps(comparison.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n"
     if args.output:

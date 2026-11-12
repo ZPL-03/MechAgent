@@ -6,7 +6,7 @@ import re
 import shutil
 from collections.abc import Sequence
 from itertools import combinations
-from math import sqrt
+from math import isfinite, sqrt
 from pathlib import Path
 from typing import Any, Optional
 
@@ -229,6 +229,13 @@ class CalculiXAdapter(AbstractSolver):
         frd_file = _first_file_with_suffix(result.output_files, ".frd")
         node_coordinates = _result_node_coordinates(result.output_files)
         parsed = _parse_frd(frd_file, node_coordinates) if frd_file else {}
+        element_volumes = _result_element_volumes(result.output_files, node_coordinates)
+        if element_volumes:
+            parsed.setdefault("fields", {})["volume"] = {
+                "location": "element",
+                "unit": "mm^3",
+                "values": {str(label): value for label, value in element_volumes.items()},
+            }
         return {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
@@ -299,7 +306,7 @@ def _beam_static_inp(model_params: ModelParams, mesh_file: Path | None = None) -
         "*NODE FILE",
         "U, RF",
         "*EL FILE",
-        "S, ENER",
+        "S, E, EVOL, ENER",
         "*END STEP",
         "",
     ]
@@ -365,7 +372,7 @@ def _plate_static_inp(model_params: ModelParams, mesh_file: Path | None = None) 
 
     lines.extend(_plate_nodal_load_lines(nodes, elements, pressure_load))
 
-    lines.extend(["*NODE FILE", "U, RF", "*EL FILE", "S, ENER", "*END STEP", ""])
+    lines.extend(["*NODE FILE", "U, RF", "*EL FILE", "S, E, EVOL, ENER", "*END STEP", ""])
     return "\n".join(lines)
 
 
@@ -450,7 +457,7 @@ def _solid_static_inp(model_params: ModelParams, mesh_file: Path | None = None) 
         "*NODE FILE",
         "U, RF",
         "*EL FILE",
-        "S, ENER",
+        "S, E, EVOL, ENER",
         "*END STEP",
         "",
     ]
@@ -1087,6 +1094,80 @@ def _result_node_coordinates(paths: list[Path]) -> dict[int, tuple[float, float,
         return {}
 
 
+def _result_element_volumes(
+    paths: list[Path], nodes: dict[int, tuple[float, float, float]]
+) -> dict[int, float]:
+    """从输入网格重建实体单元体积，作为缺少 FRD EVOL 时的确定性字段。"""
+
+    input_file = _first_file_with_suffix(paths, ".inp")
+    if input_file is None or not nodes:
+        return {}
+    try:
+        lines = input_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    volumes: dict[int, float] = {}
+    for element_id, connectivity in _parse_solid_element_rows(lines):
+        try:
+            points = [nodes[node_id] for node_id in connectivity]
+        except KeyError:
+            continue
+        if len(points) == 4:
+            volume = _tetra_volume(points)
+        elif len(points) == 8:
+            volume = _hexa_volume(points)
+        else:
+            continue
+        if isfinite(volume) and volume > 0.0:
+            volumes[element_id] = volume
+    return volumes
+
+
+def _parse_solid_element_rows(
+    lines: list[str],
+) -> list[tuple[int, tuple[int, ...]]]:
+    rows: list[tuple[int, tuple[int, ...]]] = []
+    active = False
+    expected_nodes = 0
+    for raw in lines:
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("*ELEMENT"):
+            active = "C3D8" in upper or "C3D4" in upper
+            expected_nodes = 8 if "C3D8" in upper else 4 if "C3D4" in upper else 0
+            continue
+        if active and line.startswith("*"):
+            active = False
+            expected_nodes = 0
+            continue
+        if not active or not line:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if expected_nodes and len(parts) >= expected_nodes + 1:
+            rows.append((int(parts[0]), tuple(int(part) for part in parts[1 : expected_nodes + 1])))
+    return rows
+
+
+def _tetra_volume(points: list[tuple[float, float, float]]) -> float:
+    a, b, c, d = points
+    ab = tuple(b[index] - a[index] for index in range(3))
+    ac = tuple(c[index] - a[index] for index in range(3))
+    ad = tuple(d[index] - a[index] for index in range(3))
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    return abs(sum(cross[index] * ad[index] for index in range(3))) / 6.0
+
+
+def _hexa_volume(points: list[tuple[float, float, float]]) -> float:
+    tetrahedra = ((0, 1, 3, 4), (1, 2, 3, 6), (1, 3, 4, 6), (1, 4, 5, 6), (3, 4, 6, 7))
+    return sum(
+        _tetra_volume([points[index] for index in tetrahedron]) for tetrahedron in tetrahedra
+    )
+
+
 def _parse_frd(
     path: Path,
     node_coordinates: dict[int, tuple[float, float, float]] | None = None,
@@ -1097,22 +1178,32 @@ def _parse_frd(
         node_coordinates = frd_coordinates
     displacement_frames: list[dict[int, tuple[float, float, float]]] = []
     stress_frames: list[dict[int, tuple[float, float, float, float, float, float]]] = []
+    strain_frames: list[dict[int, tuple[float, ...]]] = []
+    volume_frames: list[dict[int, float]] = []
     reaction_frames: list[dict[int, tuple[float, float, float]]] = []
     energy_frames: list[dict[int, float]] = []
     displacements: dict[int, tuple[float, float, float]] = {}
     stresses: dict[int, tuple[float, float, float, float, float, float]] = {}
+    strains: dict[int, tuple[float, ...]] = {}
+    volumes: dict[int, float] = {}
     reactions: dict[int, tuple[float, float, float]] = {}
     energies: dict[int, float] = {}
     mode: str | None = None
 
     def flush() -> None:
-        nonlocal displacements, stresses, reactions, energies
+        nonlocal displacements, stresses, strains, volumes, reactions, energies
         if displacements:
             displacement_frames.append(displacements)
             displacements = {}
         if stresses:
             stress_frames.append(stresses)
             stresses = {}
+        if strains:
+            strain_frames.append(strains)
+            strains = {}
+        if volumes:
+            volume_frames.append(volumes)
+            volumes = {}
         if reactions:
             reaction_frames.append(reactions)
             reactions = {}
@@ -1128,6 +1219,14 @@ def _parse_frd(
         if line.startswith(" -4  STRESS"):
             flush()
             mode = "stress"
+            continue
+        if line.startswith(" -4  STRAIN") or line.startswith(" -4  TOSTRAIN"):
+            flush()
+            mode = "strain"
+            continue
+        if line.startswith(" -4  VOLUME"):
+            flush()
+            mode = "volume"
             continue
         if line.startswith(" -4  FORC"):
             flush()
@@ -1157,6 +1256,10 @@ def _parse_frd(
                 values[5],
                 values[6],
             )
+        if mode == "strain" and len(values) >= 4:
+            strains[node] = tuple(values[1:])
+        if mode == "volume" and len(values) >= 2:
+            volumes[node] = values[1]
         if mode == "reaction" and len(values) >= 4:
             reactions[node] = (values[1], values[2], values[3])
         if mode == "energy" and len(values) >= 2:
@@ -1166,6 +1269,10 @@ def _parse_frd(
         displacements = displacement_frames[-1]
     if stress_frames:
         stresses = stress_frames[-1]
+    if strain_frames:
+        strains = strain_frames[-1]
+    if volume_frames:
+        volumes = volume_frames[-1]
     if reaction_frames:
         reactions = reaction_frames[-1]
     if energy_frames:
@@ -1227,6 +1334,18 @@ def _parse_frd(
             "components": ["sxx", "syy", "szz", "sxy", "syz", "sxz"],
             "values": {str(node): list(values) for node, values in stresses.items()},
         }
+    if strains:
+        result.setdefault("fields", {})["strain"] = {
+            "location": "node",
+            "unit": "",
+            "values": {str(node): list(values) for node, values in strains.items()},
+        }
+    if volumes:
+        result.setdefault("fields", {})["volume"] = {
+            "location": "node",
+            "unit": "mm^3",
+            "values": {str(node): value for node, value in volumes.items()},
+        }
     if reactions:
         result.setdefault("fields", {})["reaction_force"] = {
             "location": "node",
@@ -1241,6 +1360,12 @@ def _parse_frd(
             "components": ["energy"],
             "values": {str(node): value for node, value in energies.items()},
         }
+        result.setdefault("fields", {})["strain_energy_density"] = {
+            "location": "node",
+            "unit": "N/mm^2",
+            "components": ["strain_energy_density"],
+            "values": {str(node): value for node, value in energies.items()},
+        }
     if node_coordinates:
         result["nodes"] = {
             str(node): list(point) for node, point in sorted(node_coordinates.items())
@@ -1250,6 +1375,8 @@ def _parse_frd(
         max(
             len(displacement_frames),
             len(stress_frames),
+            len(strain_frames),
+            len(volume_frames),
             len(reaction_frames),
             len(energy_frames),
         )
@@ -1273,6 +1400,22 @@ def _parse_frd(
                     str(node): list(values) for node, values in stress_frames[index].items()
                 },
             }
+        if index < len(strain_frames):
+            frame["strain"] = {
+                "location": "node",
+                "unit": "",
+                "values": {
+                    str(node): list(values) for node, values in strain_frames[index].items()
+                },
+            }
+        if index < len(volume_frames):
+            frame["volume"] = {
+                "location": "node",
+                "unit": "mm^3",
+                "values": {
+                    str(node): value for node, value in volume_frames[index].items()
+                },
+            }
         if index < len(reaction_frames):
             frame["reaction_force"] = {
                 "location": "node",
@@ -1287,6 +1430,11 @@ def _parse_frd(
                 "location": "element",
                 "unit": "N*mm",
                 "components": ["energy"],
+                "values": {str(node): value for node, value in energy_frames[index].items()},
+            }
+            frame["strain_energy_density"] = {
+                "location": "node",
+                "unit": "N/mm^2",
                 "values": {str(node): value for node, value in energy_frames[index].items()},
             }
         history.append(frame)
