@@ -277,8 +277,10 @@ def derive_comparison_fields(
             "source": "fields.stress",
             "derivation": "全场应力分量绝对最大值",
         }
-        energy_density = [_strain_energy_density(vector, elastic_modulus, poisson_ratio)
-                          for vector in stress_vectors.values()]
+        energy_density = [
+            _strain_energy_density(vector, elastic_modulus, poisson_ratio)
+            for vector in stress_vectors.values()
+        ]
         derived["strain_energy_density"] = {
             "location": "global",
             "unit": "N/mm^2",

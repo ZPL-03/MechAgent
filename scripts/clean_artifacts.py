@@ -1,4 +1,9 @@
-"""清理仓库内可再生成产物，保护跟踪文件与求解锁。"""
+"""清理仓库内可再生成产物，保护跟踪文件与求解锁。
+
+默认只处理能够由项目工具重新生成的缓存和构建产物。正式运行证据、FEM
+文件和 Studio 正式证据目录需要显式选择对应选项；``--dry-run`` 可在删除
+前列出精确目标。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="删除 mechagent_output/.studio 运行时数据库和作业目录",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只列出待删除路径，不修改文件系统",
+    )
     args = parser.parse_args(argv)
     tracked = _tracked_paths()
     patterns = [
@@ -40,6 +50,24 @@ def main(argv: list[str] | None = None) -> int:
         "coverage",
     ]
     targets = [path for pattern in patterns for path in _iter_repo_paths(pattern) if path.is_dir()]
+    file_patterns = [
+        ".coverage",
+        "coverage.xml",
+        ".eslintcache",
+        ".stylelintcache",
+        "*.tsbuildinfo",
+        "*.pyc",
+        "*.pyo",
+        ".DS_Store",
+        "Thumbs.db",
+        "npm-debug.log*",
+        "yarn-debug.log*",
+        "yarn-error.log*",
+        "pnpm-debug.log*",
+    ]
+    targets.extend(
+        path for pattern in file_patterns for path in _iter_repo_paths(pattern) if path.is_file()
+    )
     targets.extend(
         REPO_ROOT / name
         for name in (
@@ -95,21 +123,28 @@ def main(argv: list[str] | None = None) -> int:
     removable = []
     for path in targets:
         _ensure_inside_repo(path)
+        if not path.exists():
+            continue
         if any(item == path or path in item.parents for item in tracked):
             continue
         if path.is_dir() and next(path.rglob("*.lck"), None) is not None:
             raise RuntimeError(f"清理目标内存在求解锁: {path}")
         removable.append(path)
-    for path in sorted(set(removable), key=lambda item: len(item.parts), reverse=True):
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink(missing_ok=True)
-    for name in ("knowledge/raw", "knowledge/external", "knowledge", "output"):
-        path = REPO_ROOT / name
-        if path.is_dir() and not any(path.iterdir()) and path not in tracked:
-            _ensure_inside_repo(path)
-            path.rmdir()
+    ordered = sorted(set(removable), key=lambda item: len(item.parts), reverse=True)
+    if args.dry_run:
+        for path in ordered:
+            print(path)
+    else:
+        for path in ordered:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        for name in ("knowledge/raw", "knowledge/external", "knowledge", "output"):
+            path = REPO_ROOT / name
+            if path.is_dir() and not any(path.iterdir()) and path not in tracked:
+                _ensure_inside_repo(path)
+                path.rmdir()
     return 0
 
 

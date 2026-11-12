@@ -1412,9 +1412,7 @@ def _parse_frd(
             frame["volume"] = {
                 "location": "node",
                 "unit": "mm^3",
-                "values": {
-                    str(node): value for node, value in volume_frames[index].items()
-                },
+                "values": {str(node): value for node, value in volume_frames[index].items()},
             }
         if index < len(reaction_frames):
             frame["reaction_force"] = {

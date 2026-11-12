@@ -121,6 +121,28 @@ def test_default_cleanup_preserves_runs(tmp_path: Path, monkeypatch: MonkeyPatch
     assert (output / "evidence.dat").exists()
 
 
+def test_cleanup_removes_common_cache_files_and_dry_run_is_non_destructive(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
+    cache_file = tmp_path / ".eslintcache"
+    cache_file.write_text("cache", encoding="utf-8")
+    pyc_file = tmp_path / "module.pyc"
+    pyc_file.write_bytes(b"cache")
+
+    assert clean_artifacts.main(["--dry-run"]) == 0
+    assert cache_file.exists()
+    assert pyc_file.exists()
+    output = capsys.readouterr().out
+    assert str(cache_file) in output
+    assert str(pyc_file) in output
+    assert str(tmp_path / "site") not in output
+
+    assert clean_artifacts.main([]) == 0
+    assert not cache_file.exists()
+    assert not pyc_file.exists()
+
+
 def test_explicit_studio_runtime_cleanup_preserves_formal_evidence(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
