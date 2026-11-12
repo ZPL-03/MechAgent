@@ -22,7 +22,9 @@ class Principal:
     project_ids: frozenset[str]
     organization: str = "local"
 
-    def can(self, action: str, project_id: str) -> bool:
+    def can(self, action: str, project_id: str, organization: str | None = None) -> bool:
+        if organization is not None and self.organization not in {"*", organization}:
+            return False
         if "admin" in self.roles:
             return True
         if project_id not in self.project_ids:
@@ -66,6 +68,34 @@ class ApiKeyAuthenticator:
         raise AuthenticationError("API key 无效。")
 
 
-def ensure_authorized(principal: Principal, action: str, project_id: str) -> None:
-    if not principal.can(action, project_id):
+def ensure_authorized(
+    principal: Principal, action: str, project_id: str, organization: str | None = None
+) -> None:
+    if not principal.can(action, project_id, organization):
         raise AuthorizationError("主体没有该项目的操作权限。")
+
+
+def normalize_identity_fields(
+    *,
+    subject: str,
+    organization: str,
+    roles: list[str] | tuple[str, ...],
+    projects: list[str] | tuple[str, ...],
+) -> tuple[str, str, frozenset[str], frozenset[str]]:
+    """Normalize the persisted identity fields and reject ambiguous scopes."""
+
+    normalized_subject = subject.strip()
+    normalized_organization = organization.strip()
+    normalized_roles = frozenset(item.strip().lower() for item in roles if item.strip())
+    normalized_projects = frozenset(item.strip() for item in projects if item.strip())
+    if not normalized_subject or len(normalized_subject) > 128:
+        raise ValueError("主体标识必须为 1 到 128 个字符。")
+    if not normalized_organization or len(normalized_organization) > 128:
+        raise ValueError("组织标识必须为 1 到 128 个字符。")
+    if not normalized_roles or not normalized_roles.issubset({"admin", "runner", "viewer"}):
+        raise ValueError("roles 只能包含 admin、runner 或 viewer。")
+    if normalized_organization == "*" and "admin" not in normalized_roles:
+        raise ValueError("只有 admin 主体可以使用跨组织范围。")
+    if not normalized_projects or any(len(item) > 128 for item in normalized_projects):
+        raise ValueError("projects 必须包含长度不超过 128 的非空项目标识。")
+    return normalized_subject, normalized_organization, normalized_roles, normalized_projects

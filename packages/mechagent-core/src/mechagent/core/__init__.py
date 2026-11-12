@@ -13,6 +13,11 @@ from mechagent.core.cad import (
     geometry_candidate_from_summary,
 )
 from mechagent.core.compare import BackendComparison, ComparisonTolerance, compare_backend_results
+from mechagent.core.convergence import (
+    ConvergencePoint,
+    MeshConvergenceReport,
+    evaluate_mesh_convergence,
+)
 from mechagent.core.exceptions import (
     CADError,
     ExecutorError,
@@ -72,6 +77,9 @@ __all__ = [
     "CADGeometrySummary",
     "CADImportResult",
     "CADTopologyEntity",
+    "ConvergencePoint",
+    "MeshConvergenceReport",
+    "evaluate_mesh_convergence",
     "ExecutorConfig",
     "GeometryCandidate",
     "RegionCandidate",

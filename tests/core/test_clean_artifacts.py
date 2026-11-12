@@ -49,6 +49,11 @@ def test_clean_artifacts_uses_repository_root(
         "x",
         encoding="utf-8",
     )
+    (repo / ".cache").mkdir()
+    (repo / ".cache" / "tool.bin").write_bytes(b"x")
+    (repo / ".coverage").write_text("x", encoding="utf-8")
+    (repo / "apps" / "mechagent-studio" / ".vite").mkdir(parents=True)
+    (repo / "apps" / "mechagent-studio" / ".vite" / "cache").write_text("x", encoding="utf-8")
     (repo / "knowledge" / "sources").mkdir(parents=True)
     (repo / "knowledge" / "sources" / "seed.md").write_text("x", encoding="utf-8")
     (repo / "knowledge" / "external").mkdir()
@@ -69,6 +74,9 @@ def test_clean_artifacts_uses_repository_root(
     assert not (repo / "output").exists()
     assert not (repo / "mechagent_output").exists()
     assert not (repo / "apps" / "mechagent-studio" / "node_modules").exists()
+    assert not (repo / ".cache").exists()
+    assert not (repo / ".coverage").exists()
+    assert not (repo / "apps" / "mechagent-studio" / ".vite").exists()
     assert not (repo / "knowledge" / "external").exists()
     assert not (repo / "knowledge" / "index.jsonl").exists()
     assert (repo / "knowledge" / "sources" / "seed.md").exists()

@@ -408,6 +408,7 @@ class StudioSettings(BaseModel):
     auth_required: bool = False
     auth_api_key_sha256: str = ""
     auth_subject: str = Field(default="local", min_length=1, max_length=128)
+    auth_organization: str = Field(default="local", min_length=1, max_length=128)
     auth_roles: list[str] = Field(default_factory=lambda: ["admin"])
     auth_projects: list[str] = Field(default_factory=lambda: ["default"])
     auth_principals: list[AuthPrincipalSettings] = Field(default_factory=list)
@@ -533,6 +534,15 @@ def config_to_public_dict(config: MechAgentConfig) -> dict[str, Any]:
             )
         except ValueError:
             llm["base_url"] = "[invalid URL]"
+    studio = data.get("studio")
+    if isinstance(studio, dict):
+        if studio.get("auth_api_key_sha256"):
+            studio["auth_api_key_sha256"] = "***"
+        principals = studio.get("auth_principals")
+        if isinstance(principals, list):
+            for item in principals:
+                if isinstance(item, dict) and item.get("api_key_sha256"):
+                    item["api_key_sha256"] = "***"
     return dict(public_value(data, (config.llm.api_key,)))
 
 

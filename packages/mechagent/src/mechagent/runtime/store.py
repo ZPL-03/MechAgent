@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
+import secrets
+import shutil
 import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from mechagent.evidence import atomic_json, sha256, verify_manifest
 from mechagent.runtime.artifacts import ArtifactStore
+from mechagent.runtime.auth import Principal, normalize_identity_fields
 
 ACTIVE = ("starting", "running", "cancelling")
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
-DATABASE_SCHEMA_VERSION = 5
+DATABASE_SCHEMA_VERSION = 7
 DEFAULT_MAX_RESULT_BYTES = 100 * 1024 * 1024
 
 
@@ -91,7 +96,8 @@ class JobStore:
         """在一个事务中完成可重复执行的向前迁移。
 
         v1 是早期队列表结构；v2 增加迁移记录并确保提交时保存配置哈希；v3
-        为作业增加主体和项目归属，v4 保存结果字节数，v5 保存 worker 资源用量。
+        为作业增加主体和项目归属，v4 保存结果字节数，v5 保存 worker 资源用量，v6
+        增加主体目录，v7 为作业和审计记录增加组织归属。
         旧作业归入 local/default。
         迁移只做可回滚的加法操作。缺少配置文件的历史作业保留空哈希，worker
         会拒绝执行并要求显式重新提交，避免把未经确认的旧输入静默求解。
@@ -123,7 +129,8 @@ class JobStore:
                     result_bytes INTEGER,
                     cpu_user_seconds REAL, cpu_system_seconds REAL, peak_rss_bytes INTEGER,
                     config_hash TEXT NOT NULL, owner TEXT NOT NULL DEFAULT 'local',
-                    project_id TEXT NOT NULL DEFAULT 'default'
+                    project_id TEXT NOT NULL DEFAULT 'default',
+                    organization TEXT NOT NULL DEFAULT 'local'
                 )
                 """
             )
@@ -170,6 +177,10 @@ class JobStore:
                 connection.execute("ALTER TABLE jobs ADD COLUMN cpu_system_seconds REAL")
             if "peak_rss_bytes" not in columns:
                 connection.execute("ALTER TABLE jobs ADD COLUMN peak_rss_bytes INTEGER")
+            if "organization" not in columns:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN organization TEXT NOT NULL DEFAULT 'local'"
+                )
         connection.execute("CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS events_job ON events(job_id, sequence)")
         connection.execute(
@@ -187,6 +198,27 @@ class JobStore:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS audit_project ON audit_events(project_id, created_at)"
         )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS identities (
+                subject TEXT PRIMARY KEY,
+                organization TEXT NOT NULL,
+                roles TEXT NOT NULL,
+                projects TEXT NOT NULL,
+                api_key_sha256 TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                expires_at REAL
+            )"""
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS identities_org ON identities(organization)")
+        audit_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(audit_events)").fetchall()
+        }
+        if "organization" not in audit_columns:
+            connection.execute(
+                "ALTER TABLE audit_events ADD COLUMN organization TEXT NOT NULL DEFAULT 'local'"
+            )
         known = {
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
@@ -211,6 +243,14 @@ class JobStore:
         if 5 not in known:
             connection.execute(
                 "INSERT INTO schema_migrations(version,applied_at) VALUES(5,?)", (now,)
+            )
+        if 6 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(6,?)", (now,)
+            )
+        if 7 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(7,?)", (now,)
             )
         connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
 
@@ -251,7 +291,10 @@ class JobStore:
         parent_job_id: str | None = None,
         owner: str = "local",
         project_id: str = "default",
+        organization: str = "local",
     ) -> dict[str, Any]:
+        if not organization.strip() or len(organization.strip()) > 128:
+            raise ValueError("组织标识必须为 1 到 128 个字符。")
         with self.transaction() as connection:
             if idempotency_key is not None:
                 existing = connection.execute(
@@ -265,6 +308,7 @@ class JobStore:
                         existing["config_path"],
                         existing["owner"],
                         existing["project_id"],
+                        existing["organization"],
                     ) != (
                         request,
                         use_llm_agents,
@@ -272,6 +316,7 @@ class JobStore:
                         str(config_path.resolve()),
                         owner,
                         project_id,
+                        organization,
                     ):
                         raise IdempotencyError("幂等键已用于不同请求。")
                     return dict(existing)
@@ -283,16 +328,16 @@ class JobStore:
             if self.max_active_jobs_per_project is not None:
                 project_count = connection.execute(
                     "SELECT COUNT(*) FROM jobs WHERE project_id=? AND status IN "
-                    "('queued','starting','running','cancelling')",
-                    (project_id,),
+                    "('queued','starting','running','cancelling') AND organization=?",
+                    (project_id, organization),
                 ).fetchone()[0]
                 if project_count >= self.max_active_jobs_per_project:
                     raise QueueFullError("项目作业配额已满。")
             job_id = uuid4().hex
             connection.execute(
                 """INSERT INTO jobs (job_id,request,use_llm_agents,config_path,cwd,status,
-                    created_at,idempotency_key,parent_job_id,config_hash,owner,project_id)
-                    VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?)""",
+                    created_at,idempotency_key,parent_job_id,config_hash,owner,project_id,organization)
+                    VALUES (?,?,?,?,?,'queued',?,?,?,?,?,?,?)""",
                 (
                     job_id,
                     request,
@@ -305,6 +350,7 @@ class JobStore:
                     sha256(config_path),
                     owner,
                     project_id,
+                    organization,
                 ),
             )
         return self.get(job_id)
@@ -323,6 +369,7 @@ class JobStore:
         offset: int = 0,
         owner: str | None = None,
         project_id: str | None = None,
+        organization: str | None = None,
     ) -> list[dict[str, Any]]:
         with self.connect() as connection:
             clauses: list[str] = []
@@ -333,6 +380,9 @@ class JobStore:
             if project_id is not None:
                 clauses.append("project_id=?")
                 values.append(project_id)
+            if organization is not None:
+                clauses.append("organization=?")
+                values.append(organization)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             return [
                 dict(row)
@@ -343,6 +393,188 @@ class JobStore:
                     (*values, limit, offset),
                 )
             ]
+
+    def authenticate_identity(self, token: str | None) -> Principal:
+        """Authenticate a managed identity without storing or returning its token."""
+
+        if token is None or not token.strip():
+            raise ValueError("需要有效的 Bearer API key。")
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = time.time()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM identities WHERE active=1 AND api_key_sha256=? "
+                "AND (expires_at IS NULL OR expires_at>?)",
+                (digest, now),
+            ).fetchone()
+        if row is None or not hmac.compare_digest(str(row["api_key_sha256"]), digest):
+            raise ValueError("API key 无效。")
+        return Principal(
+            subject=str(row["subject"]),
+            organization=str(row["organization"]),
+            roles=frozenset(json.loads(str(row["roles"]))),
+            project_ids=frozenset(json.loads(str(row["projects"]))),
+        )
+
+    def list_identities(self, *, organization: str | None = None) -> list[dict[str, Any]]:
+        """List managed identities without exposing API key digests."""
+
+        with self.connect() as connection:
+            if organization is None:
+                rows = connection.execute(
+                    "SELECT * FROM identities ORDER BY organization,subject"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM identities WHERE organization=? ORDER BY subject",
+                    (organization,),
+                ).fetchall()
+        return [self._identity_public(row) for row in rows]
+
+    def get_identity(self, subject: str) -> dict[str, Any]:
+        return self._identity_public(self._identity_row(subject))
+
+    def create_identity(
+        self,
+        *,
+        subject: str,
+        organization: str,
+        roles: list[str] | tuple[str, ...],
+        projects: list[str] | tuple[str, ...],
+        expires_at: float | None = None,
+        api_key: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        normalized_subject, normalized_org, normalized_roles, normalized_projects = (
+            normalize_identity_fields(
+                subject=subject, organization=organization, roles=roles, projects=projects
+            )
+        )
+        secret = api_key.strip() if api_key is not None else "mech_" + secrets.token_urlsafe(32)
+        if len(secret) < 16 or any(char.isspace() for char in secret):
+            raise ValueError("API key 必须至少包含 16 个非空白字符。")
+        digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        now = time.time()
+        with self.transaction() as connection:
+            try:
+                connection.execute(
+                    """INSERT INTO identities
+                    (subject,organization,roles,projects,api_key_sha256,active,created_at,updated_at,expires_at)
+                    VALUES (?,?,?,?,?,1,?,?,?)""",
+                    (
+                        normalized_subject,
+                        normalized_org,
+                        json.dumps(sorted(normalized_roles)),
+                        json.dumps(sorted(normalized_projects)),
+                        digest,
+                        now,
+                        now,
+                        expires_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("主体标识或 API key 已存在。") from exc
+            row = connection.execute(
+                "SELECT * FROM identities WHERE subject=?", (normalized_subject,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("主体创建后无法读取。")
+        return self._identity_public(row), secret
+
+    def update_identity(
+        self,
+        subject: str,
+        *,
+        organization: str,
+        roles: list[str] | tuple[str, ...] | None = None,
+        projects: list[str] | tuple[str, ...] | None = None,
+        active: bool | None = None,
+        expires_at: float | None = None,
+    ) -> dict[str, Any]:
+        current = self._identity_row(subject)
+        next_roles = roles if roles is not None else tuple(json.loads(str(current["roles"])))
+        next_projects = (
+            projects if projects is not None else tuple(json.loads(str(current["projects"])))
+        )
+        _, normalized_org, normalized_roles, normalized_projects = normalize_identity_fields(
+            subject=subject,
+            organization=organization,
+            roles=next_roles,
+            projects=next_projects,
+        )
+        next_active = int(bool(current["active"])) if active is None else int(active)
+        with self.transaction() as connection:
+            connection.execute(
+                """UPDATE identities SET organization=?,roles=?,projects=?,active=?,
+                updated_at=?,expires_at=? WHERE subject=?""",
+                (
+                    normalized_org,
+                    json.dumps(sorted(normalized_roles)),
+                    json.dumps(sorted(normalized_projects)),
+                    next_active,
+                    time.time(),
+                    expires_at,
+                    subject,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM identities WHERE subject=?", (subject,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("主体更新后无法读取。")
+        return self._identity_public(row)
+
+    def rotate_identity(self, subject: str) -> tuple[dict[str, Any], str]:
+        self._identity_row(subject)
+        secret = "mech_" + secrets.token_urlsafe(32)
+        digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        with self.transaction() as connection:
+            connection.execute(
+                "UPDATE identities SET api_key_sha256=?,updated_at=? WHERE subject=?",
+                (digest, time.time(), subject),
+            )
+            row = connection.execute(
+                "SELECT * FROM identities WHERE subject=?", (subject,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("主体轮换后无法读取。")
+        return self._identity_public(row), secret
+
+    def disable_identity(self, subject: str) -> dict[str, Any]:
+        with self.transaction() as connection:
+            cursor = connection.execute(
+                "UPDATE identities SET active=0,updated_at=? WHERE subject=?",
+                (time.time(), subject),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(subject)
+            row = connection.execute(
+                "SELECT * FROM identities WHERE subject=?", (subject,)
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("主体停用后无法读取。")
+        return self._identity_public(row)
+
+    def _identity_row(self, subject: str) -> sqlite3.Row:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM identities WHERE subject=?", (subject,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(subject)
+        return cast(sqlite3.Row, row)
+
+    @staticmethod
+    def _identity_public(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "subject": str(row["subject"]),
+            "organization": str(row["organization"]),
+            "roles": sorted(json.loads(str(row["roles"]))),
+            "projects": sorted(json.loads(str(row["projects"]))),
+            "active": bool(row["active"]),
+            "created_at": iso_time(float(row["created_at"])),
+            "updated_at": iso_time(float(row["updated_at"])),
+            "expires_at": iso_time(float(row["expires_at"])) if row["expires_at"] else None,
+        }
 
     def active(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -416,36 +648,51 @@ class JobStore:
         action: str,
         project_id: str,
         outcome: str,
+        organization: str = "local",
         job_id: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
         """记录不含凭据和原始请求的主体操作审计事件。"""
 
-        if not subject or not action or not project_id or not outcome:
-            raise ValueError("审计事件主体、动作、项目和结果不能为空。")
+        if not subject or not action or not project_id or not organization or not outcome:
+            raise ValueError("审计事件主体、动作、项目、组织和结果不能为空。")
         payload = json.dumps(details or {}, ensure_ascii=False, sort_keys=True)
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO audit_events
-                (created_at,subject,action,project_id,job_id,outcome,details)
-                VALUES (?,?,?,?,?,?,?)""",
-                (time.time(), subject, action, project_id, job_id, outcome, payload),
+                (created_at,subject,action,project_id,organization,job_id,outcome,details)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (time.time(), subject, action, project_id, organization, job_id, outcome, payload),
             )
 
     def list_audit_events(
-        self, *, limit: int = 100, project_id: str | None = None
+        self,
+        *,
+        limit: int = 100,
+        project_id: str | None = None,
+        organization: str | None = None,
     ) -> list[dict[str, Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("审计查询 limit 必须位于 1 到 1000。")
         with self.connect() as connection:
-            if project_id is None:
+            if project_id is None and organization is None:
                 rows = connection.execute(
                     "SELECT * FROM audit_events ORDER BY sequence DESC LIMIT ?", (limit,)
                 ).fetchall()
             else:
+                clauses: list[str] = []
+                values: list[Any] = []
+                if project_id is not None:
+                    clauses.append("project_id=?")
+                    values.append(project_id)
+                if organization is not None:
+                    clauses.append("organization=?")
+                    values.append(organization)
                 rows = connection.execute(
-                    "SELECT * FROM audit_events WHERE project_id=? ORDER BY sequence DESC LIMIT ?",
-                    (project_id, limit),
+                    "SELECT * FROM audit_events WHERE "
+                    + " AND ".join(clauses)
+                    + " ORDER BY sequence DESC LIMIT ?",
+                    (*values, limit),
                 ).fetchall()
         return [
             {
@@ -571,6 +818,7 @@ class JobStore:
             "use_llm_agents": bool(job["use_llm_agents"]),
             "owner": job["owner"],
             "project_id": job["project_id"],
+            "organization": job["organization"],
             **{key: iso_time(job[key]) for key in ("created_at", "started_at", "finished_at")},
             "duration_ms": int(((job["finished_at"] or time.time()) - job["started_at"]) * 1000)
             if job["started_at"]
@@ -585,7 +833,13 @@ class JobStore:
             "events": events,
         }
 
-    def metrics(self, *, project_id: str | None = None, owner: str | None = None) -> dict[str, Any]:
+    def metrics(
+        self,
+        *,
+        project_id: str | None = None,
+        owner: str | None = None,
+        organization: str | None = None,
+    ) -> dict[str, Any]:
         """返回从持久化作业和证据状态计算的脱敏运行指标。
 
         指标只包含计数、时长、大小、错误码和 worker 资源用量，不返回请求文本、文件路径、
@@ -601,6 +855,9 @@ class JobStore:
         if owner is not None:
             clauses.append("owner=?")
             values.append(owner)
+        if organization is not None:
+            clauses.append("organization=?")
+            values.append(organization)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with self.connect() as connection:
             status_rows = connection.execute(
@@ -642,6 +899,24 @@ class JobStore:
                 values,
             ).fetchall()
         now = time.time()
+        storage: dict[str, Any]
+        try:
+            disk = shutil.disk_usage(self.database.parent)
+            storage = {
+                "available": True,
+                "filesystem_total_bytes": int(disk.total),
+                "filesystem_used_bytes": int(disk.used),
+                "filesystem_free_bytes": int(disk.free),
+                "result_bytes": int(aggregate["result_bytes"] or 0),
+            }
+        except OSError:
+            storage = {
+                "available": False,
+                "filesystem_total_bytes": None,
+                "filesystem_used_bytes": None,
+                "filesystem_free_bytes": None,
+                "result_bytes": int(aggregate["result_bytes"] or 0),
+            }
         evidence = {"checked": 0, "valid": 0, "invalid": 0, "missing": 0}
         for row in evidence_rows:
             evidence["checked"] += 1
@@ -659,7 +934,7 @@ class JobStore:
                     evidence["valid"] += 1
         statuses = {str(row["status"]): int(row["count"]) for row in status_rows}
         return {
-            "scope": {"project_id": project_id, "owner": owner},
+            "scope": {"organization": organization, "project_id": project_id, "owner": owner},
             "generated_at": iso_time(now),
             "jobs": {
                 "total": int(aggregate["total"] or 0),
@@ -684,6 +959,7 @@ class JobStore:
                 "object_count": int(aggregate["result_objects"] or 0),
                 "bytes": int(aggregate["result_bytes"] or 0),
             },
+            "storage": storage,
             "resources": {
                 "measurement_scope": "worker_process_and_available_descendants",
                 "measured_jobs": int(aggregate["measured_resources"] or 0),

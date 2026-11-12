@@ -69,6 +69,18 @@ def test_studio_auth_directory_and_s3_settings_require_explicit_scope() -> None:
         StudioSettings(artifact_backend="s3")
 
 
+def test_public_config_redacts_configured_studio_key_digests() -> None:
+    config = MechAgentConfig(
+        studio=StudioSettings(
+            auth_api_key_sha256="a" * 64,
+            auth_principals=[AuthPrincipalSettings(subject="alice", api_key_sha256="b" * 64)],
+        )
+    )
+    public = json.dumps(config_to_public_dict(config))
+    assert "a" * 64 not in public
+    assert "b" * 64 not in public
+
+
 def test_concurrent_idempotency_and_capacity(store: JobStore) -> None:
     with ThreadPoolExecutor(max_workers=8) as pool:
         jobs = list(pool.map(lambda _: submit(store, idempotency_key="same"), range(16)))
@@ -148,6 +160,8 @@ def test_event_retention_and_result_integrity(store: JobStore) -> None:
     assert metrics["jobs"]["by_status"]["succeeded"] == 1
     assert metrics["results"]["object_count"] == 1
     assert metrics["results"]["bytes"] == payload["result_bytes"]
+    assert metrics["storage"]["available"] is True
+    assert metrics["storage"]["result_bytes"] == payload["result_bytes"]
     assert metrics["resources"] == {
         "measurement_scope": "worker_process_and_available_descendants",
         "measured_jobs": 1,
@@ -202,7 +216,13 @@ def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) ->
 
     store = JobStore(database)
     with store.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert "organization" in {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")
+        }
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='identities'"
+        ).fetchone()
         assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
     migrated = store.get("legacy-job")
     assert migrated["config_hash"]

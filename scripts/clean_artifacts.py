@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
         "*.egg-info",
         "build",
         "dist",
+        ".cache",
+        ".tox",
+        ".nox",
+        "htmlcov",
+        "coverage",
     ]
     targets = [path for pattern in patterns for path in _iter_repo_paths(pattern) if path.is_dir()]
     targets.extend(
@@ -37,9 +42,13 @@ def main(argv: list[str] | None = None) -> int:
             ".playwright-mcp",
             "output/playwright",
             "apps/mechagent-studio/node_modules",
+            "apps/mechagent-studio/.vite",
+            "apps/mechagent-studio/coverage",
             "knowledge/external",
             "knowledge/index.jsonl",
             "site",
+            ".coverage",
+            "coverage.xml",
         )
     )
     if args.include_runs:

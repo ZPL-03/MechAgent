@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import math
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from mechagent.core.adapters.calculix import CalculiXAdapter
 from mechagent.core.defaults import DEFAULT_CALCULIX_PATH
@@ -296,7 +294,10 @@ def tc01_model_params() -> ModelParams:
     """生成 TC-01 悬臂梁标准算例参数。
 
     Args:
-        无。
+        solver_path: CalculiX 可执行文件路径。
+        work_dir: 可选的证据目录；未提供时使用系统临时目录。
+        num_cpus: CalculiX 并行核数。
+        timeout: 单个案例的超时秒数。
 
     Returns:
         ModelParams: TC-01 标准算例参数。
@@ -966,5 +967,6 @@ def _axial_displacement_value(solver_result: dict[str, Any]) -> float:
 
 
 def _new_benchmark_root() -> Path:
-    timestamp = datetime.now(tz=ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d_%H%M%S_%f")
-    return Path("mechagent_output/benchmarks") / f"RUN_{timestamp}_{uuid4().hex[:8]}"
+    """Create an isolated temporary root for callers without an evidence path."""
+
+    return Path(tempfile.mkdtemp(prefix="mechagent-benchmark-"))

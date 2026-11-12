@@ -154,10 +154,12 @@ output:
 
     def fake_run_core_benchmarks(
         solver_path: str,
+        work_dir: Path | None,
         num_cpus: int,
         timeout: int,
     ) -> list[BenchmarkResult]:
         assert solver_path == "custom-ccx"
+        assert work_dir is None
         assert num_cpus == 1
         assert timeout == 3600
         return [

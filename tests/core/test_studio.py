@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import sqlite3
 import sys
 from pathlib import Path
 from time import sleep
@@ -106,7 +107,11 @@ def test_studio_metrics_are_scoped_and_persistent_without_request_data(tmp_path:
         scoped = client.get("/api/v1/metrics?project_id=project-a", headers=headers)
         assert scoped.status_code == 200
         metrics = scoped.json()["metrics"]
-        assert metrics["scope"] == {"project_id": "project-a", "owner": "alice"}
+        assert metrics["scope"] == {
+            "organization": "local",
+            "project_id": "project-a",
+            "owner": "alice",
+        }
         assert metrics["jobs"]["total"] >= 1
         assert "包含不应出现在指标中的请求文本" not in scoped.text
         assert client.get("/api/v1/metrics", headers=headers).status_code == 403
@@ -139,6 +144,116 @@ def test_studio_principal_directory_selects_subject_and_scope(tmp_path: Path) ->
         headers = {"Authorization": f"Bearer {token}"}
         assert client.get("/api/jobs?project_id=project-b", headers=headers).status_code == 200
         assert client.get("/api/jobs?project_id=project-a", headers=headers).status_code == 403
+
+
+def test_studio_managed_identity_directory_is_scoped_and_rotatable(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    admin_token = "organization-admin-token"
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        auth_required=True,
+        auth_api_key_sha256=hashlib.sha256(admin_token.encode()).hexdigest(),
+        auth_subject="org-admin",
+        auth_organization="engineering",
+        auth_roles=["admin"],
+        auth_projects=["default"],
+    )
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        created = client.post(
+            "/api/v1/identities",
+            headers=admin_headers,
+            json={
+                "subject": "analyst",
+                "organization": "engineering",
+                "roles": ["runner"],
+                "projects": ["project-a"],
+            },
+        )
+        assert created.status_code == 201
+        generated = created.json()["api_key"]
+        assert generated.startswith("mech_")
+        assert "api_key_sha256" not in created.text
+        with sqlite3.connect(settings.database) as connection:
+            database_dump = " ".join(
+                str(row) for row in connection.execute("SELECT * FROM identities")
+            )
+        assert generated not in database_dump
+        assert hashlib.sha256(generated.encode()).hexdigest() in database_dump
+        assert (
+            client.get("/api/v1/identities", headers=admin_headers).json()["identities"][0][
+                "organization"
+            ]
+            == "engineering"
+        )
+        user_headers = {"Authorization": f"Bearer {generated}"}
+        assert (
+            client.get("/api/v1/jobs?project_id=project-a", headers=user_headers).status_code == 200
+        )
+        assert (
+            client.get("/api/v1/jobs?project_id=project-b", headers=user_headers).status_code == 403
+        )
+        assert (
+            client.post(
+                "/api/v1/identities",
+                headers=admin_headers,
+                json={
+                    "subject": "other-org",
+                    "organization": "other",
+                    "roles": ["viewer"],
+                    "projects": ["project-a"],
+                },
+            ).status_code
+            == 403
+        )
+        rotated = client.post("/api/v1/identities/analyst/rotate", headers=admin_headers)
+        assert rotated.status_code == 200
+        assert (
+            client.get("/api/v1/jobs?project_id=project-a", headers=user_headers).status_code == 401
+        )
+        new_headers = {"Authorization": f"Bearer {rotated.json()['api_key']}"}
+        assert (
+            client.get("/api/v1/jobs?project_id=project-a", headers=new_headers).status_code == 200
+        )
+        assert client.delete("/api/v1/identities/analyst", headers=admin_headers).status_code == 200
+        assert (
+            client.get("/api/v1/jobs?project_id=project-a", headers=new_headers).status_code == 401
+        )
+
+
+def test_studio_cross_organization_admin_requires_explicit_target(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    token = "global-admin-token"
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        auth_required=True,
+        auth_api_key_sha256=hashlib.sha256(token.encode()).hexdigest(),
+        auth_subject="global-admin",
+        auth_organization="*",
+        auth_roles=["admin"],
+        auth_projects=["default"],
+    )
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        assert (
+            client.post(
+                "/api/v1/jobs", headers=headers, json={"request": "unsupported"}
+            ).status_code
+            == 400
+        )
+        created = client.post(
+            "/api/v1/jobs",
+            headers=headers,
+            json={"request": "unsupported", "organization": "engineering"},
+        )
+        assert created.status_code == 202
+        job_id = created.json()["job_id"]
+        assert (
+            client.get("/api/v1/jobs?organization=engineering", headers=headers).status_code == 200
+        )
+        assert client.get(f"/api/v1/jobs/{job_id}", headers=headers).status_code == 200
 
 
 def test_studio_v1_routes_are_stable_and_legacy_routes_are_deprecated(tmp_path: Path) -> None:

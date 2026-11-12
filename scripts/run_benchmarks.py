@@ -43,11 +43,18 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("config/mechagent.yaml"),
         help="配置文件路径。",
     )
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        default=None,
+        help="求解中间产物目录；未指定时使用系统临时目录。",
+    )
     args = parser.parse_args(argv)
     agent = MechAgent.from_config(args.config)
     calculix = agent.config.solver.calculix
     results = run_core_benchmarks(
         solver_path=calculix.path,
+        work_dir=args.work_dir,
         num_cpus=calculix.num_cpus,
         timeout=calculix.timeout,
     )

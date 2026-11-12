@@ -58,11 +58,18 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `GET /api/v1/capabilities` | 已注册能力与工具绑定 |
 | `GET /api/v1/examples` | 自然语言案例目录 |
 | `POST /api/v1/inspect` | 请求与 `use_llm_agents`；任务、缺项和可执行状态 |
-| `POST /api/v1/jobs` | 创建请求作业，返回作业标识 |
+| `POST /api/v1/jobs` | 创建请求作业，返回作业标识；跨组织管理员必须在请求中指定 `organization` |
 | `GET /api/v1/jobs/{job_id}` | 作业状态、事件与终态结果 |
-| `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果 |
-| `GET /api/v1/audit` | admin 读取当前项目主体操作审计事件，`limit` 为 1–1000 |
-| `GET /api/v1/metrics` | 受项目权限约束的脱敏作业、结果、证据和 worker 资源指标；admin 不带 `project_id` 时读取全局范围 |
+| `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果；跨组织管理员可用 `organization` 过滤 |
+| `GET /api/v1/audit` | admin 读取当前组织和项目的主体操作审计事件，`limit` 为 1–1000 |
+| `GET /api/v1/metrics` | 受组织和项目权限约束的脱敏作业、结果、证据和 worker 资源指标；admin 不带 `project_id` 时读取相应组织范围 |
+| `GET /api/v1/identities` | admin 读取当前组织的主体摘要；跨组织管理员读取全部组织；不返回 API key |
+| `POST /api/v1/identities` | admin 创建主体并返回一次性明文 API key；数据库只保存 SHA-256 摘要 |
+| `PATCH /api/v1/identities/{subject}` | admin 更新组织范围、角色、项目范围、启用状态和过期时间 |
+| `POST /api/v1/identities/{subject}/rotate` | admin 轮换 key 并返回一次性明文 API key |
+| `DELETE /api/v1/identities/{subject}` | admin 停用主体并立即拒绝其 key |
+| `GET /api/identities`、`POST /api/identities` | 兼容路径；语义与对应 `/api/v1/identities` 相同并返回弃用响应头 |
+| `PATCH /api/identities/{subject}`、`POST /api/identities/{subject}/rotate`、`DELETE /api/identities/{subject}` | 兼容路径；语义与对应 `/api/v1` 路径相同并返回弃用响应头 |
 | `POST /api/v1/jobs/{job_id}/cancel` | 登记取消；终态请求保持终态 |
 | `POST /api/v1/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
 | `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
@@ -70,8 +77,8 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 
 旧兼容入口包含同一路径的 `/api/metrics`，其响应头声明弃用周期。
 
-每个 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
-幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，项目范围决定可见作业；密钥只以 SHA-256 摘要写入配置。该实现是单主体本机访问控制，不提供组织目录、动态用户管理或分布式配额。
+作业、诊断、报告和主体目录类 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
+幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，组织和项目范围共同决定可见作业；配置主体和受管理主体的密钥均只以 SHA-256 摘要保存。受管理主体只属于一个组织，管理员只能管理本组织主体；组织为 `*` 的管理员可跨组织管理。该实现仍限于单个 SQLite 数据库，不提供外部身份提供商、集中审计或分布式配额。
 兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、
 `GET /api/examples`、`POST /api/inspect`、`POST /api/jobs`、`GET /api/jobs/{job_id}`、
 `GET /api/jobs`、`GET /api/audit`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
@@ -79,4 +86,4 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 
 `POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
 
-Studio 使用 SQLite WAL 本机持久队列，支持配置主体、角色和项目范围，不提供分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份目录、网络边界和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。
+Studio 使用 SQLite WAL 本机持久队列，支持配置主体、受管理主体、角色、组织和项目范围，不提供分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份提供商、网络边界、集中审计和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。

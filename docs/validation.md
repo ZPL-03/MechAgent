@@ -7,7 +7,7 @@
 标准验证由独立命令执行：
 
 ```powershell
-python scripts/run_benchmarks.py
+python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYYMMDD
 ```
 
 | 编号 | 物理量 | CalculiX | 解析参考 | 相对误差 | 阈值 | 状态 |
@@ -32,6 +32,7 @@ python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-curr
 python -m mechagent.cli verify-evidence mechagent_output/cad-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-hole-topology-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/studio-recovery-evidence/manifest.json
+python -m mechagent.cli verify-evidence mechagent_output/mesh-convergence-tc01/manifest.json
 ```
 
 校验通过只证明文件完整性和清单一致性，不证明物理结果正确；物理结论仍以本节的参考误差、字段检查和适配器边界为准。
@@ -57,7 +58,7 @@ Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190
 输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查
 `SimulationCase.execution_readiness()` 对六类字段来源和区域置信度的执行阻断，检查
 `ModelParams` 与案例契约之间的兼容转换，以及未知未来 schema 的拒绝行为。运行层门禁
-检查 v1 数据库迁移、迁移记录、旧作业读取和未来数据库版本拒绝；API 门禁检查 `/api/v1`
+检查 v1 至 v7 数据库迁移、迁移记录、旧作业读取、组织字段和未来数据库版本拒绝；API 门禁检查 `/api/v1`
 路由与旧 `/api` 兼容入口的弃用响应头；指标门禁检查 `/api/v1/metrics` 的项目范围、admin
 全局范围、脱敏输出、数据库重启后的统计一致性以及结果大小和证据清单完整性计数。
 
@@ -75,6 +76,17 @@ C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、�
 python scripts/run_cad_topology_case.py --generate-box --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --output-dir mechagent_output/cad-topology-evidence
 python scripts/run_cad_topology_case.py --generate-hole-box --seed-size 8 --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --output-dir mechagent_output/cad-hole-topology-evidence
 ```
+
+网格独立性使用同一案例、递减 seed size 和同一求解器重复运行；收敛状态同时检查终点相邻网格变化和解析参考误差。当前 TC-01 的四级真实运行证据为 `mechagent_output/mesh-convergence-tc01/manifest.json`，seed size 为 40、20、10、5 mm，终点节点/单元数为 201/200，终点相邻网格相对变化为 2.014e-5，解析参考相对误差为 0.1031%，清单状态为 `passed`。该证据只覆盖参数化 B31 梁；CAD 实体、多区域映射、其他单元族和自动网格质量统一模型仍需独立验收。
+
+```powershell
+python scripts/run_mesh_convergence.py `
+  --case-id TC-01 `
+  --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe `
+  --output-dir mechagent_output/mesh-convergence-YYYYMMDD
+```
+
+输出目录必须为空；脚本拒绝覆盖既有证据。`convergence.json` 的 `status=passed` 且清单校验退出码为 0，才算该案例收敛门禁通过。只有网格结果稳定而没有参考解时，状态为 `unverified`，不替代工程验收。
 
 以下命令记录本机维护者完整验证所用解释器。公开用户和 CI 在激活独立 Python 环境后使用等价 `python` 命令执行同一组门禁。
 
@@ -170,13 +182,15 @@ python -m mechagent.cli verify-evidence path/to/run/manifest.json
 
 文件校验通过返回退出码 0，不匹配返回 1；校验不替代工程参考比较。Windows Job Object 进程树终止具有本机与 Windows CI 行为测试；其他操作系统的进程边界仍需独立验收。运行层不提供求解器内部断点续算。
 
-指标接口的最小检查使用已配置的 Bearer API key；不携带项目范围时只有 admin 可以读取全局统计：
+身份目录门禁使用组织管理员创建主体、验证项目和组织范围、轮换并停用 API key；数据库只保留
+SHA-256 摘要，创建和轮换响应中的明文 key 不会写入主体表。跨组织管理员可读取和管理全部组织，
+普通管理员只能操作所属组织。指标接口的最小检查使用已配置的 Bearer API key；不携带项目范围时只有 admin 可以读取本组织统计：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Headers @{Authorization="Bearer <key>"}
 ```
 
-响应只包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数以及 worker 和可见子进程的 CPU 时间与峰值常驻内存，不包含请求正文、凭据、文件路径或原始 worker 诊断。资源字段可能为空，表示进程边界内没有可读取的采样，不代表零消耗。
+响应只包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数、数据库文件系统容量以及 worker 和可见子进程的 CPU 时间与峰值常驻内存，不包含请求正文、凭据、文件路径或原始 worker 诊断。资源或文件系统字段可能为空，表示边界内没有可读取的采样，不代表零消耗；文件系统指标不等同于对象存储配额或集中 telemetry。
 
 ## 清理策略
 
@@ -185,7 +199,7 @@ python scripts/clean_artifacts.py
 python scripts/clean_artifacts.py --include-runs
 ```
 
-默认清理缓存、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用该选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
+默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录和可再生成知识索引，保留 `mechagent_output/` 与 FEM 运行文件。`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用该选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
 
 若默认清理后仍有一次性文件，使用以下命令列出未跟踪文件并逐项确认：
 

@@ -160,6 +160,7 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 | `auth_required` | false | 是否要求 Bearer API key；健康检查仍可匿名读取 |
 | `auth_api_key_sha256` | 空 | 64 位小写 SHA-256；不保存明文密钥 |
 | `auth_subject` | `local` | 审计主体标识 |
+| `auth_organization` | `local` | 配置主体所属组织；`*` 表示跨组织管理员 |
 | `auth_roles` | `admin` | `admin`、`runner` 或 `viewer` |
 | `auth_projects` | `default` | 主体可访问的项目标识 |
 
@@ -167,6 +168,6 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 
 worker 使用当前 Python 环境重新导入内置能力和工具。父进程中临时调用注册函数的插件不会自动传播到独立 worker；此类插件可使用 SDK，Studio 插件发现与打包入口尚无发布契约。配置文件在提交后变化会阻止该任务执行，显式重试读取当前配置。运行目录、状态语义与备份要求见[架构](architecture.md)。
 
-SQLite 数据库由 `JobStore` 在启动时执行事务迁移。当前 schema 为 5，迁移记录保存在
+SQLite 数据库由 `JobStore` 在启动时执行事务迁移。当前 schema 为 7，迁移记录保存在
 `schema_migrations` 表；启动时发现高于当前版本的数据库会拒绝打开。备份数据库时须在
 服务停止且所有作业处于终态后复制数据库文件、WAL 文件和同目录 `jobs/` 产物。

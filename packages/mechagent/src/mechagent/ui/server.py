@@ -8,6 +8,7 @@ import time
 import webbrowser
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -55,6 +56,30 @@ class StudioRunRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
     )
+    organization: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class IdentityCreateRequest(BaseModel):
+    """创建受管理主体；明文 API key 仅在创建响应中返回一次。"""
+
+    model_config = ConfigDict(extra="forbid")
+    subject: str = Field(min_length=1, max_length=128)
+    organization: str = Field(min_length=1, max_length=128)
+    roles: list[str] = Field(min_length=1)
+    projects: list[str] = Field(min_length=1)
+    api_key: str | None = Field(default=None, min_length=16, max_length=512)
+    expires_at: datetime | None = None
+
+
+class IdentityPatchRequest(BaseModel):
+    """更新主体范围或状态；清除 expires_at 表示永不过期。"""
+
+    model_config = ConfigDict(extra="forbid")
+    organization: str = Field(min_length=1, max_length=128)
+    roles: list[str] | None = Field(default=None, min_length=1)
+    projects: list[str] | None = Field(default=None, min_length=1)
+    active: bool | None = None
+    expires_at: datetime | None = None
 
 
 def create_studio_app(
@@ -72,6 +97,7 @@ def create_studio_app(
         subject=configured_settings.auth_subject,
         roles=frozenset(configured_settings.auth_roles),
         project_ids=frozenset(configured_settings.auth_projects),
+        organization=configured_settings.auth_organization,
     )
     directory = tuple(
         (
@@ -136,12 +162,17 @@ def create_studio_app(
             try:
                 request.state.principal = authenticator.authenticate(token, configured_principal)
             except AuthenticationError as exc:
-                return Response(
-                    content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
-                    status_code=401,
-                    media_type="application/json",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                try:
+                    if manager is None:
+                        raise ValueError("作业调度器未启动。")
+                    request.state.principal = manager.store.authenticate_identity(token)
+                except ValueError:
+                    return Response(
+                        content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
+                        status_code=401,
+                        media_type="application/json",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
         else:
             request.state.principal = configured_principal
         response = await call_next(request)
@@ -162,16 +193,20 @@ def create_studio_app(
     def principal(request: Request) -> Principal:
         return getattr(request.state, "principal", configured_principal)
 
-    def authorize(request: Request, action: str, project_id: str) -> Principal:
+    def authorize(
+        request: Request, action: str, project_id: str, organization: str | None = None
+    ) -> Principal:
         current = principal(request)
+        scope_organization = organization or current.organization
         try:
-            ensure_authorized(current, action, project_id)
+            ensure_authorized(current, action, project_id, scope_organization)
         except AuthorizationError as exc:
             if manager is not None:
                 manager.store.audit(
                     subject=current.subject,
                     action=action,
                     project_id=project_id,
+                    organization=scope_organization,
                     outcome="denied",
                     details={"path": request.url.path},
                 )
@@ -181,6 +216,7 @@ def create_studio_app(
                 subject=current.subject,
                 action=action,
                 project_id=project_id,
+                organization=scope_organization,
                 outcome="allowed",
                 details={"path": request.url.path},
             )
@@ -191,7 +227,7 @@ def create_studio_app(
             job = runtime().store.get(job_id)
         except KeyError as exc:
             raise HTTPException(404, "作业不存在。") from exc
-        authorize(request, "read", str(job["project_id"]))
+        authorize(request, "read", str(job["project_id"]), str(job["organization"]))
         return job
 
     def payload(job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
@@ -207,7 +243,13 @@ def create_studio_app(
         if not request_text:
             raise HTTPException(400, "请求不能为空。")
         dispatcher = runtime()
-        current = authorize(request, "submit", body.project_id)
+        current = principal(request)
+        target_organization = body.organization or current.organization
+        if target_organization == "*":
+            raise HTTPException(400, "跨组织管理员提交作业时必须指定 organization。")
+        if current.organization != "*" and target_organization != current.organization:
+            raise HTTPException(403, "主体不能提交到其他组织。")
+        authorize(request, "submit", body.project_id, target_organization)
         if dispatcher.error:
             raise HTTPException(503, dispatcher.error)
         try:
@@ -220,6 +262,7 @@ def create_studio_app(
                 parent_job_id=parent,
                 owner=current.subject,
                 project_id=body.project_id,
+                organization=target_organization,
             )
         except IdempotencyError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -289,7 +332,11 @@ def create_studio_app(
         request_text = body.request.strip()
         if not request_text:
             raise HTTPException(400, "请求不能为空。")
-        authorize(request, "inspect", body.project_id)
+        current = principal(request)
+        target_organization = body.organization or current.organization
+        if target_organization == "*":
+            raise HTTPException(400, "跨组织管理员检查请求时必须指定 organization。")
+        authorize(request, "inspect", body.project_id, target_organization)
         return (
             MechAgent.from_config(config_path)
             .inspect(
@@ -315,10 +362,15 @@ def create_studio_app(
     def list_jobs(
         request: Request,
         project_id: str = Query("default", min_length=1, max_length=128),
+        organization: str | None = Query(None, min_length=1, max_length=128),
         limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0),
     ) -> dict[str, Any]:
-        current = authorize(request, "read", project_id)
+        current = principal(request)
+        if current.organization != "*" and organization not in {None, current.organization}:
+            raise HTTPException(403, "主体不能读取其他组织。")
+        scope_organization = current.organization if current.organization != "*" else organization
+        current = authorize(request, "read", project_id, scope_organization)
         owner = None if "admin" in current.roles else current.subject
         return {
             "jobs": [
@@ -328,6 +380,7 @@ def create_studio_app(
                     offset=offset,
                     owner=owner,
                     project_id=project_id,
+                    organization=scope_organization,
                 )
             ]
         }
@@ -336,27 +389,164 @@ def create_studio_app(
     def audit_events(
         request: Request,
         project_id: str = Query("default", min_length=1, max_length=128),
+        organization: str | None = Query(None, min_length=1, max_length=128),
         limit: int = Query(100, ge=1, le=1000),
     ) -> dict[str, Any]:
-        current = authorize(request, "inspect", project_id)
+        current = principal(request)
+        if current.organization != "*" and organization not in {None, current.organization}:
+            raise HTTPException(403, "主体不能读取其他组织。")
+        scope_organization = current.organization if current.organization != "*" else organization
+        current = authorize(request, "inspect", project_id, scope_organization)
         if "admin" not in current.roles:
             raise HTTPException(403, "只有 admin 可以读取审计事件。")
-        return {"events": runtime().store.list_audit_events(limit=limit, project_id=project_id)}
+        return {
+            "events": runtime().store.list_audit_events(
+                limit=limit, project_id=project_id, organization=scope_organization
+            )
+        }
 
     @app.get("/api/metrics")
     def metrics(
         request: Request,
         project_id: str | None = Query(None, min_length=1, max_length=128),
+        organization: str | None = Query(None, min_length=1, max_length=128),
     ) -> dict[str, Any]:
         """返回受项目权限约束的脱敏作业、结果、证据和 worker 资源指标。"""
 
         current = principal(request)
+        if current.organization != "*" and organization not in {None, current.organization}:
+            raise HTTPException(403, "主体不能读取其他组织。")
+        scope_organization = current.organization if current.organization != "*" else organization
         if project_id is None:
-            authorize(request, "inspect", "*")
-            return {"metrics": runtime().store.metrics()}
-        authorize(request, "inspect", project_id)
+            authorize(request, "inspect", "*", scope_organization)
+            return {"metrics": runtime().store.metrics(organization=scope_organization)}
+        authorize(request, "inspect", project_id, scope_organization)
         owner = None if "admin" in current.roles else current.subject
-        return {"metrics": runtime().store.metrics(project_id=project_id, owner=owner)}
+        return {
+            "metrics": runtime().store.metrics(
+                project_id=project_id, owner=owner, organization=scope_organization
+            )
+        }
+
+    def require_admin(request: Request) -> Principal:
+        current = principal(request)
+        if "admin" not in current.roles:
+            raise HTTPException(403, "只有 admin 可以管理主体目录。")
+        return current
+
+    def expires_timestamp(value: datetime | None) -> float | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise HTTPException(422, "expires_at 必须包含时区。")
+        return value.astimezone(timezone.utc).timestamp()
+
+    @app.get("/api/identities")
+    def list_identities(request: Request) -> dict[str, Any]:
+        current = require_admin(request)
+        scope = None if current.organization == "*" else current.organization
+        return {"identities": runtime().store.list_identities(organization=scope)}
+
+    @app.post("/api/identities", status_code=201)
+    def create_identity(body: IdentityCreateRequest, request: Request) -> dict[str, Any]:
+        current = require_admin(request)
+        if current.organization != "*" and body.organization != current.organization:
+            raise HTTPException(403, "主体只能加入当前组织。")
+        try:
+            identity, secret = runtime().store.create_identity(
+                subject=body.subject,
+                organization=body.organization,
+                roles=body.roles,
+                projects=body.projects,
+                api_key=body.api_key,
+                expires_at=expires_timestamp(body.expires_at),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        runtime().store.audit(
+            subject=current.subject,
+            action="identity.create",
+            project_id="*",
+            organization=body.organization,
+            outcome="allowed",
+            details={"subject": identity["subject"]},
+        )
+        return {"identity": identity, "api_key": secret}
+
+    @app.patch("/api/identities/{subject}")
+    def update_identity(
+        subject: str, body: IdentityPatchRequest, request: Request
+    ) -> dict[str, Any]:
+        current = require_admin(request)
+        if current.organization != "*" and body.organization != current.organization:
+            raise HTTPException(403, "主体只能保留在当前组织。")
+        try:
+            existing = runtime().store.get_identity(subject)
+            if current.organization != "*" and existing["organization"] != current.organization:
+                raise HTTPException(403, "主体不属于当前组织。")
+            identity = runtime().store.update_identity(
+                subject,
+                organization=body.organization,
+                roles=body.roles,
+                projects=body.projects,
+                active=body.active,
+                expires_at=expires_timestamp(body.expires_at),
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "主体不存在。") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        runtime().store.audit(
+            subject=current.subject,
+            action="identity.update",
+            project_id="*",
+            organization=identity["organization"],
+            outcome="allowed",
+            details={"subject": identity["subject"]},
+        )
+        if current.organization != "*" and identity["organization"] != current.organization:
+            raise HTTPException(403, "主体只能保留在当前组织。")
+        return {"identity": identity}
+
+    @app.post("/api/identities/{subject}/rotate")
+    def rotate_identity(subject: str, request: Request) -> dict[str, Any]:
+        current = require_admin(request)
+        try:
+            existing = runtime().store.get_identity(subject)
+            if current.organization != "*" and existing["organization"] != current.organization:
+                raise HTTPException(403, "主体不属于当前组织。")
+            identity, secret = runtime().store.rotate_identity(subject)
+        except KeyError as exc:
+            raise HTTPException(404, "主体不存在。") from exc
+        runtime().store.audit(
+            subject=current.subject,
+            action="identity.rotate",
+            project_id="*",
+            organization=identity["organization"],
+            outcome="allowed",
+            details={"subject": identity["subject"]},
+        )
+        return {"identity": identity, "api_key": secret}
+
+    @app.delete("/api/identities/{subject}")
+    def disable_identity(subject: str, request: Request) -> dict[str, Any]:
+        current = require_admin(request)
+        try:
+            existing = runtime().store.get_identity(subject)
+            if current.organization != "*" and existing["organization"] != current.organization:
+                raise HTTPException(403, "主体不属于当前组织。")
+            identity = runtime().store.disable_identity(subject)
+        except KeyError as exc:
+            raise HTTPException(404, "主体不存在。") from exc
+        runtime().store.audit(
+            subject=current.subject,
+            action="identity.disable",
+            project_id="*",
+            organization=identity["organization"],
+            outcome="allowed",
+            details={"subject": identity["subject"]},
+        )
+        return {"identity": identity}
 
     @app.post("/api/jobs/{job_id}/cancel", status_code=202)
     def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
@@ -388,6 +578,7 @@ def create_studio_app(
                     request=job["request"],
                     use_llm_agents=job["use_llm_agents"],
                     project_id=job["project_id"],
+                    organization=job["organization"],
                 ),
                 request,
                 idempotency_key,
@@ -423,6 +614,11 @@ def create_studio_app(
         ("/api/v1/jobs", list_jobs, ["GET"], None),
         ("/api/v1/audit", audit_events, ["GET"], None),
         ("/api/v1/metrics", metrics, ["GET"], None),
+        ("/api/v1/identities", list_identities, ["GET"], None),
+        ("/api/v1/identities", create_identity, ["POST"], 201),
+        ("/api/v1/identities/{subject}", update_identity, ["PATCH"], None),
+        ("/api/v1/identities/{subject}/rotate", rotate_identity, ["POST"], None),
+        ("/api/v1/identities/{subject}", disable_identity, ["DELETE"], None),
         ("/api/v1/jobs/{job_id}/cancel", cancel_job, ["POST"], 202),
         ("/api/v1/jobs/{job_id}/retry", retry_job, ["POST"], 202),
         ("/api/v1/jobs/{job_id}/evidence", job_evidence, ["GET"], None),
