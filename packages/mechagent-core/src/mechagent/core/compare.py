@@ -133,11 +133,14 @@ def compare_backend_results(
         if not isinstance(left_values, dict) or not isinstance(right_values, dict):
             missing.append(name)
             continue
-        if field_source in {"fields", "mapped_fields"} and _raw_field_has_incompatible_semantics(
-            left_field, right_field
-        ):
-            unverified.append(name)
-            alignments[name] = "unverified"
+        field_semantics = _field_semantics_mismatch(left_field, right_field)
+        if field_semantics is not None:
+            if field_source in {"fields", "mapped_fields"}:
+                unverified.append(name)
+                alignments[name] = "unverified"
+            else:
+                differences.append({"field": name, **field_semantics})
+                alignments[name] = "contract-mismatch"
             continue
         location = str(left_field.get("location", ""))
         if location in {"element", "integration_point"} and not _mesh_digests_match(left, right):
@@ -287,11 +290,9 @@ def compare_backend_results(
         if direct_compared:
             alignments[name] = "direct"
     status: Literal["passed", "failed", "unverified"] = "passed"
-    if not compared:
-        status = "unverified"
-    elif missing or differences:
+    if missing or differences:
         status = "failed"
-    elif unverified:
+    elif not compared or unverified:
         status = "unverified"
     return BackendComparison(
         status=status,
@@ -309,21 +310,30 @@ def compare_backend_results(
     )
 
 
-def _raw_field_has_incompatible_semantics(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    """判断原始场是否缺少可证明的离散位置一致性。
+def _field_semantics_mismatch(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any] | None:
+    """返回两个字段的空间或单位契约冲突。
 
-    原始场只在同一位置、同一单位时允许继续比较；节点场的坐标对应由上层
-    分支处理，并要求映射覆盖两侧场值。不同位置的场必须通过
-    ``comparison_fields`` 提供统一语义摘要，不能把标签或全场统计量强行配对。
+    原始场的位置或单位不一致时只能保持 ``unverified``；请求字段和统一语义
+    字段的同类冲突属于比较契约失败。两侧都未声明单位时保留兼容行为。
     """
 
     left_location = str(left.get("location", ""))
     right_location = str(right.get("location", ""))
     if left_location != right_location:
-        return True
+        return {
+            "reason": "field_location_mismatch",
+            "left_location": left_location,
+            "right_location": right_location,
+        }
     left_unit = str(left.get("unit", ""))
     right_unit = str(right.get("unit", ""))
-    return left_unit != right_unit
+    if left_unit != right_unit and (left_unit or right_unit):
+        return {
+            "reason": "field_unit_mismatch",
+            "left_unit": left_unit,
+            "right_unit": right_unit,
+        }
+    return None
 
 
 def _mesh_digests_match(left: dict[str, Any], right: dict[str, Any]) -> bool:

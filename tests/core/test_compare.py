@@ -95,6 +95,26 @@ def test_backend_comparison_passes_within_tolerance() -> None:
     assert result.differences == []
 
 
+def test_backend_comparison_rejects_requested_field_location_mismatch() -> None:
+    result = compare_backend_results(
+        {"requested_fields": {"u": {"location": "node", "unit": "mm", "values": {"1": 1.0}}}},
+        {"requested_fields": {"u": {"location": "element", "unit": "mm", "values": {"1": 1.0}}}},
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.alignment == {"u": "contract-mismatch"}
+    assert result.differences == [
+        {
+            "field": "u",
+            "reason": "field_location_mismatch",
+            "left_location": "node",
+            "right_location": "element",
+        }
+    ]
+
+
 def test_backend_comparison_reports_missing_and_large_difference() -> None:
     left = {"requested_fields": {"u": {"values": {"1": 1.0}}, "s": {"values": {"1": 2.0}}}}
     right = {"requested_fields": {"u": {"values": {"1": 2.0}}}}
