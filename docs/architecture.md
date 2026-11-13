@@ -100,6 +100,7 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 `ModelParams.to_simulation_case()` 和 `SimulationCase.to_model_params()` 是兼容转换
 入口。当前结构静力工作流在 Designer 输出后生成案例摘要，求解器仍接收兼容的
 `ModelParams`；这保证旧工具接口稳定，同时让 API、报告和证据可以逐步迁移到统一案例契约。
+统一结果层按 `load_steps.sequence` 排列 `step_results`；后端返回的分析步名称顺序不影响报告和导出顺序。
 
 `SimulationCase.execution_readiness()` 检查六类必需字段来源及全部载荷/边界区域来源的
 `confidence`。默认执行门槛为 `0.80`；缺失置信度或低于门槛的案例可以被读取和迁移，

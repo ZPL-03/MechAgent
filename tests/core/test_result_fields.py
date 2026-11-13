@@ -172,6 +172,46 @@ def test_step_results_only_contain_fields_declared_by_that_step() -> None:
     assert list(extracted["step_results"][1]["fields"]) == ["s_mises"]
 
 
+def test_named_step_history_follows_declared_sequence() -> None:
+    case = _case().model_copy(
+        update={
+            "load_steps": [
+                LoadStepSpec(step_id="step-1", sequence=1, result_fields=["u_mag"]),
+                LoadStepSpec(step_id="step-2", sequence=2, result_fields=["s_mises"]),
+            ]
+        }
+    )
+    extracted = attach_case_result_fields(
+        {
+            "fields": {
+                "displacement": {"location": "node", "values": {"1": [3, 4, 0]}},
+                "stress": {"location": "node", "values": {"1": [3, 0, 0, 0, 0, 0]}},
+            },
+            "field_history": [
+                {
+                    "step_name": "step-2",
+                    "frame_index": 0,
+                    "stress": {
+                        "location": "node",
+                        "values": {"1": [3, 0, 0, 0, 0, 0]},
+                    },
+                },
+                {
+                    "step_name": "step-1",
+                    "frame_index": 0,
+                    "displacement": {
+                        "location": "node",
+                        "values": {"1": [3, 4, 0]},
+                    },
+                },
+            ],
+        },
+        case,
+    )
+
+    assert [item["step_id"] for item in extracted["step_results"]] == ["step-1", "step-2"]
+
+
 def test_mapped_fields_use_element_centroids_and_preserve_native_fields() -> None:
     case = SimulationCase.from_model_params(tc03_model_params(), provenance_confidence=1.0)
     extracted = attach_mapped_result_fields(

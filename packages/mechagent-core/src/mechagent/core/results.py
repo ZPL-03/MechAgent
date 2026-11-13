@@ -87,7 +87,12 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                 named_groups.setdefault(str(frame["step_name"]), []).append(dict(frame))
         if named_groups:
             ordered_steps = sorted(case.load_steps, key=lambda item: item.sequence)
-            for index, (step_name, frames) in enumerate(named_groups.items()):
+            ordered_names = [step.step_id for step in ordered_steps if step.step_id in named_groups]
+            ordered_names.extend(
+                sorted(step_name for step_name in named_groups if step_name not in ordered_names)
+            )
+            for index, step_name in enumerate(ordered_names):
+                frames = named_groups[step_name]
                 step = next((item for item in ordered_steps if item.step_id == step_name), None)
                 if step is None and index < len(ordered_steps):
                     step = ordered_steps[index]
