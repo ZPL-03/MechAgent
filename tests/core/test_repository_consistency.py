@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -217,6 +218,35 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         assert (ROOT / "scripts" / script).is_file()
     for name in ("README.md", "CONTRIBUTING.md", "docs/local_setup.md"):
         assert "validation.md" in read(name)
+
+
+def test_script_registry_matches_scripts_and_catalogue() -> None:
+    registry_path = ROOT / "scripts" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert registry["schema"] == 1
+    assert registry["root"] == "scripts"
+    entries = registry["entries"]
+    assert isinstance(entries, list) and entries
+    paths = [entry["path"] for entry in entries]
+    assert len(paths) == len(set(paths))
+    actual = sorted(
+        path.name for path in (ROOT / "scripts").glob("*.py") if path.name != "__init__.py"
+    )
+    assert sorted(paths) == actual
+    for entry in entries:
+        assert set(entry) == {
+            "path",
+            "category",
+            "mutates_external_state",
+            "real_solver",
+            "description",
+        }
+        assert entry["category"]
+        assert isinstance(entry["mutates_external_state"], bool)
+        assert isinstance(entry["real_solver"], bool)
+        assert entry["description"].strip()
+    catalogue = read("docs/script_catalog.md")
+    assert all(f"`{path}`" in catalogue for path in paths)
 
 
 def test_public_knowledge_sources_are_configured_and_nonempty() -> None:
