@@ -22,7 +22,7 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYY
 
 本机标准算例的当前运行结果保存在 `mechagent_output/benchmark_results.json`，求解中间产物位于
 `mechagent_output/benchmarks/`，对应清单为 `mechagent_output/benchmarks/manifest.json`。Abaqus
-多步、双后端和 CAD 拓扑证据分别使用各自目录下的 `manifest.json`。这些清单都使用相对路径、文件大小
+多步、跨工具比较和 CAD 拓扑证据分别使用各自目录下的 `manifest.json`。这些清单都使用相对路径、文件大小
 和 SHA-256；统一校验命令如下：
 
 ```powershell
@@ -51,7 +51,7 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 
 模型、约束、字段与验收条件见[求解器与网格](solver_mesh.md)。脚本在独立目录保留 CAE 日志、INP、ODB 和结果 JSON，参考值由外层固定模型核验。
 
-Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190471 mm，相对误差约 1.071×10⁻⁸，平均 S11=1 MPa。完成判定使用 STA 成功标记、锁文件释放和有效 ODB 字段；CAE 的 `job.status` 在该环境返回 `None`。这项证据不代表 Abaqus 平台适配器，也不构成不同边界模型之间的求解器对比。外层超时返回失败；启动器可能派生子进程，应核实本机作业状态后清理目录。
+Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190471 mm，相对误差约 1.071×10⁻⁸，平均 S11=1 MPa。完成判定使用 STA 成功标记、锁文件释放和有效 ODB 字段；CAE 的 `job.status` 在该环境返回 `None`。该清单记录独立 Abaqus 工具链的几何、网格、求解和 ODB 提取结果；平台适配器验收和不同边界模型的结果比较分别执行。外层超时返回失败；启动器可能派生子进程，应核实本机作业状态后清理目录。
 
 许可证服务审计使用 Abaqus launcher 的只读 FlexNet 查询：
 
@@ -59,7 +59,7 @@ Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190
 python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.bat --output mechagent_output/abaqus-license-audit/manifest.json
 ```
 
-清单只保存探针返回码、服务状态检查、耗时、输出长度和摘要哈希，不保存许可证服务器地址、许可证文件路径或原始诊断。本机清单 `mechagent_output/abaqus-license-audit/manifest.json` 的 `status` 为 `passed`，`process_succeeded`、`license_server_up`、`vendor_daemon_up` 和 `feature_usage_observed` 均为 `true`。该证据只覆盖本机 FlexNet 服务和 Abaqus vendor daemon，不代表集群许可证容量、跨主机高可用或许可证服务的长期可用性。
+清单只保存探针返回码、服务状态检查、耗时、输出长度和摘要哈希，不保存许可证服务器地址、许可证文件路径或原始诊断。本机清单 `mechagent_output/abaqus-license-audit/manifest.json` 的 `status` 为 `passed`，`process_succeeded`、`license_server_up`、`vendor_daemon_up` 和 `feature_usage_observed` 均为 `true`。该证据范围为本机 FlexNet 服务和 Abaqus vendor daemon；集群许可证容量、跨主机高可用和长期可用性属于部署验收项目。
 
 ## 质量门禁
 
@@ -73,8 +73,7 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑实体和六向区域候选是否随 `GeometryCandidate` 进入
 `ModelParams.metadata.cad_geometry`；案例提升只接受唯一、已映射且置信度不低于 0.80 的
 面/边拓扑 ID。`ambiguous`、`unresolved` 或缺少拓扑 ID 的区域必须生成 `unknown` 区域并使
-`SimulationCase.execution_ready` 为 `False`。该门禁验证区域语义传递和失败行为，不替代
-直接 CAD 网格、网格集合映射、网格质量或收敛验收。
+`SimulationCase.execution_ready` 为 `False`。该门禁验证区域语义传递和失败行为；直接 CAD 网格、网格质量和收敛由对应门禁执行。
 
 实体 CAD 直接网格的本机证据使用以下命令生成。两个清单均要求源文件摘要、拓扑区域节点集合、
 C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、能量字段全部有效；带孔案例额外
@@ -94,7 +93,7 @@ python scripts/run_mesh_convergence.py `
   --output-dir mechagent_output/mesh-convergence-YYYYMMDD
 ```
 
-输出目录必须为空；脚本拒绝覆盖既有证据。`convergence.json` 的 `status=passed` 且清单校验退出码为 0，才算该案例收敛门禁通过。只有网格结果稳定而没有参考解时，状态为 `unverified`，不替代工程验收。
+输出目录必须为空；脚本拒绝覆盖既有证据。`convergence.json` 的 `status=passed` 且清单校验退出码为 0，才算该案例收敛门禁通过。只有网格结果稳定而没有参考解时，状态为 `unverified`，工程验收待参考证据。
 
 以下命令记录本机维护者完整验证所用解释器。公开用户和 CI 在激活独立 Python 环境后使用等价 `python` 命令执行同一组门禁。
 
@@ -146,11 +145,11 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 与前端测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建均由质量门禁执行，结果以当前命令输出和对应证据清单为准。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 与前端测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建均由质量门禁执行，结果以当前命令输出和对应证据清单为准。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，审计结果按失败状态处理。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`；本机真实求解单独执行。
 
-`scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单可作为发布前许可证审计输入，不替代许可证人工确认。
+`scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单用于发布前许可证审计，许可证人工确认另行进行。
 
-`scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；它不提供签名、作者身份或可信构建服务证明。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；`scripts/verify_release.py` 可在独立环境重新校验所有 artifact 摘要和签名身份。发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
+`scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；签名、作者身份和可信构建服务证明由后续发布步骤提供。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；`scripts/verify_release.py` 可在独立环境重新校验所有 artifact 摘要和签名身份。发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
 `.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并用 `gh attestation verify` 校验每个发布 subject 的仓库、工作流、tag 和 OIDC issuer 身份，再由 cosign 对发布清单执行 keyless 签名和验证。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。该门禁只有 tag 工作流在目标仓库中成功运行后才形成外部验证证据。
 
 `scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，否则以 `failed` 终止比较。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，不得用最终帧替代缺失分析步。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。

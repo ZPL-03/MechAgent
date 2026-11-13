@@ -44,6 +44,27 @@ def test_studio_health_endpoint_reports_config(tmp_path: Path) -> None:
     assert isinstance(payload["static_ready"], bool)
 
 
+def test_studio_rate_limit_returns_429_with_retry_metadata(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    settings = StudioSettings(
+        database=tmp_path / "jobs.sqlite3",
+        rate_limit_requests=1,
+        rate_limit_window_seconds=60,
+    )
+
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        first = client.get("/api/v1/health")
+        second = client.get("/api/v1/health")
+
+    assert first.status_code == 200
+    assert first.headers["X-RateLimit-Limit"] == "1"
+    assert first.headers["X-RateLimit-Remaining"] == "0"
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == "60"
+    assert second.json() == {"detail": "请求频率超过当前 Studio 限额。"}
+
+
 def test_studio_authentication_and_project_isolation(tmp_path: Path) -> None:
     config_path = tmp_path / "mechagent.yaml"
     config_path.write_text("{}", encoding="utf-8")

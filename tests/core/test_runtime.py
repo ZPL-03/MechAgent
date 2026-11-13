@@ -27,6 +27,7 @@ from mechagent.config import (
 from mechagent.evidence import artifact_records, verify_manifest, write_manifest
 from mechagent.runtime.manager import JobManager
 from mechagent.runtime.process import identified_process, stop_process
+from mechagent.runtime.rate_limit import SlidingWindowRateLimiter
 from mechagent.runtime.store import IdempotencyError, JobStore, QueueFullError
 
 
@@ -40,6 +41,21 @@ def submit(store: JobStore, **kwargs: Any) -> dict[str, Any]:
     return store.submit(
         "不支持的仿真请求", False, store.database.parent / "config.yaml", max_queued=5, **kwargs
     )
+
+
+def test_sliding_window_rate_limiter_expires_events() -> None:
+    current = [100.0]
+    limiter = SlidingWindowRateLimiter(2, 10.0, clock=lambda: current[0])
+
+    assert limiter.check("client").remaining == 1
+    assert limiter.check("client").remaining == 0
+    blocked = limiter.check("client")
+    assert blocked.allowed is False
+    assert blocked.retry_after == 10
+
+    current[0] = 110.0
+    assert limiter.check("client").allowed is True
+    assert limiter.check("other").allowed is True
 
 
 def test_studio_auth_required_rejects_missing_or_malformed_digest() -> None:

@@ -33,6 +33,7 @@ from mechagent.runtime.auth import (
     ensure_authorized,
 )
 from mechagent.runtime.manager import JobManager
+from mechagent.runtime.rate_limit import RateLimitDecision, SlidingWindowRateLimiter
 from mechagent.runtime.store import (
     TERMINAL,
     IdempotencyError,
@@ -113,6 +114,10 @@ def create_studio_app(
         for item in configured_settings.auth_principals
     )
     authenticator = ApiKeyAuthenticator(configured_settings.auth_api_key_sha256, directory)
+    rate_limiter = SlidingWindowRateLimiter(
+        configured_settings.rate_limit_requests,
+        configured_settings.rate_limit_window_seconds,
+    )
     manager: JobManager | None = None
 
     @asynccontextmanager
@@ -154,6 +159,7 @@ def create_studio_app(
     async def api_compatibility_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        decision: RateLimitDecision | None = None
         if (
             configured_settings.auth_required
             and request.url.path.startswith("/api")
@@ -171,6 +177,9 @@ def create_studio_app(
                         raise ValueError("作业调度器未启动。")
                     request.state.principal = manager.store.authenticate_identity(token)
                 except ValueError:
+                    decision = rate_limiter.check(_rate_limit_key(request, None))
+                    if not decision.allowed:
+                        return _rate_limit_response(decision)
                     return Response(
                         content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
                         status_code=401,
@@ -179,7 +188,11 @@ def create_studio_app(
                     )
         else:
             request.state.principal = configured_principal
+        decision = rate_limiter.check(_rate_limit_key(request, request.state.principal))
+        if not decision.allowed:
+            return _rate_limit_response(decision)
         response = await call_next(request)
+        _set_rate_limit_headers(response, decision)
         path = request.url.path
         if path.startswith("/api/v1/"):
             response.headers["X-MechAgent-API-Version"] = "v1"
@@ -188,6 +201,26 @@ def create_studio_app(
             response.headers["Sunset"] = "2027-06-30"
             response.headers["Link"] = '</api/v1>; rel="successor-version"'
         return response
+
+    def _rate_limit_key(request: Request, current: Principal | None) -> str:
+        client = request.client.host if request.client is not None else "unknown"
+        subject = current.subject if current is not None else "unauthenticated"
+        return f"{subject}@{client}"
+
+    def _rate_limit_response(decision: RateLimitDecision) -> Response:
+        response = Response(
+            content=json.dumps({"detail": "请求频率超过当前 Studio 限额。"}, ensure_ascii=False),
+            status_code=429,
+            media_type="application/json",
+        )
+        _set_rate_limit_headers(response, decision)
+        response.headers["Retry-After"] = str(decision.retry_after)
+        return response
+
+    def _set_rate_limit_headers(response: Response, decision: RateLimitDecision) -> None:
+        if decision.limit is not None and decision.remaining is not None:
+            response.headers["X-RateLimit-Limit"] = str(decision.limit)
+            response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
 
     def runtime() -> JobManager:
         if manager is None:

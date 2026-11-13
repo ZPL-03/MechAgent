@@ -166,6 +166,8 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 | `max_queued` | 32 | 1–10000，等待领取的作业容量 |
 | `max_result_bytes` | 104857600 | 单个公开 `result.json` 的字节上限 |
 | `max_storage_bytes` | 空 | 本机工作目录文件总字节上限；空值表示不启用 |
+| `rate_limit_requests` | 120 | 单个进程、主体和客户端地址在窗口内允许的 API 请求数；空值表示不启用 |
+| `rate_limit_window_seconds` | 60 s | 速率限制窗口，1–3600 s |
 | `startup_timeout` | 60 s | 至少 5 s，worker 身份登记期限 |
 | `heartbeat_timeout` | 30 s | 至少 5 s，worker 每秒发送心跳 |
 | `job_timeout` | 7200 s | 至少 10 s，从领取开始计时，包含初始化、求解和证据写入 |

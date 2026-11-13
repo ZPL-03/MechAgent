@@ -50,7 +50,10 @@ def test_public_markdown_links_resolve(path: Path) -> None:
 def test_public_docs_describe_facts_without_editing_narrative(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert text.startswith("# ")
-    assert not re.search(r"本次|此次|优化后|现在改为|我们完成了|TODO", text)
+    assert not re.search(
+        r"本次|此次|优化后|现在改为|我们完成了|新增|修改后|原来|补丁|过程性|TODO",
+        text,
+    )
 
 
 def test_ignored_local_rules_are_not_release_documents() -> None:
