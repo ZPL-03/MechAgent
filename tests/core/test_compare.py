@@ -116,6 +116,8 @@ def test_backend_comparison_rejects_requested_field_location_mismatch() -> None:
             "right_location": "element",
         }
     ]
+    assert result.field_results["u"].status == "failed"
+    assert result.field_results["u"].reason == "field_location_mismatch"
 
 
 def test_backend_comparison_reports_missing_and_large_difference() -> None:
@@ -282,6 +284,8 @@ def test_backend_comparison_marks_raw_fields_at_different_locations_unverified()
     assert result.field_source == "fields"
     assert result.unverified_fields == ["energy", "stress"]
     assert result.alignment == {"energy": "unverified", "stress": "unverified"}
+    assert result.field_results["stress"].status == "unverified"
+    assert result.field_results["stress"].reason == "field_location_mismatch"
 
 
 def test_backend_comparison_aligns_exact_integration_points_with_mesh_digest() -> None:
@@ -550,3 +554,49 @@ def test_mapped_fields_align_by_element_centroid_coordinates() -> None:
     assert result.status == "passed"
     assert result.alignment == {"stress_sxx": "element-centroid-coordinate"}
     assert result.compared_fields == ["stress_sxx[10<->42]"]
+    assert result.field_results["stress_sxx"].status == "passed"
+    assert result.field_results["stress_sxx"].compared_count == 1
+    assert result.field_results["stress_sxx"].alignment == "element-centroid-coordinate"
+
+
+def test_mapped_fields_with_incomplete_coverage_are_unverified() -> None:
+    left = {
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"10": 100.0},
+                "coverage": 0.5,
+                "complete": False,
+                "mapping": "integration-point-mean",
+            }
+        },
+        "element_centroids": {"10": [5.0, 0.0, 0.0]},
+    }
+    right = {
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"42": 100.0},
+                "coverage": 1.0,
+                "complete": True,
+                "mapping": "integration-point-mean",
+            }
+        },
+        "element_centroids": {"42": [5.0, 0.0, 0.0]},
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["stress_sxx"]
+    assert result.field_results["stress_sxx"].status == "unverified"
+    assert result.field_results["stress_sxx"].reason == "mapping_incomplete"
+    assert result.field_results["stress_sxx"].left_coverage == 0.5

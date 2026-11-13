@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from mechagent.core.exceptions import SolverError
@@ -50,6 +51,31 @@ _COMPONENT_INDEX = {
     "rf2": 1,
     "rf3": 2,
 }
+
+
+@dataclass(frozen=True)
+class _FieldMapping:
+    """保存一次原始场到单元场映射的值与覆盖证据。"""
+
+    values: dict[str, float | list[float]]
+    source_count: int
+    target_count: int
+    mapping: str
+    source_location: str
+
+    @property
+    def mapped_count(self) -> int:
+        return len(self.values)
+
+    @property
+    def coverage(self) -> float:
+        if self.target_count == 0:
+            return 0.0
+        return self.mapped_count / self.target_count
+
+    @property
+    def complete(self) -> bool:
+        return self.target_count > 0 and self.mapped_count == self.target_count
 
 
 def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -> dict[str, Any]:
@@ -247,85 +273,205 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
     element_centroids = _normalise_coordinates(extracted.get("element_centroids"))
     if not elements or not element_centroids:
         return extracted
+
     fields = extracted.get("fields")
-    if not isinstance(fields, Mapping):
-        return extracted
+    if isinstance(fields, Mapping):
+        mapped = _map_fields_to_elements(
+            fields,
+            elements,
+            extracted,
+            case,
+        )
+        if mapped:
+            extracted["mapped_fields"] = mapped
+
+    mapped_steps = _map_history_to_elements(extracted, elements, case)
+    if mapped_steps:
+        extracted["mapped_step_fields"] = mapped_steps
+
+    if "mapped_fields" in extracted or mapped_steps:
+        extracted["element_centroids"] = {
+            str(label): list(point) for label, point in sorted(element_centroids.items())
+        }
+    return extracted
+
+
+def _map_fields_to_elements(
+    fields: Mapping[str, Any],
+    elements: dict[str, tuple[str, ...]],
+    extracted: Mapping[str, Any],
+    case: SimulationCase,
+) -> dict[str, Any]:
+    """将一个输出帧映射为单元质心字段，并附带覆盖证据。"""
 
     mapped: dict[str, Any] = {}
+    allow_axis_station = case.model.geometry.type.value == "beam"
     for name, quantity, component in (
         ("stress_sxx", "stress", "sxx"),
         ("strain_exx", "strain", "exx"),
     ):
         field = fields.get(quantity)
-        values = _map_field_to_elements(
+        mapping = _map_field_to_elements(
             field,
             elements,
             extracted,
             component_index=0,
-            allow_axis_station=case.model.geometry.type.value == "beam",
+            allow_axis_station=allow_axis_station,
         )
-        if values:
-            mapped[name] = {
-                "quantity": quantity,
-                "component": component,
-                "location": "element_centroid",
-                "unit": "MPa" if quantity == "stress" else "",
-                "values": values,
-                "source": f"fields.{quantity}",
-                "derivation": "按单元连接或积分点的场值均值聚合到单元质心",
-                "mapping": "element-connectivity-mean-or-axis-station-mean",
-            }
+        if mapping is not None and mapping.values:
+            mapped[name] = _mapped_field_payload(
+                quantity=quantity,
+                component=component,
+                unit=str(field.get("unit", "")) if isinstance(field, Mapping) else "",
+                values=mapping,
+                source=f"fields.{quantity}",
+                derivation="按单元连接或积分点的场值均值聚合到单元质心",
+            )
 
     volume = fields.get("volume")
-    volume_values: dict[str, float | list[float]] = _map_field_to_elements(
+    volume_mapping = _map_field_to_elements(
         volume,
         elements,
         extracted,
-        allow_axis_station=case.model.geometry.type.value == "beam",
+        allow_axis_station=allow_axis_station,
     )
     volume_source = "fields.volume"
-    if not volume_values and case.model.geometry.type.value == "beam":
-        volume_values = dict(_beam_element_volumes(elements, extracted, case))
-        volume_source = "mesh_nodes+case.geometry"
-    if volume_values:
-        mapped["volume"] = {
-            "quantity": "volume",
-            "location": "element_centroid",
-            "unit": "mm^3",
-            "values": volume_values,
-            "source": volume_source,
-            "derivation": "按单元标签或连接映射体积；梁缺少体积场时按轴向长度与截面面积计算",
-            "mapping": "element-label-or-connectivity",
-        }
+    if (
+        volume_mapping is None or not volume_mapping.values
+    ) and case.model.geometry.type.value == "beam":
+        volume_values = _beam_element_volumes(elements, extracted, case)
+        if volume_values:
+            volume_mapping = _FieldMapping(
+                values=dict(volume_values),
+                source_count=0,
+                target_count=len(elements),
+                mapping="beam-volume-from-mesh-and-geometry",
+                source_location="derived",
+            )
+            volume_source = "mesh_nodes+case.geometry"
+    if volume_mapping is not None and volume_mapping.values:
+        mapped["volume"] = _mapped_field_payload(
+            quantity="volume",
+            unit="mm^3",
+            values=volume_mapping,
+            source=volume_source,
+            derivation="按单元标签或连接映射体积；梁缺少体积场时按轴向长度与截面面积计算",
+        )
 
     # Abaqus exposes SENER at integration points; CalculiX exposes the same
     # quantity at nodes for solid meshes. Beam section values have different
     # conventions and remain outside this normalized field.
     if case.model.geometry.type.value != "beam":
         energy = fields.get("strain_energy_density")
-        energy_values = _map_field_to_elements(
+        energy_mapping = _map_field_to_elements(
             energy,
             elements,
             extracted,
-            allow_axis_station=case.model.geometry.type.value == "beam",
+            allow_axis_station=False,
         )
-        if energy_values:
-            mapped["strain_energy_density"] = {
-                "quantity": "strain_energy_density",
-                "location": "element_centroid",
-                "unit": "N/mm^2",
-                "values": energy_values,
-                "source": "fields.strain_energy_density",
-                "derivation": "按单元连接或积分点的应变能密度均值聚合到单元质心",
-                "mapping": "element-connectivity-mean-or-integration-point-mean",
-            }
+        if energy_mapping is not None and energy_mapping.values:
+            mapped["strain_energy_density"] = _mapped_field_payload(
+                quantity="strain_energy_density",
+                unit=str(energy.get("unit", "")) if isinstance(energy, Mapping) else "",
+                values=energy_mapping,
+                source="fields.strain_energy_density",
+                derivation="按单元连接或积分点的应变能密度均值聚合到单元质心",
+            )
+    return mapped
 
-    if mapped:
-        extracted["mapped_fields"] = mapped
-        extracted["element_centroids"] = {
-            str(label): list(point) for label, point in sorted(element_centroids.items())
-        }
-    return extracted
+
+def _mapped_field_payload(
+    *,
+    quantity: str,
+    values: _FieldMapping,
+    source: str,
+    derivation: str,
+    unit: str,
+    component: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "quantity": quantity,
+        "location": "element_centroid",
+        "unit": unit,
+        "values": values.values,
+        "source": source,
+        "derivation": derivation,
+        "mapping": values.mapping,
+        "source_location": values.source_location,
+        "source_count": values.source_count,
+        "target_count": values.target_count,
+        "mapped_count": values.mapped_count,
+        "coverage": values.coverage,
+        "complete": values.complete,
+    }
+    if component is not None:
+        payload["component"] = component
+    return payload
+
+
+def _map_history_to_elements(
+    extracted: Mapping[str, Any],
+    elements: dict[str, tuple[str, ...]],
+    case: SimulationCase,
+) -> list[dict[str, Any]]:
+    history = extracted.get("field_history")
+    if not isinstance(history, list):
+        return []
+    frames_by_step: dict[str, list[tuple[int, Mapping[str, Any]]]] = {}
+    metadata: dict[str, dict[str, Any]] = {}
+    ordered_steps = sorted(case.load_steps, key=lambda item: item.sequence)
+    for index, frame in enumerate(history):
+        if not isinstance(frame, Mapping):
+            continue
+        step_name = frame.get("step_name")
+        step_index = frame.get("step_index")
+        step = None
+        if isinstance(step_name, str):
+            step = next((item for item in ordered_steps if item.step_id == step_name), None)
+            key = step_name
+        elif isinstance(step_index, int):
+            step = next((item for item in ordered_steps if item.sequence == step_index), None)
+            key = f"step-index:{step_index}"
+        else:
+            step = ordered_steps[index] if index < len(ordered_steps) else None
+            key = f"frame:{index}"
+        frames_by_step.setdefault(key, []).append((index, frame))
+        current = metadata.setdefault(key, {})
+        if isinstance(step_name, str):
+            current["step_name"] = step_name
+        if isinstance(step_index, int):
+            current["step_index"] = step_index
+        if step is not None:
+            current.update({"step_id": step.step_id, "sequence": step.sequence})
+
+    def sort_key(item: tuple[str, list[tuple[int, Mapping[str, Any]]]]) -> tuple[int, int, str]:
+        key, frames = item
+        value = metadata[key].get("sequence")
+        return (0 if isinstance(value, int) else 1, value if isinstance(value, int) else 0, key)
+
+    result: list[dict[str, Any]] = []
+    for key, frames in sorted(frames_by_step.items(), key=sort_key):
+        item: dict[str, Any] = dict(metadata[key])
+        mapped_frames: list[dict[str, Any]] = []
+        for index, frame in frames:
+            frame_fields = {
+                name: value for name, value in frame.items() if name in _QUANTITY_ALIASES.values()
+            }
+            mapped = _map_fields_to_elements(
+                frame_fields,
+                elements,
+                extracted,
+                case,
+            )
+            mapped_frame: dict[str, Any] = {
+                "frame_index": frame.get("frame_index", index),
+                "mapped_fields": mapped,
+            }
+            mapped_frames.append(mapped_frame)
+        item["frames"] = mapped_frames
+        item["mapped_fields"] = mapped_frames[-1]["mapped_fields"] if mapped_frames else {}
+        result.append(item)
+    return result
 
 
 def _map_field_to_elements(
@@ -335,11 +481,12 @@ def _map_field_to_elements(
     *,
     component_index: int | None = None,
     allow_axis_station: bool = False,
-) -> dict[str, float | list[float]]:
+) -> _FieldMapping | None:
     if not isinstance(field, Mapping) or not isinstance(field.get("values"), Mapping):
-        return {}
+        return None
     values = {str(label): value for label, value in field["values"].items()}
     location = str(field.get("location", ""))
+    target_count = len(elements)
     if location in {"element", "integration_point"}:
         grouped: dict[str, list[Any]] = {}
         for label, value in values.items():
@@ -349,9 +496,15 @@ def _map_field_to_elements(
             items = grouped.get(element_id)
             if items:
                 result[element_id] = _mean_field_values(items, component_index)
-        return result
+        return _FieldMapping(
+            values=result,
+            source_count=len(values),
+            target_count=target_count,
+            mapping=("element-label-mean" if location == "element" else "integration-point-mean"),
+            source_location=location,
+        )
     if location != "node":
-        return {}
+        return None
 
     result = {}
     direct = all(node in values for nodes in elements.values() for node in nodes)
@@ -360,10 +513,16 @@ def _map_field_to_elements(
             result[element_id] = _mean_field_values(
                 [values[node] for node in nodes], component_index
             )
-        return result
+        return _FieldMapping(
+            values=result,
+            source_count=len(values),
+            target_count=target_count,
+            mapping="element-connectivity-mean",
+            source_location=location,
+        )
 
     if not allow_axis_station:
-        return {}
+        return None
 
     # Beam FRD files may replace the input centerline nodes with section nodes.
     # Average values at the nearest axial station and retain that limitation in
@@ -371,7 +530,7 @@ def _map_field_to_elements(
     coordinates = _normalise_coordinates(extracted.get("nodes"))
     centroids = _normalise_coordinates(extracted.get("element_centroids"))
     if not coordinates or not centroids:
-        return {}
+        return None
     axes = [
         max(point[index] for point in coordinates.values())
         - min(point[index] for point in coordinates.values())
@@ -384,7 +543,7 @@ def _map_field_to_elements(
         if point is not None:
             stations.setdefault(round(point[axis], 8), []).append(value)
     if not stations:
-        return {}
+        return None
     result = {}
     for element_id in elements:
         point = centroids.get(element_id)
@@ -392,7 +551,13 @@ def _map_field_to_elements(
             continue
         station = min(stations, key=lambda value: (abs(value - point[axis]), value))
         result[element_id] = _mean_field_values(stations[station], component_index)
-    return result
+    return _FieldMapping(
+        values=result,
+        source_count=len(values),
+        target_count=target_count,
+        mapping="axis-station-mean",
+        source_location=location,
+    )
 
 
 def _mean_field_values(values: Sequence[Any], component_index: int | None) -> float | list[float]:

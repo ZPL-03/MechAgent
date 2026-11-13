@@ -374,6 +374,12 @@ def test_mapped_fields_use_element_centroids_and_preserve_native_fields() -> Non
     assert extracted["mapped_fields"]["strain_energy_density"]["values"] == {"10": 2.0}
     assert extracted["mapped_fields"]["stress_sxx"]["source"] == "fields.stress"
     assert "单元质心" in extracted["mapped_fields"]["stress_sxx"]["derivation"]
+    assert extracted["mapped_fields"]["stress_sxx"]["source_count"] == 2
+    assert extracted["mapped_fields"]["stress_sxx"]["target_count"] == 1
+    assert extracted["mapped_fields"]["stress_sxx"]["mapped_count"] == 1
+    assert extracted["mapped_fields"]["stress_sxx"]["coverage"] == 1.0
+    assert extracted["mapped_fields"]["stress_sxx"]["complete"] is True
+    assert extracted["mapped_fields"]["stress_sxx"]["source_location"] == "integration_point"
 
 
 def test_mapped_beam_volume_uses_mesh_nodes_when_native_volume_is_absent() -> None:
@@ -426,3 +432,85 @@ def test_mapped_solid_field_does_not_use_beam_axis_fallback_for_missing_nodes() 
     )
 
     assert "mapped_fields" not in extracted
+
+
+def test_mapped_field_retains_partial_coverage_instead_of_claiming_complete_mapping() -> None:
+    case = SimulationCase.from_model_params(tc03_model_params(), provenance_confidence=1.0)
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                }
+            },
+            "elements": {"10": ["1", "2"], "11": ["2", "3"]},
+            "element_centroids": {"10": [0.5, 0.0, 0.0], "11": [1.5, 0.0, 0.0]},
+        },
+        case,
+    )
+
+    field = extracted["mapped_fields"]["stress_sxx"]
+    assert field["values"] == {"10": 10.0}
+    assert field["source_count"] == 1
+    assert field["target_count"] == 2
+    assert field["mapped_count"] == 1
+    assert field["coverage"] == 0.5
+    assert field["complete"] is False
+
+
+def test_mapped_step_fields_follow_declared_step_sequence_and_frame_order() -> None:
+    base = SimulationCase.from_model_params(tc03_model_params(), provenance_confidence=1.0)
+    case = base.model_copy(
+        update={
+            "load_steps": [
+                LoadStepSpec(step_id="step-1", sequence=1),
+                LoadStepSpec(step_id="step-2", sequence=2),
+            ]
+        }
+    )
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {},
+            "elements": {"10": ["1", "2"]},
+            "element_centroids": {"10": [0.5, 0.0, 0.0]},
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+            "field_history": [
+                {
+                    "step_name": "step-2",
+                    "frame_index": 0,
+                    "stress": {
+                        "location": "integration_point",
+                        "unit": "MPa",
+                        "values": {"10@ip1": [20.0, 0.0, 0.0]},
+                    },
+                },
+                {
+                    "step_name": "step-1",
+                    "frame_index": 0,
+                    "stress": {
+                        "location": "integration_point",
+                        "unit": "MPa",
+                        "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                    },
+                },
+                {
+                    "step_name": "step-2",
+                    "frame_index": 1,
+                    "stress": {
+                        "location": "integration_point",
+                        "unit": "MPa",
+                        "values": {"10@ip1": [25.0, 0.0, 0.0]},
+                    },
+                },
+            ],
+        },
+        case,
+    )
+
+    steps = extracted["mapped_step_fields"]
+    assert [item["step_id"] for item in steps] == ["step-1", "step-2"]
+    assert [frame["frame_index"] for frame in steps[1]["frames"]] == [0, 1]
+    assert steps[0]["mapped_fields"]["stress_sxx"]["values"] == {"10": 10.0}
+    assert steps[1]["frames"][1]["mapped_fields"]["stress_sxx"]["values"] == {"10": 25.0}

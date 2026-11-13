@@ -48,7 +48,7 @@ MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元�
 
 `CalculiXAdapter.run_case()` 支持 `SimulationCase` 的多个线性静力 `LoadStepSpec`。每个步骤的载荷比例、增量和输出间隔进入同一个输入文件。FRD 解析按分析步编号和字段类别内的输出顺序合并 `field_history`，字段缺失会保留在对应帧而不会借用相邻分析步的值；统一结果选择器据此生成 `requested_fields`、逐步 `step_results` 和兼容别名 `result_steps`，必需字段缺失时作业失败。旧 `run(ModelParams)` 入口仍保持单步兼容语义。
 
-`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。选定字段、单元映射字段和统一语义字段保留位置、单位、来源、推导和映射方式；`ResultFieldSpec.unit` 非空时必须与后端单位完全一致，不能用请求标签掩盖单位冲突。后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
+`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。选定字段、单元映射字段和统一语义字段保留位置、单位、来源、推导和映射方式；`mapped_fields` 还记录 `source_count`、`target_count`、`mapped_count`、`coverage`、`complete`、`source_location` 和具体映射方法。多步结果从 `field_history` 生成 `mapped_step_fields`，每个分析步保留逐帧映射结果和最后一帧的字段索引。`ResultFieldSpec.unit` 非空时必须与后端单位完全一致，不能用请求标签掩盖单位冲突。后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
 
 每个成功适配器结果还保留 `input_sha256` 和 `artifacts`。`artifacts` 只记录求解工作目录内文件的相对路径、大小和 SHA-256，供运行清单、备份和跨后端证据定位同一份输入或输出；该完整性记录不替代参考解、网格收敛或工程适用性校核。
 

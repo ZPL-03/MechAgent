@@ -21,6 +21,20 @@ class ComparisonTolerance(BaseModel):
     coordinate: float = Field(default=1.0e-7, gt=0.0)
 
 
+class FieldComparison(BaseModel):
+    """单个结果字段的比较状态和证据摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["passed", "failed", "unverified", "missing"]
+    alignment: str | None = None
+    reason: str | None = None
+    compared_count: int = Field(default=0, ge=0)
+    mapping: str | None = None
+    left_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+    right_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class BackendComparison(BaseModel):
     """两个适配器结果的差异比较。"""
 
@@ -36,6 +50,7 @@ class BackendComparison(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     unverified_fields: list[str] = Field(default_factory=list)
     alignment: dict[str, str] = Field(default_factory=dict)
+    field_results: dict[str, FieldComparison] = Field(default_factory=dict)
     max_absolute_error: float = Field(default=0.0, ge=0.0)
     max_relative_error: float = Field(default=0.0, ge=0.0)
     tolerance: ComparisonTolerance
@@ -147,27 +162,93 @@ def compare_backend_results(
     compared: list[str] = []
     differences: list[dict[str, Any]] = []
     alignments: dict[str, str] = {}
+    field_results: dict[str, FieldComparison] = {}
     max_abs = 0.0
     max_rel = 0.0
+
+    def set_field_result(
+        name: str,
+        status: Literal["passed", "failed", "unverified", "missing"],
+        *,
+        alignment: str | None = None,
+        reason: str | None = None,
+        compared_count: int = 0,
+        left_field: dict[str, Any] | None = None,
+        right_field: dict[str, Any] | None = None,
+    ) -> None:
+        mapping = _field_mapping_name(left_field, right_field)
+        field_results[name] = FieldComparison(
+            status=status,
+            alignment=alignment,
+            reason=reason,
+            compared_count=compared_count,
+            mapping=mapping,
+            left_coverage=_field_coverage(left_field),
+            right_coverage=_field_coverage(right_field),
+        )
+
     for name in names:
         left_field = left_fields.get(name)
         right_field = right_fields.get(name)
         if not isinstance(left_field, dict) or not isinstance(right_field, dict):
             missing.append(name)
+            set_field_result(
+                name,
+                "missing",
+                reason="field_missing",
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         left_values = left_field.get("values")
         right_values = right_field.get("values")
         if not isinstance(left_values, dict) or not isinstance(right_values, dict):
             missing.append(name)
+            set_field_result(
+                name,
+                "missing",
+                reason="field_values_missing",
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         field_semantics = _field_semantics_mismatch(left_field, right_field)
         if field_semantics is not None:
             if field_source in {"fields", "mapped_fields"}:
                 unverified.append(name)
                 alignments[name] = "unverified"
+                set_field_result(
+                    name,
+                    "unverified",
+                    alignment="unverified",
+                    reason=str(field_semantics["reason"]),
+                    left_field=left_field,
+                    right_field=right_field,
+                )
             else:
                 differences.append({"field": name, **field_semantics})
                 alignments[name] = "contract-mismatch"
+                set_field_result(
+                    name,
+                    "failed",
+                    alignment="contract-mismatch",
+                    reason=str(field_semantics["reason"]),
+                    left_field=left_field,
+                    right_field=right_field,
+                )
+            continue
+        mapping_issue = _mapping_coverage_mismatch(left_field, right_field, field_source)
+        if mapping_issue is not None:
+            unverified.append(name)
+            alignments[name] = "unverified"
+            set_field_result(
+                name,
+                "unverified",
+                alignment="unverified",
+                reason=mapping_issue,
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         location = str(left_field.get("location", ""))
         if location in {"element", "integration_point"} and not _mesh_digests_match(left, right):
@@ -177,6 +258,14 @@ def compare_backend_results(
             ):
                 unverified.append(name)
                 alignments[name] = "unverified"
+                set_field_result(
+                    name,
+                    "unverified",
+                    alignment="unverified",
+                    reason="mesh_digest_mismatch",
+                    left_field=left_field,
+                    right_field=right_field,
+                )
                 continue
         elif location in {"element", "integration_point"}:
             labels = sorted(set(left_values) | set(right_values))
@@ -198,6 +287,23 @@ def compare_backend_results(
             missing.extend(f"{name}[{label}]" for label in labels if label not in left_values)
             missing.extend(f"{name}[{label}]" for label in labels if label not in right_values)
             alignments[name] = "element-key" if location == "element" else "integration-point-key"
+            field_missing = any(item.startswith(f"{name}[") for item in missing)
+            field_failed = any(item.get("field") == name for item in differences)
+            set_field_result(
+                name,
+                "failed" if field_missing or field_failed else "passed",
+                alignment=alignments[name],
+                reason=(
+                    "value_difference"
+                    if field_failed
+                    else "field_values_missing"
+                    if field_missing
+                    else None
+                ),
+                compared_count=_field_compared_count(name, compared),
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         labels = sorted(set(left_values) | set(right_values))
         coordinate_pairs = _coordinate_pairs(
@@ -234,6 +340,28 @@ def compare_backend_results(
                 if left_field.get("location") == "element_centroid"
                 else "node-coordinate"
             )
+            field_failed = any(item.get("field") == name for item in differences)
+            field_compared = _field_compared_count(name, compared)
+            field_missing = any(item.startswith(f"{name}[") for item in missing)
+            set_field_result(
+                name,
+                "failed"
+                if field_failed or field_missing
+                else "passed"
+                if field_compared
+                else "unverified",
+                alignment=alignments[name],
+                reason=(
+                    "value_difference"
+                    if field_failed
+                    else "field_values_missing"
+                    if field_missing
+                    else None
+                ),
+                compared_count=field_compared,
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         line_aligned = _line_coordinate_values(
             left,
@@ -256,6 +384,16 @@ def compare_backend_results(
             max_abs = max(max_abs, aligned[2])
             max_rel = max(max_rel, aligned[3])
             alignments[name] = line_alignment
+            field_failed = any(item.get("field") == name for item in differences)
+            set_field_result(
+                name,
+                "failed" if field_failed else "passed",
+                alignment=line_alignment,
+                reason="value_difference" if field_failed else None,
+                compared_count=_field_compared_count(name, compared),
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         if isinstance(left_field.get("summary"), dict) and isinstance(
             right_field.get("summary"), dict
@@ -274,10 +412,37 @@ def compare_backend_results(
                 max_abs = max(max_abs, summary_result[2])
                 max_rel = max(max_rel, summary_result[3])
                 alignments[name] = "summary"
+                field_failed = any(item.get("field") == name for item in differences)
+                set_field_result(
+                    name,
+                    "failed" if field_failed else "passed",
+                    alignment="summary",
+                    reason="value_difference" if field_failed else None,
+                    compared_count=_field_compared_count(name, compared),
+                    left_field=left_field,
+                    right_field=right_field,
+                )
+            if summary_result is None:
+                set_field_result(
+                    name,
+                    "missing",
+                    alignment="summary",
+                    reason="summary_missing",
+                    left_field=left_field,
+                    right_field=right_field,
+                )
             continue
         if field_source in {"fields", "mapped_fields"}:
             unverified.append(name)
             alignments[name] = "unverified"
+            set_field_result(
+                name,
+                "unverified",
+                alignment="unverified",
+                reason="coordinate_alignment_unavailable",
+                left_field=left_field,
+                right_field=right_field,
+            )
             continue
         direct_compared = False
         for label in labels:
@@ -316,6 +481,34 @@ def compare_backend_results(
                     )
         if direct_compared:
             alignments[name] = "direct"
+            field_failed = any(item.get("field") == name for item in differences)
+            field_missing = any(item.startswith(f"{name}[") for item in missing)
+            set_field_result(
+                name,
+                "failed" if field_failed or field_missing else "passed",
+                alignment="direct",
+                reason=(
+                    "value_difference"
+                    if field_failed
+                    else "field_values_missing"
+                    if field_missing
+                    else None
+                ),
+                compared_count=_field_compared_count(name, compared),
+                left_field=left_field,
+                right_field=right_field,
+            )
+        else:
+            set_field_result(
+                name,
+                "missing" if any(item.startswith(f"{name}[") for item in missing) else "unverified",
+                alignment=alignments.get(name),
+                reason="field_values_missing"
+                if any(item.startswith(f"{name}[") for item in missing)
+                else "no_comparable_values",
+                left_field=left_field,
+                right_field=right_field,
+            )
     status: Literal["passed", "failed", "unverified"] = "passed"
     if missing or differences:
         status = "failed"
@@ -330,11 +523,53 @@ def compare_backend_results(
         missing_fields=sorted(set(missing)),
         unverified_fields=sorted(set(unverified)),
         alignment=alignments,
+        field_results=field_results,
         max_absolute_error=max_abs,
         max_relative_error=max_rel,
         tolerance=selected_tolerance,
         differences=differences,
     )
+
+
+def _field_mapping_name(left: dict[str, Any] | None, right: dict[str, Any] | None) -> str | None:
+    values = [
+        str(field["mapping"])
+        for field in (left, right)
+        if isinstance(field, dict) and isinstance(field.get("mapping"), str)
+    ]
+    if not values:
+        return None
+    if len(set(values)) == 1:
+        return values[0]
+    return " <-> ".join(dict.fromkeys(values))
+
+
+def _field_coverage(field: dict[str, Any] | None) -> float | None:
+    if not isinstance(field, dict) or "coverage" not in field:
+        return None
+    try:
+        value = float(field["coverage"])
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and 0.0 <= value <= 1.0 else None
+
+
+def _mapping_coverage_mismatch(
+    left: dict[str, Any], right: dict[str, Any], field_source: str
+) -> str | None:
+    if field_source != "mapped_fields":
+        return None
+    coverages = (_field_coverage(left), _field_coverage(right))
+    complete_values = (left.get("complete"), right.get("complete"))
+    if any(value is not None and value < 1.0 for value in coverages):
+        return "mapping_incomplete"
+    if any(value is False for value in complete_values):
+        return "mapping_incomplete"
+    return None
+
+
+def _field_compared_count(name: str, compared: list[str]) -> int:
+    return sum(1 for item in compared if item.startswith(f"{name}[") or item.startswith(f"{name}."))
 
 
 def _field_semantics_mismatch(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any] | None:

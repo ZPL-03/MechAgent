@@ -29,6 +29,7 @@ from mechagent.core.compare import (
     BackendComparison,
     ComparisonTolerance,
     EquilibriumReport,
+    FieldComparison,
     compare_backend_results,
     evaluate_reaction_balance,
 )
@@ -152,6 +153,7 @@ __all__ = [
     "BackendComparison",
     "ComparisonTolerance",
     "EquilibriumReport",
+    "FieldComparison",
     "compare_backend_results",
     "evaluate_reaction_balance",
     "attach_case_result_fields",
