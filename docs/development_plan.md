@@ -18,7 +18,7 @@ MechAgent 的目标产品是一个可部署、可审计、可扩展的 CAE/FEA �
 
 ## 当前基线与缺口
 
-`v0.2.0` 的已验证基线为结构线弹性静力梁、矩形板、参数化开孔薄板和矩形实体，默认工具为 CalculiX、CalculiX INP、Gmsh OCC 和本地执行器。Studio 已具备 SQLite 作业记录、独立 worker、取消、重试、重启查询、幂等提交和运行清单校验。代码已注册 Abaqus/Standard 适配器、结果字段选择器、双后端差异比较器和 Studio 备份工具；本机 Abaqus 真实运行与双后端数值证据属于独立工具门禁，不能由便携 CI 替代。
+当前已验证基线覆盖结构线弹性静力梁、矩形板、参数化开孔薄板和矩形实体，默认工具为 CalculiX、CalculiX INP、Gmsh OCC 和本地执行器。Studio 已具备 SQLite 作业记录、独立 worker、取消、重试、重启查询、幂等提交和运行清单校验。代码已注册 Abaqus/Standard 适配器、结果字段选择器、双后端差异比较器和 Studio 备份工具；本机 Abaqus 真实运行与双后端数值证据属于独立工具门禁，不能由便携 CI 替代。
 
 当前代码基线还提供 `SimulationCase` schema v1 的兼容封装、`/api/v1` 稳定入口和 SQLite
 schema v7 事务迁移。案例契约复用 `ModelParams`，补充单位、坐标、区域、请求来源、字段来源、

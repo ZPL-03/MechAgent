@@ -77,8 +77,8 @@ CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑�
 直接 CAD 网格、网格集合映射、网格质量或收敛验收。
 
 实体 CAD 直接网格的本机证据使用以下命令生成。两个清单均要求源文件摘要、拓扑区域节点集合、
-C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、能量字段全部有效；带孔案例还
-验证了圆柱内壁和端面存在于同一直接导入实体中。
+C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、能量字段全部有效；带孔案例额外
+检查贯穿圆孔的圆柱内壁拓扑面保留在直接导入实体中。
 
 ```powershell
 python scripts/run_cad_topology_case.py --generate-box --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --output-dir mechagent_output/cad-topology-evidence

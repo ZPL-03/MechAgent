@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -26,6 +27,10 @@ from mechagent.core.models import ElementType  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.evidence import artifact_records  # noqa: E402
 from mechagent.orchestrator.agents.geometry import GeometryAgent  # noqa: E402
+
+_HOLE_CENTER = (50.0, 20.0)
+_HOLE_RADIUS = 8.0
+_SOLID_BOUNDS = (100.0, 40.0, 30.0)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,7 +130,13 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         result = solver.run_case(case)
-        passed, checks = _checks(analysis, case, mesh, result)
+        passed, checks = _checks(
+            analysis,
+            case,
+            mesh,
+            result,
+            require_through_hole=args.generate_hole_box,
+        )
         manifest = {
             "schema_version": 1,
             "status": "passed" if passed else "failed",
@@ -152,7 +163,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _checks(
-    analysis: object, case: object, mesh: object, result: dict[str, object]
+    analysis: object,
+    case: object,
+    mesh: object,
+    result: dict[str, object],
+    *,
+    require_through_hole: bool = False,
 ) -> tuple[bool, dict[str, bool]]:
     candidate = analysis.candidate  # type: ignore[attr-defined]
     regions = case.regions  # type: ignore[attr-defined]
@@ -161,6 +177,9 @@ def _checks(
     checks = {
         "cad_topology_entities": bool(candidate.topology_entities),
         "cad_region_candidates": bool(candidate.region_candidates),
+        "through_hole_topology": (
+            _has_generated_through_hole(candidate) if require_through_hole else True
+        ),
         "case_root_topology": (
             regions.get("root").kind == "topology" if "root" in regions else False
         ),
@@ -178,12 +197,52 @@ def _checks(
     return all(checks.values()), checks
 
 
+def _has_generated_through_hole(candidate: object) -> bool:
+    """确认生成案例中的贯穿圆孔面仍作为独立 CAD 面存在。"""
+
+    bbox_min = candidate.bbox_min  # type: ignore[attr-defined]
+    bbox_max = candidate.bbox_max  # type: ignore[attr-defined]
+    expected_area = 2.0 * math.pi * _HOLE_RADIUS * _SOLID_BOUNDS[2]
+    tolerance = 1.0e-5
+    for entity in candidate.topology_entities:  # type: ignore[attr-defined]
+        if entity.dimension != 2:
+            continue
+        entity_min = entity.bbox_min
+        entity_max = entity.bbox_max
+        spans_height = (
+            abs(entity_min[2] - bbox_min[2]) <= tolerance
+            and abs(entity_max[2] - bbox_max[2]) <= tolerance
+        )
+        interior_xy = (
+            entity_min[0] > bbox_min[0] + 1.0
+            and entity_max[0] < bbox_max[0] - 1.0
+            and entity_min[1] > bbox_min[1] + 1.0
+            and entity_max[1] < bbox_max[1] - 1.0
+        )
+        if (
+            spans_height
+            and interior_xy
+            and math.isclose(entity.measure, expected_area, rel_tol=1.0e-6, abs_tol=1.0e-4)
+        ):
+            expected_half_width = _HOLE_RADIUS
+            center_x, center_y = _HOLE_CENTER
+            if (
+                abs((entity_min[0] + entity_max[0]) / 2.0 - center_x) > tolerance
+                or abs((entity_min[1] + entity_max[1]) / 2.0 - center_y) > tolerance
+                or abs((entity_max[0] - entity_min[0]) / 2.0 - expected_half_width) > tolerance
+                or abs((entity_max[1] - entity_min[1]) / 2.0 - expected_half_width) > tolerance
+            ):
+                continue
+            return True
+    return False
+
+
 def _write_box_step(path: Path) -> None:
     gmsh.initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("mechagent_cad_case")
-        gmsh.model.occ.addBox(0.0, 0.0, 0.0, 100.0, 40.0, 30.0)
+        gmsh.model.occ.addBox(0.0, 0.0, 0.0, *_SOLID_BOUNDS)
         gmsh.model.occ.synchronize()
         gmsh.write(str(path))
     finally:
@@ -195,8 +254,10 @@ def _write_hole_box_step(path: Path) -> None:
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("mechagent_cad_hole_case")
-        box = gmsh.model.occ.addBox(0.0, 0.0, 0.0, 100.0, 40.0, 30.0)
-        hole = gmsh.model.occ.addCylinder(50.0, 20.0, 0.0, 0.0, 0.0, 30.0, 8.0)
+        box = gmsh.model.occ.addBox(0.0, 0.0, 0.0, *_SOLID_BOUNDS)
+        hole = gmsh.model.occ.addCylinder(
+            _HOLE_CENTER[0], _HOLE_CENTER[1], 0.0, 0.0, 0.0, _SOLID_BOUNDS[2], _HOLE_RADIUS
+        )
         gmsh.model.occ.cut([(3, box)], [(3, hole)], removeObject=True, removeTool=True)
         gmsh.model.occ.synchronize()
         gmsh.write(str(path))
