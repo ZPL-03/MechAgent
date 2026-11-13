@@ -73,6 +73,12 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
     extracted["case_id"] = case.case_id or case.model.case_id
     extracted["units"] = case.units.model_dump(mode="json")
     extracted["coordinate_system"] = case.coordinate_system.model_dump(mode="json")
+    mesh_digest = compute_mesh_digest(extracted)
+    declared_mesh_digest = extracted.get("mesh_digest")
+    if declared_mesh_digest is not None and declared_mesh_digest != mesh_digest:
+        raise SolverError("结果中的 mesh_digest 与节点/单元拓扑不一致。")
+    if mesh_digest is not None:
+        extracted["mesh_digest"] = mesh_digest
 
     raw_fields = extracted.get("fields")
     if not isinstance(raw_fields, Mapping):
@@ -453,6 +459,28 @@ def _normalise_coordinates(value: Any) -> dict[str, tuple[float, float, float]]:
         if all(math.isfinite(item) for item in coordinates):
             result[str(label)] = coordinates
     return result
+
+
+def compute_mesh_digest(extracted: Mapping[str, Any]) -> str | None:
+    """根据节点坐标和单元连接生成可复核的网格指纹。"""
+
+    nodes = _normalise_coordinates(extracted.get("nodes")) or _normalise_coordinates(
+        extracted.get("mesh_nodes")
+    )
+    elements = _normalise_elements(extracted.get("elements"))
+    if not nodes or not elements:
+        return None
+    if any(node not in nodes for connectivity in elements.values() for node in connectivity):
+        return None
+    payload = {
+        "nodes": {label: list(nodes[label]) for label in sorted(nodes)},
+        "elements": {label: list(elements[label]) for label in sorted(elements)},
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
 
 
 def _step_result_specs(case: SimulationCase, step: LoadStepSpec | None) -> list[ResultFieldSpec]:

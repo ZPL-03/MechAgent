@@ -7,6 +7,7 @@ from mechagent.core.compare import (
     compare_backend_results,
     derive_comparison_fields,
 )
+from mechagent.core.results import compute_mesh_digest
 
 
 def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
@@ -258,6 +259,111 @@ def test_backend_comparison_marks_raw_fields_at_different_locations_unverified()
     assert result.field_source == "fields"
     assert result.unverified_fields == ["energy", "stress"]
     assert result.alignment == {"energy": "unverified", "stress": "unverified"}
+
+
+def test_backend_comparison_aligns_exact_integration_points_with_mesh_digest() -> None:
+    mesh = {
+        "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+        "elements": {"10": ["1", "2"]},
+    }
+    mesh["mesh_digest"] = compute_mesh_digest(mesh)
+    left = {
+        **mesh,
+        "fields": {
+            "stress": {
+                "location": "integration_point",
+                "unit": "MPa",
+                "values": {"10@ip1": [10.0, 0.0, 0.0]},
+            }
+        },
+    }
+    right = {
+        **mesh,
+        "fields": {
+            "stress": {
+                "location": "integration_point",
+                "unit": "MPa",
+                "values": {"10@ip1": [10.0001, 0.0, 0.0]},
+            }
+        },
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-3),
+    )
+
+    assert result.status == "passed"
+    assert result.alignment == {"stress": "integration-point-key"}
+
+
+def test_backend_comparison_keeps_integration_points_unverified_without_mesh_digest() -> None:
+    result = compare_backend_results(
+        {
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                }
+            }
+        },
+        {
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                }
+            }
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["stress"]
+
+
+def test_backend_comparison_rejects_invalid_mesh_digest_provenance() -> None:
+    mesh = {
+        "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+        "elements": {"10": ["1", "2"]},
+        "mesh_digest": "0" * 64,
+    }
+    result = compare_backend_results(
+        {
+            **mesh,
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                }
+            },
+        },
+        {
+            **mesh,
+            "fields": {
+                "stress": {
+                    "location": "integration_point",
+                    "unit": "MPa",
+                    "values": {"10@ip1": [10.0, 0.0, 0.0]},
+                }
+            },
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["stress"]
 
 
 def test_derived_comparison_fields_use_common_physical_semantics() -> None:

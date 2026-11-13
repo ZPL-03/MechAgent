@@ -36,6 +36,52 @@ def test_result_fields_select_magnitude_and_mises() -> None:
     assert extracted["result_steps"][0]["step_id"] == "step-1"
 
 
+def test_result_fields_include_stable_mesh_digest() -> None:
+    case = _case()
+    extracted = attach_case_result_fields(
+        {
+            "nodes": {"2": [1.0, 0.0, 0.0], "1": [0.0, 0.0, 0.0]},
+            "elements": {"10": ["1", "2"]},
+            "fields": {
+                "displacement": {
+                    "location": "node",
+                    "values": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+                },
+                "stress": {
+                    "location": "node",
+                    "values": {"1": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                },
+            },
+        },
+        case,
+    )
+
+    assert len(extracted["mesh_digest"]) == 64
+    assert extracted["mesh_digest"].islower()
+
+
+def test_result_fields_reject_declared_mesh_digest_mismatch() -> None:
+    with pytest.raises(SolverError, match="mesh_digest"):
+        attach_case_result_fields(
+            {
+                "mesh_digest": "0" * 64,
+                "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+                "elements": {"10": ["1", "2"]},
+                "fields": {
+                    "displacement": {
+                        "location": "node",
+                        "values": {"1": [0.0, 0.0, 0.0]},
+                    },
+                    "stress": {
+                        "location": "node",
+                        "values": {"1": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                    },
+                },
+            },
+            _case(),
+        )
+
+
 def test_result_fields_reject_incomplete_multistep_history() -> None:
     case = _case().model_copy(
         update={

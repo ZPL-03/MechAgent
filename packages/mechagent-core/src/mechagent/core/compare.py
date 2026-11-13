@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mechagent.core.results import compute_mesh_digest
+
 
 class ComparisonTolerance(BaseModel):
     """场量差异阈值。"""
@@ -136,6 +138,36 @@ def compare_backend_results(
         ):
             unverified.append(name)
             alignments[name] = "unverified"
+            continue
+        location = str(left_field.get("location", ""))
+        if location in {"element", "integration_point"} and not _mesh_digests_match(left, right):
+            if not (
+                isinstance(left_field.get("summary"), dict)
+                and isinstance(right_field.get("summary"), dict)
+            ):
+                unverified.append(name)
+                alignments[name] = "unverified"
+                continue
+        elif location in {"element", "integration_point"}:
+            labels = sorted(set(left_values) | set(right_values))
+            exact_values = [
+                (label, label, left_values[label], right_values[label])
+                for label in labels
+                if label in left_values and label in right_values
+            ]
+            exact_aligned = _compare_value_maps(
+                name,
+                exact_values,
+                selected_tolerance,
+                "element-key" if location == "element" else "integration-point-key",
+            )
+            compared.extend(exact_aligned[0])
+            differences.extend(exact_aligned[1])
+            max_abs = max(max_abs, exact_aligned[2])
+            max_rel = max(max_rel, exact_aligned[3])
+            missing.extend(f"{name}[{label}]" for label in labels if label not in left_values)
+            missing.extend(f"{name}[{label}]" for label in labels if label not in right_values)
+            alignments[name] = "element-key" if location == "element" else "integration-point-key"
             continue
         labels = sorted(set(left_values) | set(right_values))
         coordinate_pairs = _coordinate_pairs(
@@ -292,6 +324,20 @@ def _raw_field_has_incompatible_semantics(left: dict[str, Any], right: dict[str,
     left_unit = str(left.get("unit", ""))
     right_unit = str(right.get("unit", ""))
     return left_unit != right_unit
+
+
+def _mesh_digests_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_digest = left.get("mesh_digest")
+    right_digest = right.get("mesh_digest")
+    left_computed = compute_mesh_digest(left)
+    right_computed = compute_mesh_digest(right)
+    if left_computed is None or right_computed is None:
+        return False
+    if left_computed != left_digest:
+        return False
+    if right_computed != right_digest:
+        return False
+    return isinstance(left_digest, str) and bool(left_digest) and left_digest == right_digest
 
 
 def _result_contract_mismatches(
