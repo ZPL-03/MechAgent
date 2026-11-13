@@ -7,6 +7,7 @@ import hashlib
 import json
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -101,6 +102,13 @@ def _wait_ready(process: subprocess.Popen[str], base_url: str, timeout: float = 
     raise TimeoutError("Studio HTTP 服务未在限定时间内就绪。")
 
 
+def _checkpoint_database(database: Path) -> None:
+    with sqlite3.connect(database) as connection:
+        result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if result is None or int(result[0]) != 0:
+        raise RuntimeError(f"SQLite WAL checkpoint 未完成：{database}")
+
+
 def run_smoke(output_dir: Path) -> dict[str, Any]:
     """启动独立 HTTP 服务并返回不含凭据的验证结果。"""
 
@@ -147,12 +155,31 @@ def run_smoke(output_dir: Path) -> dict[str, Any]:
                 "organization": "engineering",
                 "roles": ["runner"],
                 "projects": ["project-a"],
+                "expires_at": "2099-01-01T00:00:00Z",
             },
         )
         child_key = str(created.get("api_key", ""))
         checks["identity_creation"] = status == 201 and child_key.startswith("mech_")
         checks["key_not_returned_as_digest"] = "api_key_sha256" not in json.dumps(
             created, ensure_ascii=False
+        )
+        status, identities, _ = _request(f"{base_url}/api/v1/identities", token=admin_key)
+        listed = identities.get("identities", []) if isinstance(identities, dict) else []
+        checks["expiry_returned"] = status == 200 and any(
+            item.get("subject") == "http-runner"
+            and item.get("expires_at") == "2099-01-01T00:00:00+00:00"
+            for item in listed
+            if isinstance(item, dict)
+        )
+        status, preserved, _ = _request(
+            f"{base_url}/api/v1/identities/http-runner",
+            method="PATCH",
+            token=admin_key,
+            body={"organization": "engineering"},
+        )
+        checks["expiry_preserved_on_patch"] = (
+            status == 200
+            and preserved.get("identity", {}).get("expires_at") == "2099-01-01T00:00:00+00:00"
         )
 
         status, _, _ = _request(f"{base_url}/api/v1/jobs?project_id=project-a", token=child_key)
@@ -172,6 +199,26 @@ def run_smoke(output_dir: Path) -> dict[str, Any]:
         status, _, _ = _request(f"{base_url}/api/v1/jobs?project_id=project-a", token=rotated_key)
         checks["rotated_key_allowed"] = status == 200
 
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "UPDATE identities SET expires_at=? WHERE subject=?",
+                (time.time() - 1, "http-runner"),
+            )
+        status, _, _ = _request(f"{base_url}/api/v1/jobs?project_id=project-a", token=rotated_key)
+        checks["expired_key_revoked"] = status == 401
+
+        status, cleared, _ = _request(
+            f"{base_url}/api/v1/identities/http-runner",
+            method="PATCH",
+            token=admin_key,
+            body={"organization": "engineering", "expires_at": None},
+        )
+        checks["expiry_cleared_explicitly"] = (
+            status == 200 and cleared.get("identity", {}).get("expires_at") is None
+        )
+        status, _, _ = _request(f"{base_url}/api/v1/jobs?project_id=project-a", token=rotated_key)
+        checks["cleared_key_allowed"] = status == 200
+
         status, _, _ = _request(
             f"{base_url}/api/v1/identities/http-runner",
             method="DELETE",
@@ -186,6 +233,7 @@ def run_smoke(output_dir: Path) -> dict[str, Any]:
         actions = {str(item.get("action")) for item in events if isinstance(item, dict)}
         checks["audit_events_visible"] = status == 200 and {
             "identity.create",
+            "identity.update",
             "identity.rotate",
             "identity.disable",
         }.issubset(actions)
@@ -202,6 +250,17 @@ def run_smoke(output_dir: Path) -> dict[str, Any]:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+    if database.exists():
+        try:
+            _checkpoint_database(database)
+            checks["database_checkpoint"] = True
+        except (OSError, RuntimeError, sqlite3.DatabaseError) as exc:
+            checks["database_checkpoint"] = False
+            observations["database_checkpoint_error"] = redact_sensitive_text(
+                str(exc), extra_secrets=(admin_key, child_key, rotated_key)
+            )
+    else:
+        checks["database_checkpoint"] = False
     observations["checks"] = checks
     observations["status"] = "passed" if checks and all(checks.values()) else "failed"
     observations["server_stopped"] = process.poll() is not None

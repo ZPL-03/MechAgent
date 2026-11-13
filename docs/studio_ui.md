@@ -76,6 +76,8 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
 | `POST /api/v1/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
 
+主体的 `expires_at` 使用带时区的 ISO 8601 时间。创建主体或明确设置过期时间时，该时间必须晚于服务当前时间；认证查询会拒绝已过期主体。更新主体时省略 `expires_at` 保留原值，显式传入 `null` 表示永不过期。
+
 旧兼容入口包含同一路径的 `/api/metrics`，其响应头声明弃用周期。
 
 作业、诊断、报告和主体目录类 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、

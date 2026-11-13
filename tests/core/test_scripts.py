@@ -48,6 +48,17 @@ def test_studio_http_smoke_verifies_independent_process_and_writes_manifest(tmp_
     assert result["status"] == "passed"
     assert result["server_stopped"] is True
     assert result["manifest_errors"] == []
+    assert all(
+        result["checks"][name]
+        for name in (
+            "database_checkpoint",
+            "expiry_returned",
+            "expiry_preserved_on_patch",
+            "expired_key_revoked",
+            "expiry_cleared_explicitly",
+            "cleared_key_allowed",
+        )
+    )
     assert verify_manifest(Path(result["manifest"])) == []
 
 

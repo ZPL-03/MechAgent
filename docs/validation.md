@@ -259,8 +259,7 @@ python -m mechagent.cli verify-evidence path/to/run/manifest.json
 文件校验通过返回退出码 0，不匹配返回 1；工程参考比较单独执行。Windows Job Object 进程树终止具有本机与 Windows CI 行为测试；其他操作系统的进程边界仍需独立验收。运行层当前没有求解器内部断点续算接口。
 
 身份目录门禁使用组织管理员创建主体、验证项目和组织范围、轮换并停用 API key；数据库只保留
-SHA-256 摘要，创建和轮换响应中的明文 key 不会写入主体表。跨组织管理员可读取和管理全部组织，
-普通管理员只能操作所属组织。指标接口的最小检查使用已配置的 Bearer API key；不携带项目范围时只有 admin 可以读取本组织统计：
+SHA-256 摘要，创建和轮换响应中的明文 key 不会写入主体表。`expires_at` 必须是带时区且晚于当前时间的 ISO 8601 时间；认证查询拒绝已过期主体，更新请求省略该字段时保留原值，显式 `null` 表示永不过期。跨组织管理员可读取和管理全部组织，普通管理员只能操作所属组织。指标接口的最小检查使用已配置的 Bearer API key；不携带项目范围时只有 admin 可以读取本组织统计：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Headers @{Authorization="Bearer <key>"}
@@ -268,7 +267,7 @@ Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Heade
 
 响应包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数、本机工作目录字节数与配额、数据库文件系统容量以及 worker 和可见子进程的 CPU 时间与峰值常驻内存；请求正文、凭据、文件路径和原始 worker 诊断位于响应字段之外。资源或文件系统字段为空时表示当前边界没有可读取的采样；本机工作目录配额和文件系统指标与 S3 容量、集中 telemetry 分别统计。
 
-独立 HTTP 验收使用 `scripts/studio_http_smoke.py`。脚本在临时输出目录生成只含 API key 摘要的配置，启动独立 Uvicorn 进程，并通过回环 TCP 请求验证缺少凭据、管理员认证、v1 响应头、主体创建、项目允许与拒绝、密钥轮换、旧密钥撤销、主体停用和审计读取。脚本只在进程结束后写入 `http-smoke.json` 和 `manifest.json`，不会输出明文 key；退出码为 0 且清单校验无错误才算通过：
+独立 HTTP 验收使用 `scripts/studio_http_smoke.py`。脚本在临时输出目录生成只含 API key 摘要的配置，启动独立 Uvicorn 进程，并通过回环 TCP 请求验证缺少凭据、管理员认证、v1 响应头、主体创建、过期时间返回、PATCH 保留和清除过期时间、已过期主体拒绝认证、项目允许与拒绝、密钥轮换、旧密钥撤销、主体停用和审计读取。脚本只在进程结束后写入 `http-smoke.json` 和 `manifest.json`，不会输出明文 key；退出码为 0 且清单校验无错误才算通过：
 
 ```powershell
 python scripts/studio_http_smoke.py --output-dir mechagent_output/studio-http-evidence-live

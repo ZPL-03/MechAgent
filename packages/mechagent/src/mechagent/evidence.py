@@ -47,7 +47,12 @@ def artifact_records(
         raise FileNotFoundError(root)
     records: list[dict[str, Any]] = []
     for path in sorted(root.rglob("*")):
-        if path.is_symlink() or not path.is_file() or path.name == manifest_name:
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.name == manifest_name
+            or _is_sqlite_journal(path)
+        ):
             continue
         if not path.resolve().is_relative_to(root):
             continue
@@ -59,6 +64,12 @@ def artifact_records(
             }
         )
     return records
+
+
+def _is_sqlite_journal(path: Path) -> bool:
+    """SQLite WAL and shared-memory files are transient and not backup objects."""
+
+    return path.name.endswith(("-wal", "-shm"))
 
 
 def public_value(value: Any, secrets: tuple[str, ...] = ()) -> Any:
@@ -131,6 +142,7 @@ def verify_manifest(path: Path) -> list[str]:
             or not candidate.is_file()
             or candidate.name == path.name
             or candidate.name.endswith((".tmp", ".log"))
+            or _is_sqlite_journal(candidate)
         ):
             continue
         relative = candidate.relative_to(root).as_posix()

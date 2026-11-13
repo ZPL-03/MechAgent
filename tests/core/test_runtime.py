@@ -85,6 +85,25 @@ def test_studio_auth_directory_and_s3_settings_require_explicit_scope() -> None:
         StudioSettings(artifact_backend="s3")
 
 
+def test_expired_managed_identity_cannot_authenticate(store: JobStore) -> None:
+    _, secret = store.create_identity(
+        subject="expired",
+        organization="engineering",
+        roles=["viewer"],
+        projects=["project-a"],
+        expires_at=time.time() + 3600,
+        api_key="expired-key-123456",
+    )
+    with store.transaction() as connection:
+        connection.execute(
+            "UPDATE identities SET expires_at=? WHERE subject=?",
+            (time.time() - 1, "expired"),
+        )
+
+    with pytest.raises(ValueError, match="API key 无效"):
+        store.authenticate_identity(secret)
+
+
 def test_public_config_redacts_configured_studio_key_digests() -> None:
     config = MechAgentConfig(
         studio=StudioSettings(
@@ -379,6 +398,8 @@ def test_artifact_records_hashes_nested_files_and_excludes_manifest(tmp_path: Pa
     nested = tmp_path / "nested" / "result.bin"
     nested.parent.mkdir()
     nested.write_bytes(b"result")
+    (tmp_path / "jobs.sqlite3-wal").write_bytes(b"transient")
+    (tmp_path / "jobs.sqlite3-shm").write_bytes(b"transient")
     (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
 
     records = artifact_records(tmp_path)

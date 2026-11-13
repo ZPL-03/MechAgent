@@ -61,6 +61,17 @@ def _nonnegative_int(value: float | int | None) -> int | None:
     return normalized
 
 
+def _validate_identity_expiry(value: float | None) -> float | None:
+    """校验新建或明确设置的主体过期时间。"""
+
+    if value is None:
+        return None
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized <= time.time():
+        raise ValueError("expires_at 必须是晚于当前时间的有限时间戳。")
+    return normalized
+
+
 class JobStore:
     def __init__(
         self,
@@ -487,6 +498,7 @@ class JobStore:
         secret = api_key.strip() if api_key is not None else "mech_" + secrets.token_urlsafe(32)
         if len(secret) < 16 or any(char.isspace() for char in secret):
             raise ValueError("API key 必须至少包含 16 个非空白字符。")
+        expires_at = _validate_identity_expiry(expires_at)
         digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
         now = time.time()
         with self.transaction() as connection:
@@ -524,6 +536,7 @@ class JobStore:
         projects: list[str] | tuple[str, ...] | None = None,
         active: bool | None = None,
         expires_at: float | None = None,
+        preserve_expires_at: bool = False,
     ) -> dict[str, Any]:
         current = self._identity_row(subject)
         next_roles = roles if roles is not None else tuple(json.loads(str(current["roles"])))
@@ -537,17 +550,22 @@ class JobStore:
             projects=next_projects,
         )
         next_active = int(bool(current["active"])) if active is None else int(active)
+        next_expires_at = (
+            float(current["expires_at"])
+            if preserve_expires_at and current["expires_at"] is not None
+            else _validate_identity_expiry(expires_at)
+        )
         with self.transaction() as connection:
             connection.execute(
                 """UPDATE identities SET organization=?,roles=?,projects=?,active=?,
-                updated_at=?,expires_at=? WHERE subject=?""",
+                    updated_at=?,expires_at=? WHERE subject=?""",
                 (
                     normalized_org,
                     json.dumps(sorted(normalized_roles)),
                     json.dumps(sorted(normalized_projects)),
                     next_active,
                     time.time(),
-                    expires_at,
+                    next_expires_at,
                     subject,
                 ),
             )

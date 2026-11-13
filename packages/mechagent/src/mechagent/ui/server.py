@@ -478,7 +478,10 @@ def create_studio_app(
             return None
         if value.tzinfo is None:
             raise HTTPException(422, "expires_at 必须包含时区。")
-        return value.astimezone(timezone.utc).timestamp()
+        timestamp = value.astimezone(timezone.utc).timestamp()
+        if timestamp <= time.time():
+            raise HTTPException(422, "expires_at 必须晚于当前时间。")
+        return timestamp
 
     @app.get("/api/identities")
     def list_identities(request: Request) -> dict[str, Any]:
@@ -530,6 +533,7 @@ def create_studio_app(
                 projects=body.projects,
                 active=body.active,
                 expires_at=expires_timestamp(body.expires_at),
+                preserve_expires_at="expires_at" not in body.model_fields_set,
             )
         except KeyError as exc:
             raise HTTPException(404, "主体不存在。") from exc

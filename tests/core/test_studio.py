@@ -202,6 +202,7 @@ def test_studio_managed_identity_directory_is_scoped_and_rotatable(tmp_path: Pat
                 "organization": "engineering",
                 "roles": ["runner"],
                 "projects": ["project-a"],
+                "expires_at": "2099-01-01T00:00:00Z",
             },
         )
         assert created.status_code == 201
@@ -227,6 +228,31 @@ def test_studio_managed_identity_directory_is_scoped_and_rotatable(tmp_path: Pat
         assert (
             client.get("/api/v1/jobs?project_id=project-b", headers=user_headers).status_code == 403
         )
+        listed = client.get("/api/v1/identities", headers=admin_headers).json()["identities"]
+        assert listed[0]["expires_at"] == "2099-01-01T00:00:00+00:00"
+        preserved = client.patch(
+            "/api/v1/identities/analyst",
+            headers=admin_headers,
+            json={
+                "organization": "engineering",
+                "roles": ["viewer"],
+                "projects": ["project-a"],
+            },
+        )
+        assert preserved.status_code == 200
+        assert preserved.json()["identity"]["expires_at"] == "2099-01-01T00:00:00+00:00"
+        cleared = client.patch(
+            "/api/v1/identities/analyst",
+            headers=admin_headers,
+            json={
+                "organization": "engineering",
+                "roles": ["runner"],
+                "projects": ["project-a"],
+                "expires_at": None,
+            },
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["identity"]["expires_at"] is None
         assert (
             client.post(
                 "/api/v1/identities",
@@ -240,6 +266,19 @@ def test_studio_managed_identity_directory_is_scoped_and_rotatable(tmp_path: Pat
             ).status_code
             == 403
         )
+        expired = client.post(
+            "/api/v1/identities",
+            headers=admin_headers,
+            json={
+                "subject": "expired",
+                "organization": "engineering",
+                "roles": ["viewer"],
+                "projects": ["project-a"],
+                "expires_at": "2020-01-01T00:00:00Z",
+            },
+        )
+        assert expired.status_code == 422
+        assert "expires_at" in expired.json()["detail"]
         rotated = client.post("/api/v1/identities/analyst/rotate", headers=admin_headers)
         assert rotated.status_code == 200
         assert (
