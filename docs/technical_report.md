@@ -37,7 +37,7 @@ SDK、CLI 和 Studio 使用同一编排模型及公开摘要。公开响应保�
 
 ## 验证证据
 
-维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。当前 Python 测试收集 629 项，便携测试和 19 项真实 CalculiX 回归均通过；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 通过。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
+维护基线包括 5 个 CalculiX 标准验证算例、28 个自然语言案例和 15 项 LLM smoke 检查。Python 测试、便携测试和真实 CalculiX 回归由质量门禁执行；Ruff、mypy、MkDocs strict、两个包的 wheel/sdist 构建、隔离 wheel 安装烟测和 `pip check` 同样以当前命令输出为准。前端测试、TypeScript/Vite 构建、生产依赖审计、SBOM、发布清单、构建 provenance 和 Python 运行时依赖审计由质量门禁统一检查。
 
 验证命令、算例误差、环境边界、依赖审计和清理策略见[验证与质量门禁](validation.md)。标准算例和自然语言案例的具体范围见[能力与自然语言解析](capabilities.md)及[求解器、网格与后处理](solver_mesh.md)。
 

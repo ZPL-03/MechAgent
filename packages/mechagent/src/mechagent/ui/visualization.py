@@ -120,14 +120,10 @@ def _scene_payload(
     mesh = _dict_value(model_params.get("mesh"))
     geometry_type = str(geometry.get("type", "unknown")).lower()
     dimensions = _dimensions(model_params)
-    nodes = data.nodes or _scene_fallback_nodes(geometry_type, dimensions)
-    elements = data.elements or _scene_fallback_elements(geometry_type, nodes)
-    displacements = data.displacements or _scene_fallback_displacements(
-        geometry_type,
-        nodes,
-        solver_result,
-    )
-    fields = _scene_fields(displacements, data.stresses, solver_result)
+    nodes = data.nodes
+    elements = data.elements
+    displacements = data.displacements
+    fields = _scene_fields(displacements, data.stresses)
     default_field = fields[0]
     deformation_scale = _scene_deformation_scale(geometry_type, nodes, displacements, mode)
     original_bounds = _scene_bounds(nodes)
@@ -168,9 +164,7 @@ def _scene_payload(
             "seed_size": _optional_float(mesh.get("seed_size")),
             "node_count": mesh_metadata.get("node_count") or len(nodes),
             "element_count": mesh_metadata.get("element_count") or len(elements),
-            "source": (
-                str(mesh_metadata.get("source", "solver")) if data.has_real_mesh else "fallback"
-            ),
+            "source": str(mesh_metadata.get("source", "solver")),
             "quality": _dict_value(_dict_value(solver_result.get("mesh_metadata")).get("quality")),
         },
         "nodes": node_entries,
@@ -257,62 +251,9 @@ def _direction(value: Any) -> list[float]:
     return components[:3]
 
 
-def _scene_fallback_nodes(
-    geometry_type: str,
-    dimensions: dict[str, Any],
-) -> dict[int, tuple[float, float, float]]:
-    if geometry_type == "beam":
-        return _beam_fallback_nodes(_positive_float(dimensions.get("length"), 1000.0))
-    if geometry_type == "plate":
-        return _plate_fallback_nodes(
-            _positive_float(dimensions.get("length"), 300.0),
-            _positive_float(dimensions.get("width"), 200.0),
-        )
-    if geometry_type == "solid":
-        return _solid_fallback_nodes(
-            _positive_float(dimensions.get("length"), 200.0),
-            _positive_float(dimensions.get("width"), 20.0),
-            _positive_float(dimensions.get("height"), 20.0),
-        )
-    return {1: (0.0, 0.0, 0.0)}
-
-
-def _scene_fallback_elements(
-    geometry_type: str,
-    nodes: dict[int, tuple[float, float, float]],
-) -> list[tuple[int, ...]]:
-    ordered = sorted(nodes)
-    if geometry_type == "beam":
-        return [(a, b) for a, b in zip(ordered, ordered[1:], strict=False)]
-    if geometry_type == "plate":
-        return _plate_fallback_elements()
-    if geometry_type == "solid" and len(ordered) >= 8:
-        return [tuple(ordered[:8])]
-    return []
-
-
-def _scene_fallback_displacements(
-    geometry_type: str,
-    nodes: dict[int, tuple[float, float, float]],
-    solver_result: dict[str, Any],
-) -> dict[int, tuple[float, float, float]]:
-    predicted = _result_value(
-        solver_result,
-        ("tip_deflection", "tip_deflection_mm", "center_deflection", "axial_displacement"),
-    )
-    if geometry_type == "beam":
-        return _beam_fallback_displacements(nodes, predicted)
-    if geometry_type == "plate":
-        return _plate_fallback_displacements(nodes, predicted)
-    if geometry_type == "solid":
-        return _solid_fallback_displacements(nodes, predicted)
-    return dict.fromkeys(nodes, (0.0, 0.0, 0.0))
-
-
 def _scene_fields(
     displacements: dict[int, tuple[float, float, float]],
     stresses: dict[int, tuple[float, float, float, float, float, float]],
-    solver_result: dict[str, Any],
 ) -> list[_SceneField]:
     fields: list[_SceneField] = []
     if displacements:
@@ -407,15 +348,7 @@ def _scene_fields(
         )
     if fields:
         return fields
-    return [
-        _SceneField(
-            key="result",
-            name=str(solver_result.get("quantity", "result")),
-            unit=str(solver_result.get("unit", "")),
-            kind="result",
-            values=dict.fromkeys(displacements, 0.0),
-        )
-    ]
+    return []
 
 
 def _von_mises(stress: tuple[float, float, float, float, float, float]) -> float:
@@ -522,11 +455,12 @@ def _beam_visualization(
     solver_result: dict[str, Any],
     data: _FieldData,
 ) -> Visualization:
-    dimensions = _dimensions(model_params)
-    length = _positive_float(dimensions.get("length"), 1000.0)
-    predicted = _result_value(solver_result, ("tip_deflection", "tip_deflection_mm", "predicted"))
-    nodes = data.nodes or _beam_fallback_nodes(length)
-    displacements = data.displacements or _beam_fallback_displacements(nodes, predicted)
+    missing = _missing_result_data(data)
+    if missing:
+        return _message_visualization(task, missing)
+    nodes = data.nodes
+    displacements = data.displacements
+    length = _span([point[0] for point in nodes.values()], 1000.0)
     points = sorted(nodes.items(), key=lambda item: item[1][0])
     max_deflection = max(
         (abs(displacements.get(node_id, (0.0, 0.0, 0.0))[1]) for node_id, _ in points),
@@ -588,7 +522,7 @@ def _beam_visualization(
         title=_title(task),
         kind="beam",
         svg=_style_svg(svg),
-        caption="梁图使用求解器位移场绘制变形线；无位移场时使用主结果值生成等效形状。",
+        caption="梁图使用求解器输出的真实节点位移场绘制变形线。",
         scene=_scene_payload(task, model_params, solver_result, data, mode="result"),
     )
 
@@ -599,17 +533,16 @@ def _plate_visualization(
     solver_result: dict[str, Any],
     data: _FieldData,
 ) -> Visualization:
-    dimensions = _dimensions(model_params)
-    length = _positive_float(dimensions.get("length"), 300.0)
-    width = _positive_float(dimensions.get("width"), 200.0)
-    nodes = data.nodes or _plate_fallback_nodes(length, width)
-    displacements = data.displacements or _plate_fallback_displacements(
-        nodes,
-        _result_value(solver_result, ("center_deflection", "center_deflection_mm", "predicted")),
-    )
-    elements = [
-        element for element in data.elements if len(element) in {3, 4}
-    ] or _plate_fallback_elements()
+    missing = _missing_result_data(data)
+    if missing:
+        return _message_visualization(task, missing)
+    nodes = data.nodes
+    displacements = data.displacements
+    length = _span([point[0] for point in nodes.values()], 300.0)
+    width = _span([point[1] for point in nodes.values()], 200.0)
+    elements = [element for element in data.elements if len(element) in {3, 4}]
+    if not elements:
+        return _message_visualization(task, "真实网格不含可绘制的板单元。")
     uz_values = [abs(displacements.get(node_id, (0.0, 0.0, 0.0))[2]) for node_id in nodes]
     max_uz = max(uz_values, default=0.0)
     polygons = []
@@ -675,15 +608,12 @@ def _solid_visualization(
     solver_result: dict[str, Any],
     data: _FieldData,
 ) -> Visualization:
-    dimensions = _dimensions(model_params)
-    length = _positive_float(dimensions.get("length"), 200.0)
-    width = _positive_float(dimensions.get("width"), 20.0)
-    height = _positive_float(dimensions.get("height"), 20.0)
-    nodes = data.nodes or _solid_fallback_nodes(length, width, height)
-    displacements = data.displacements or _solid_fallback_displacements(
-        nodes,
-        _result_value(solver_result, ("axial_displacement", "axial_displacement_mm", "predicted")),
-    )
+    missing = _missing_result_data(data)
+    if missing:
+        return _message_visualization(task, missing)
+    nodes = data.nodes
+    displacements = data.displacements
+    length = _span([point[0] for point in nodes.values()], 200.0)
     max_u1 = max(
         (abs(displacements.get(node_id, (0.0, 0.0, 0.0))[0]) for node_id in nodes),
         default=0.0,
@@ -714,7 +644,7 @@ def _solid_visualization(
         title=_title(task),
         kind="solid",
         svg=_style_svg(svg),
-        caption="实体图使用节点位移绘制轴向变形外形；蓝色外框为放大后的变形状态。",
+        caption="实体图使用求解器输出的真实节点位移绘制变形外形；蓝色外框为放大后的变形状态。",
         scene=_scene_payload(task, model_params, solver_result, data, mode="result"),
     )
 
@@ -735,6 +665,14 @@ def _message_visualization(task: dict[str, Any], message: str) -> Visualization:
         svg=_style_svg(svg),
         caption=message,
     )
+
+
+def _missing_result_data(data: _FieldData) -> str | None:
+    if not data.has_real_mesh:
+        return "缺少真实网格文件，无法生成结果视图。"
+    if not data.has_real_results:
+        return "缺少真实求解场量（FRD），无法生成结果视图。"
+    return None
 
 
 def _style_svg(svg: str) -> str:
@@ -1100,106 +1038,10 @@ def _metric_label(solver_result: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def _result_value(solver_result: dict[str, Any], keys: tuple[str, ...]) -> float:
-    values = _dict_value(solver_result.get("values"))
-    for key in keys:
-        for source in (solver_result, values):
-            value = _optional_float(source.get(key))
-            if value is not None:
-                return value
-            value = _optional_float(source.get(f"{key}_mm"))
-            if value is not None:
-                return value
-    return 0.0
-
-
 def _number_text(value: Optional[float]) -> str:
     if value is None:
         return "N/A"
     return f"{value:.6g}"
-
-
-def _beam_fallback_nodes(length: float) -> dict[int, tuple[float, float, float]]:
-    return {index + 1: (length * index / 20.0, 0.0, 0.0) for index in range(21)}
-
-
-def _beam_fallback_displacements(
-    nodes: dict[int, tuple[float, float, float]],
-    tip_deflection: float,
-) -> dict[int, tuple[float, float, float]]:
-    max_x = max(point[0] for point in nodes.values())
-    sign = -1.0 if tip_deflection >= 0 else 1.0
-    return {
-        node_id: (0.0, sign * abs(tip_deflection) * (point[0] / max(max_x, 1.0e-9)) ** 2, 0.0)
-        for node_id, point in nodes.items()
-    }
-
-
-def _plate_fallback_nodes(length: float, width: float) -> dict[int, tuple[float, float, float]]:
-    nodes: dict[int, tuple[float, float, float]] = {}
-    node_id = 1
-    for j in range(11):
-        for i in range(11):
-            nodes[node_id] = (length * i / 10.0, width * j / 10.0, 0.0)
-            node_id += 1
-    return nodes
-
-
-def _plate_fallback_elements() -> list[tuple[int, ...]]:
-    elements: list[tuple[int, ...]] = []
-    for j in range(10):
-        for i in range(10):
-            n1 = j * 11 + i + 1
-            elements.append((n1, n1 + 1, n1 + 12, n1 + 11))
-    return elements
-
-
-def _plate_fallback_displacements(
-    nodes: dict[int, tuple[float, float, float]],
-    center_deflection: float,
-) -> dict[int, tuple[float, float, float]]:
-    x_values = [point[0] for point in nodes.values()]
-    y_values = [point[1] for point in nodes.values()]
-    min_x, max_x = min(x_values), max(x_values)
-    min_y, max_y = min(y_values), max(y_values)
-    return {
-        node_id: (
-            0.0,
-            0.0,
-            abs(center_deflection)
-            * math.sin(math.pi * (point[0] - min_x) / max(max_x - min_x, 1.0e-9))
-            * math.sin(math.pi * (point[1] - min_y) / max(max_y - min_y, 1.0e-9)),
-        )
-        for node_id, point in nodes.items()
-    }
-
-
-def _solid_fallback_nodes(
-    length: float,
-    width: float,
-    height: float,
-) -> dict[int, tuple[float, float, float]]:
-    return {
-        1: (0.0, 0.0, 0.0),
-        2: (length, 0.0, 0.0),
-        3: (length, width, 0.0),
-        4: (0.0, width, 0.0),
-        5: (0.0, 0.0, height),
-        6: (length, 0.0, height),
-        7: (length, width, height),
-        8: (0.0, width, height),
-    }
-
-
-def _solid_fallback_displacements(
-    nodes: dict[int, tuple[float, float, float]],
-    axial_displacement: float,
-) -> dict[int, tuple[float, float, float]]:
-    max_x = max(point[0] for point in nodes.values())
-    return {
-        node_id: (abs(axial_displacement) * point[0] / max(max_x, 1.0e-9), 0.0, 0.0)
-        for node_id, point in nodes.items()
-    }
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -1233,13 +1075,6 @@ def _list_value(value: Any) -> list[Any]:
 
 def _dict_value(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
-
-
-def _positive_float(value: Any, default: float) -> float:
-    number = _optional_float(value)
-    if number is None or number <= 0:
-        return default
-    return number
 
 
 def _optional_float(value: Any) -> Optional[float]:

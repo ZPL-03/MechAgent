@@ -11,7 +11,7 @@ export const english: Record<string, string> = {
   "浏览器无法保存作业标识；可从服务器记录重新打开。": "The browser cannot save the job ID. Reopen it from server jobs.",
   "浏览器作业标识无法恢复；可从服务器记录重新打开。": "The browser job ID could not be restored. Reopen it from server jobs.",
   "结构静力分析": "Structural static analysis",
-  "梁图使用求解器位移场绘制变形线；无位移场时使用主结果值生成等效形状。": "The beam uses solver displacement fields; without field output, the shape is inferred from the primary result.",
+  "梁图使用求解器输出的真实节点位移场绘制变形线。": "The beam uses the real nodal displacement field from solver output.",
 
   "运行环境通过，必需 {0}/{1}，可选 {2}/{3}": "Runtime passed. Required {0}/{1}, optional {2}/{3}",
   "运行环境异常，必需 {0}/{1}，可选 {2}/{3}": "Runtime error. Required {0}/{1}, optional {2}/{3}",
@@ -76,6 +76,12 @@ export const english: Record<string, string> = {
   跳转到工作台: "Skip to workspace",
   仿真输入: "Simulation input",
   "3D 视图加载中": "Loading 3D view",
+  "缺少真实网格文件，无法生成结果视图。":
+    "A real mesh file is required to generate a result view.",
+  "缺少真实求解场量（FRD），无法生成结果视图。":
+    "A real solver field (FRD) is required to generate a result view.",
+  "真实网格不含可绘制的板单元。":
+    "The real mesh does not contain drawable plate elements.",
   历史结果已回看: "Saved result summary",
   等待结果场: "Your model will appear here",
   "当前历史仅保留摘要和报告。重跑此请求可恢复几何、网格和结果视图。":
@@ -336,6 +342,6 @@ export const english: Record<string, string> = {
   网格拓扑: "Mesh topology",
   应力云图: "Stress",
   真实网格: "Solver mesh",
-  示意网格: "Schematic mesh",
+  无网格证据: "No mesh evidence",
   "{0} · {1} 节点 / {2} 单元": "{0} · {1} nodes / {2} elements",
 };

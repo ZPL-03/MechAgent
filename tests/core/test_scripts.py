@@ -32,6 +32,16 @@ from mechagent.core.validation import BenchmarkResult
 from mechagent.evidence import verify_manifest
 
 
+def test_script_registry_covers_all_root_python_scripts() -> None:
+    root = Path(__file__).parents[2]
+    registry = json.loads((root / "scripts" / "registry.json").read_text(encoding="utf-8"))
+    registered = sorted(entry["path"] for entry in registry["entries"])
+    discovered = sorted(path.name for path in (root / "scripts").glob("*.py"))
+
+    assert registry["schema"] == 1
+    assert registered == discovered
+
+
 def test_studio_http_smoke_verifies_independent_process_and_writes_manifest(tmp_path: Path) -> None:
     result = studio_http_smoke.run_smoke(tmp_path / "studio-http")
 

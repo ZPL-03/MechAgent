@@ -2029,7 +2029,7 @@ function sceneSummary(
           : "位移云图";
   const scalarLabel =
     `${t(field.name)} ${field.unit ? `(${field.unit})` : ""}`.trim();
-  const meshSource = scene.has_real_mesh ? "真实网格" : "示意网格";
+  const meshSource = scene.has_real_mesh ? "真实网格" : "无网格证据";
   return {
     label: `${t(modeLabel)} · ${scene.geometry_type}`,
     mesh: t(

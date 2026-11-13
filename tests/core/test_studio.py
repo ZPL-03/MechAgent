@@ -667,7 +667,7 @@ def test_cli_studio_rejects_auto_run_without_request() -> None:
     assert "--auto-run" in result.output
 
 
-def test_visualizations_cover_current_static_geometry_types() -> None:
+def test_visualizations_require_real_mesh_and_solver_fields() -> None:
     visuals = visualizations_from_summary(
         {
             "tasks": [
@@ -682,23 +682,48 @@ def test_visualizations_cover_current_static_geometry_types() -> None:
         }
     )
 
-    assert [item.kind for item in visuals] == ["beam", "plate", "solid"]
+    assert [item.kind for item in visuals] == ["message", "message", "message"]
     for item in visuals:
         assert item.svg.startswith("<svg")
         assert item.task_id.startswith("TASK_")
-        assert item.scene is not None
-        assert item.scene["mode"] == "result"
-        assert item.scene["geometry_type"] == item.kind
-        assert (item.scene["scalar"]["name"], item.scene["scalar"]["unit"]) == (
-            "U 位移模量",
-            "mm",
-        )
-        assert [field["key"] for field in item.scene["fields"]][:4] == [
-            "u_mag",
-            "ux",
-            "uy",
-            "uz",
-        ]
+        assert item.scene is None
+        assert "缺少真实网格文件" in item.caption
+
+
+def test_visualization_rejects_mesh_without_solver_fields(tmp_path: Path) -> None:
+    input_file = tmp_path / "mesh_only.inp"
+    input_file.write_text(
+        "\n".join(
+            [
+                "*NODE",
+                "1, 0, 0, 0",
+                "2, 100, 0, 0",
+                "*ELEMENT, TYPE=B31, ELSET=EALL",
+                "1, 1, 2",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    task = _task_summary("TASK_1", "beam", {"length": 100.0})
+    solver_result = cast(dict[str, object], task["solver_result"])
+    visual = visualizations_from_summary(
+        {
+            "tasks": [
+                {
+                    **task,
+                    "mesh_result": {"mesh_file": str(input_file)},
+                    "solver_result": {
+                        **solver_result,
+                        "output_files": [str(input_file)],
+                    },
+                }
+            ]
+        }
+    )[0]
+
+    assert visual.kind == "message"
+    assert visual.scene is None
+    assert "缺少真实求解场量" in visual.caption
 
 
 def test_visualization_scene_exposes_displacement_and_stress_fields(tmp_path: Path) -> None:

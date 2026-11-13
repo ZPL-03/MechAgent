@@ -75,7 +75,7 @@ def run_environment_diagnostics(
 
 
 def _python_check() -> dict[str, Any]:
-    version_ok = sys.version_info >= (3, 9)
+    version_ok = sys.version_info >= (3, 10)
     return _check_item(
         "python",
         "Python 运行时",
@@ -84,7 +84,7 @@ def _python_check() -> dict[str, Any]:
         {
             "executable": sys.executable,
             "version": sys.version.split()[0],
-            "minimum": "3.9",
+            "minimum": "3.10",
         },
     )
 
