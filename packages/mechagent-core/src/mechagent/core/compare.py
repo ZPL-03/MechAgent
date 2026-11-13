@@ -74,7 +74,8 @@ class BackendStepComparison(BaseModel):
     """多步结果的逐步逐帧跨后端比较。
 
     ``unmatched_frames`` 记录只由一侧输出的初始基准帧；这类帧保留在结果
-    证据中，但不作为求解帧的数值对应项。其他缺帧仍进入 ``missing_frames``。
+    证据中，但不作为求解帧的数值对应项。其他缺帧仍进入 ``missing_frames``；
+    重复标识、未知帧语义和非对象字段记录进入 ``invalid_records`` 并使比较失败。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -87,6 +88,7 @@ class BackendStepComparison(BaseModel):
     missing_steps: list[str] = Field(default_factory=list)
     missing_frames: list[str] = Field(default_factory=list)
     unmatched_frames: list[str] = Field(default_factory=list)
+    invalid_records: list[str] = Field(default_factory=list)
     reason: str | None = None
 
 
@@ -610,15 +612,17 @@ def compare_backend_step_fields(
     帧时比较状态为 ``failed``，避免只比较两侧最后一帧而掩盖不完整结果。
     """
 
-    left_steps = _step_records(left, field_source)
-    right_steps = _step_records(right, field_source)
+    left_steps, left_invalid = _step_records(left, field_source)
+    right_steps, right_invalid = _step_records(right, field_source)
     if not left_steps or not right_steps:
+        invalid_records = [*left_invalid, *right_invalid]
         return BackendStepComparison(
-            status="unverified",
+            status="failed" if invalid_records else "unverified",
             left_backend=left_backend,
             right_backend=right_backend,
             field_source=field_source,
-            reason="逐步结果缺失，不能进行逐帧比较。",
+            invalid_records=invalid_records,
+            reason=("结果帧契约无效。" if invalid_records else "逐步结果缺失，不能进行逐帧比较。"),
         )
 
     selected_tolerance = tolerance or ComparisonTolerance()
@@ -676,6 +680,8 @@ def compare_backend_step_fields(
 
     if missing_steps or missing_frames:
         status: Literal["passed", "failed", "unverified"] = "failed"
+    elif left_invalid or right_invalid:
+        status = "failed"
     elif not statuses:
         status = "unverified"
     elif "failed" in statuses:
@@ -693,17 +699,24 @@ def compare_backend_step_fields(
         missing_steps=missing_steps,
         missing_frames=missing_frames,
         unmatched_frames=unmatched_frames,
+        invalid_records=[*left_invalid, *right_invalid],
+        reason=("结果帧契约无效。" if left_invalid or right_invalid else None),
     )
 
 
-def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, Any]]:
+def _step_records(
+    result: dict[str, Any], field_source: str
+) -> tuple[list[dict[str, Any]], list[str]]:
     key = "mapped_step_fields" if field_source == "mapped_fields" else "step_results"
     raw_steps = result.get(key)
     if not isinstance(raw_steps, list):
-        return []
+        return [], []
     records: list[dict[str, Any]] = []
+    invalid: list[str] = []
+    seen_step_keys: set[str] = set()
     for index, raw_step in enumerate(raw_steps):
         if not isinstance(raw_step, dict):
+            invalid.append(f"step[{index}]:记录必须是对象")
             continue
         step_id = raw_step.get("step_id")
         sequence = raw_step.get("sequence")
@@ -716,17 +729,36 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
             step_key = f"name:{step_name}"
         else:
             step_key = f"index:{index}"
+        if step_key in seen_step_keys:
+            invalid.append(f"{step_key}:分析步标识重复")
+            continue
+        seen_step_keys.add(step_key)
         raw_frames = raw_step.get("frames")
         frames: list[dict[str, Any]] = []
         if isinstance(raw_frames, list) and raw_frames:
+            seen_frame_keys: set[str] = set()
             for frame_index, raw_frame in enumerate(raw_frames):
                 if not isinstance(raw_frame, dict):
+                    invalid.append(f"{step_key}[{frame_index}]:帧记录必须是对象")
                     continue
                 frame_key_value = raw_frame.get("frame_index", frame_index)
                 frame_role = raw_frame.get("frame_role")
+                if frame_role is not None and frame_role not in {"initial", "solution"}:
+                    invalid.append(f"{step_key}[{frame_index}]:未知帧语义 {frame_role!r}")
+                    continue
+                if not isinstance(frame_key_value, int) or frame_key_value < 0:
+                    invalid.append(f"{step_key}[{frame_index}]:frame_index 必须是非负整数")
+                    continue
                 frame_key = "initial" if frame_role == "initial" else str(frame_key_value)
+                if frame_key in seen_frame_keys:
+                    invalid.append(f"{step_key}[{frame_key}]:帧标识重复")
+                    continue
+                seen_frame_keys.add(frame_key)
                 fields_key = "mapped_fields" if field_source == "mapped_fields" else "fields"
                 frame_fields = raw_frame.get(fields_key)
+                if not isinstance(frame_fields, dict):
+                    invalid.append(f"{step_key}[{frame_key}]:字段记录必须是对象")
+                    continue
                 frames.append(
                     {
                         "key": frame_key,
@@ -734,18 +766,21 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
                         if isinstance(frame_key_value, int)
                         else None,
                         "frame_role": frame_role if isinstance(frame_role, str) else None,
-                        "fields": frame_fields if isinstance(frame_fields, dict) else {},
+                        "fields": frame_fields,
                     }
                 )
         else:
             fields_key = "mapped_fields" if field_source == "mapped_fields" else "fields"
             step_fields = raw_step.get(fields_key)
+            if not isinstance(step_fields, dict):
+                invalid.append(f"{step_key}[final]:字段记录必须是对象")
+                continue
             frames.append(
                 {
                     "key": "final",
                     "frame_index": None,
                     "frame_role": "solution",
-                    "fields": step_fields if isinstance(step_fields, dict) else {},
+                    "fields": step_fields,
                 }
             )
         records.append(
@@ -756,7 +791,7 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
                 "frames": frames,
             }
         )
-    return records
+    return records, invalid
 
 
 def _step_frame_payload(

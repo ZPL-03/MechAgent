@@ -874,3 +874,85 @@ def test_multistep_comparison_records_unmatched_initial_frame() -> None:
     assert result.missing_frames == []
     assert result.unmatched_frames == ["id:step-1[initial]"]
     assert [item.frame_role for item in result.steps] == ["solution"]
+
+
+def test_multistep_comparison_rejects_duplicate_frame_keys() -> None:
+    common = {
+        "physical_case_digest": "p" * 64,
+        "units": {"length": "mm"},
+        "coordinate_system": {"name": "global"},
+    }
+    result_payload = {
+        **common,
+        "case_digest": "a" * 64,
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {"frame_index": 1, "mapped_fields": {}},
+                    {"frame_index": 1, "mapped_fields": {}},
+                ],
+            }
+        ],
+    }
+
+    result = compare_backend_step_fields(
+        result_payload,
+        {**result_payload, "case_digest": "b" * 64},
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "结果帧契约无效。"
+    assert result.invalid_records == [
+        "id:step-1[1]:帧标识重复",
+        "id:step-1[1]:帧标识重复",
+    ]
+
+
+def test_multistep_comparison_rejects_unknown_frame_role_and_non_object_fields() -> None:
+    common = {
+        "physical_case_digest": "p" * 64,
+        "units": {"length": "mm"},
+        "coordinate_system": {"name": "global"},
+    }
+    left = {
+        **common,
+        "case_digest": "a" * 64,
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "frame_role": "checkpoint",
+                        "mapped_fields": {},
+                    }
+                ],
+            }
+        ],
+    }
+    right = {
+        **common,
+        "case_digest": "b" * 64,
+        "mapped_step_fields": [
+            {"step_id": "step-1", "frames": [{"frame_index": 0, "mapped_fields": []}]}
+        ],
+    }
+
+    result = compare_backend_step_fields(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "结果帧契约无效。"
+    assert result.invalid_records == [
+        "id:step-1[0]:未知帧语义 'checkpoint'",
+        "id:step-1[0]:字段记录必须是对象",
+    ]
