@@ -35,6 +35,19 @@ def _write_box_step(path: Path, dx: float, dy: float, dz: float) -> None:
         gmsh.finalize()
 
 
+def _write_assembly_step(path: Path) -> None:
+    gmsh.initialize(interruptible=False)
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("assembly")
+        gmsh.model.occ.addBox(0.0, 0.0, 0.0, 40.0, 40.0, 40.0)
+        gmsh.model.occ.addBox(60.0, 0.0, 0.0, 40.0, 40.0, 40.0)
+        gmsh.model.occ.synchronize()
+        gmsh.write(str(path))
+    finally:
+        gmsh.finalize()
+
+
 def _candidate(bbox_max: tuple[float, float, float]) -> GeometryCandidate:
     return geometry_candidate_from_summary(
         CADGeometrySummary(
@@ -167,6 +180,21 @@ def test_cad_mesh_rejects_topology_digest_drift(tmp_path: Path) -> None:
 
     assert output.mesh_result.success is False
     assert "拓扑摘要" in (output.mesh_result.error_message or "")
+
+
+def test_cad_direct_mesh_rejects_multi_solid_assembly(tmp_path: Path) -> None:
+    step = tmp_path / "assembly.step"
+    _write_assembly_step(step)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    output = MeshAgent(config, tmp_path / "mesh-assembly").generate_with_trace(params)
+
+    assert output.mesh_result.success is False
+    assert "单个封闭实体" in (output.mesh_result.error_message or "")
+    assert output.mesh_result.metadata["solid_count"] == 2
 
 
 @pytest.mark.real_solver

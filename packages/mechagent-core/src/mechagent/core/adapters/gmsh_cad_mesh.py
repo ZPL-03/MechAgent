@@ -62,6 +62,16 @@ class GmshCADInpMesher(AbstractMesher):
             gmsh.option.setNumber("Mesh.ElementOrder", 1)
             gmsh.model.add(case_id)
             gmsh.model.occ.importShapes(str(source))
+            gmsh.model.occ.synchronize()
+            imported_volumes = gmsh.model.getEntities(3)
+            if len(imported_volumes) > 1:
+                return MeshResult(
+                    success=False,
+                    error_message=(
+                        "CAD 直接网格当前只接受单个封闭实体；装配体或多个实体需要独立的区域契约。"
+                    ),
+                    metadata={"solid_count": len(imported_volumes)},
+                )
             if self.config.healing:
                 gmsh.model.occ.healShapes()
             gmsh.model.occ.synchronize()
@@ -69,6 +79,14 @@ class GmshCADInpMesher(AbstractMesher):
             faces = gmsh.model.getEntities(2)
             if not volumes:
                 return MeshResult(success=False, error_message="CAD 直接网格需要至少一个封闭实体。")
+            if len(volumes) != 1:
+                return MeshResult(
+                    success=False,
+                    error_message=(
+                        "CAD 直接网格当前只接受单个封闭实体；装配体或多个实体需要独立的区域契约。"
+                    ),
+                    metadata={"solid_count": len(volumes)},
+                )
             gmsh.model.mesh.generate(3)
             nodes = _gmsh_nodes()
             tetrahedra = _gmsh_tetrahedra()
