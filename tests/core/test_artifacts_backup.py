@@ -52,6 +52,20 @@ def test_artifact_store_keeps_object_when_destination_is_object_path(tmp_path: P
     assert artifacts.verify(digest)
 
 
+def test_artifact_store_preserves_destination_when_restore_integrity_fails(tmp_path: Path) -> None:
+    artifacts = ArtifactStore(tmp_path / "objects")
+    digest = artifacts.put_bytes(b"immutable")
+    artifacts.path_for(digest).write_bytes(b"tampered")
+    destination = tmp_path / "restored.bin"
+    destination.write_bytes(b"keep")
+
+    with pytest.raises(ValueError, match="完整性校验失败"):
+        artifacts.get_file(digest, destination)
+
+    assert destination.read_bytes() == b"keep"
+    assert not list(tmp_path.glob(".restored.bin.*.tmp"))
+
+
 def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     class FakeS3:
         def __init__(self) -> None:
@@ -97,8 +111,12 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     )
 
     fake.objects[("results", store._key(digest))] = (b"tampered", {"sha256": digest})
+    assert store.verify(digest) is False
+    assert store.put_file(source) == digest
+    assert store.verify(digest) is True
+    fake.objects[("results", store._key(digest))] = (b"tampered", {"sha256": digest})
     destination.write_text("keep", encoding="utf-8")
-    with pytest.raises(ValueError, match="恢复后完整性校验失败"):
+    with pytest.raises(ValueError, match="完整性校验失败"):
         store.get_file(digest, destination)
     assert destination.read_text(encoding="utf-8") == "keep"
     assert not list(tmp_path.glob(".restored.json.*.tmp"))

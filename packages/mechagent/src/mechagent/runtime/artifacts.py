@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -62,10 +63,19 @@ class ArtifactStore:
             # 对象存储是不可变的；目标已经是对象本身时不能执行移动。
             return source
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(source.read_bytes())
-        if _sha256_file(destination) != digest:
-            raise ValueError("对象恢复后完整性校验失败。")
-        return destination
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            shutil.copyfile(source, temporary)
+            if _sha256_file(temporary) != digest:
+                raise ValueError("对象恢复后完整性校验失败。")
+            os.replace(temporary, destination)
+            return destination
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def verify(self, digest: str) -> bool:
         path = self.path_for(digest)
@@ -204,7 +214,7 @@ class S3ArtifactStore:
         key = self._key(digest)
         try:
             head = self.client.head_object(Bucket=self.bucket, Key=key)
-            if str(head.get("Metadata", {}).get("sha256", "")) == digest:
+            if str(head.get("Metadata", {}).get("sha256", "")) == digest and self.verify(digest):
                 return digest
         except Exception as exc:  # boto3 uses provider-specific not-found exceptions
             response = getattr(exc, "response", {}) or {}
@@ -250,7 +260,12 @@ class S3ArtifactStore:
             if code in {"404", "NoSuchKey"}:
                 return False
             raise
-        return str(head.get("Metadata", {}).get("sha256", "")) == digest
+        if str(head.get("Metadata", {}).get("sha256", "")) != digest:
+            return False
+        with tempfile.TemporaryDirectory(prefix="mechagent-s3-verify-") as temporary_dir:
+            temporary = Path(temporary_dir) / "object"
+            self.client.download_file(self.bucket, self._key(digest), str(temporary))
+            return _sha256_file(temporary) == digest
 
     def get_file(self, digest: str, destination: Path) -> Path:
         if not self.verify(digest):
