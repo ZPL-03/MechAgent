@@ -70,7 +70,7 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 路由与旧 `/api` 兼容入口的弃用响应头；指标门禁检查 `/api/v1/metrics` 的项目范围、admin
 全局范围、脱敏输出、数据库重启后的统计一致性以及结果大小和证据清单完整性计数。
 
-CAD 区域门禁检查源文件摘要、稳定拓扑实体和六向区域候选是否随 `GeometryCandidate` 进入
+CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑实体和六向区域候选是否随 `GeometryCandidate` 进入
 `ModelParams.metadata.cad_geometry`；案例提升只接受唯一、已映射且置信度不低于 0.80 的
 面/边拓扑 ID。`ambiguous`、`unresolved` 或缺少拓扑 ID 的区域必须生成 `unknown` 区域并使
 `SimulationCase.execution_ready` 为 `False`。该门禁验证区域语义传递和失败行为，不替代

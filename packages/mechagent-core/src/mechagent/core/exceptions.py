@@ -18,7 +18,7 @@ class PostProcError(MechAgentCoreError):
 
 
 class CADError(MechAgentCoreError):
-    """CAD 形体导入、修复或特征识别失败异常。"""
+    """CAD 形体导入或具体适配器处理失败异常。"""
 
 
 class ExecutorError(MechAgentCoreError):
