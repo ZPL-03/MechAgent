@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -152,6 +153,23 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
                 "error_message": "网格结果缺少 mesh_file，求解阶段无法继续。",
             }
         )
+    if not result.mesh_file.is_file():
+        return result.model_copy(
+            update={
+                "success": False,
+                "error_message": f"网格结果文件不存在: {result.mesh_file}",
+            }
+        )
+    mesh_sha256 = _sha256_file(result.mesh_file)
+    declared_sha256 = result.metadata.get("mesh_sha256")
+    if declared_sha256 is not None and declared_sha256 != mesh_sha256:
+        return result.model_copy(
+            update={
+                "success": False,
+                "error_message": "网格文件 SHA-256 与结果元数据不一致。",
+            }
+        )
+    result = result.model_copy(update={"metadata": {**result.metadata, "mesh_sha256": mesh_sha256}})
     invalid = [name for name, value in result.quality.items() if not math.isfinite(value)]
     if invalid:
         details = "、".join(f"{name}={result.quality[name]}" for name in invalid)
@@ -175,6 +193,14 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
             "error_message": f"网格质量低于阈值 {min_quality:.6g}: {details}。",
         }
     )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _mesh_strategy_context(model_params: ModelParams, task: TaskItem | None) -> dict[str, Any]:
