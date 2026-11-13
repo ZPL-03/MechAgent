@@ -12,7 +12,7 @@
 
 启用 LLM Agent 时，MeshAgent 在调用网格器前把 `ModelParams`、当前网格设置和网格策略规则发送给 LLM，并解析 `seed_size`、`element_type` 和 `rationale`。`seed_size` 必须是有限正数，且位于当前结构化网格尺寸 `1/5` 至 `5` 倍范围内；`element_type` 必须与几何类型兼容。未通过校验的 LLM 网格策略只进入 `mesh_llm_trace.error`，不改变网格生成参数。
 
-MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元数据中记录该文件的 `mesh_sha256`；SolverAgent 在启动求解器前重新读取文件并校验摘要。文件缺失、摘要缺失或摘要不一致会阻断求解。`MeshResult.quality` 中的数值必须为有限数值。`MeshConfig.seed_size`、`MeshConfig.min_quality` 和 `SolverResult.wall_time` 在公共模型层拒绝非有限数值。运行配置模型同样拒绝非有限 `llm.temperature`、`mesher.min_quality`、`knowledge.bm25_weight` 和 `knowledge.tfidf_weight`。
+MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元数据中记录该文件的 `mesh_sha256`；同时生成版本化 `MeshResult.provenance`，记录案例、几何、网格器、尺寸、单元类型、质量门禁、区域名称和可用 CAD 摘要。SolverAgent 在启动求解器前重新读取文件并校验摘要，并将该来源对象放入求解摘要。文件缺失、摘要缺失或摘要不一致会阻断求解。`MeshResult.quality` 中的数值必须为有限数值。`MeshConfig.seed_size`、`MeshConfig.min_quality` 和 `SolverResult.wall_time` 在公共模型层拒绝非有限数值。运行配置模型同样拒绝非有限 `llm.temperature`、`mesher.min_quality`、`knowledge.bm25_weight` 和 `knowledge.tfidf_weight`。
 
 配置项 `mesher.min_quality` 只应用于网格结果中的 `min_*` 质量指标；低于阈值的网格结果进入失败状态。`max_*` 等上界指标不使用最小质量阈值判定。工作流在 MeshAgent 阶段记录 `mesh_failed` 并停止该任务的求解。
 

@@ -112,6 +112,27 @@ def test_mesh_agent_validates_mesh_output_contract_and_upper_bound_metrics(
     assert "网格结果文件不存在" in str(missing_path_result.error_message)
 
 
+def test_mesh_agent_emits_typed_mesh_provenance(tmp_path: Path) -> None:
+    register_mesher("unit-provenance-mesher", AspectMetricMesher)
+    try:
+        result = MeshAgent(
+            MechAgentConfig(mesher=MesherSettings(default="unit-provenance-mesher")),
+            tmp_path,
+        ).generate(tc01_model_params())
+    finally:
+        unregister_mesher("unit-provenance-mesher")
+
+    assert result.success is True
+    assert result.provenance is not None
+    assert result.provenance.case_id == "TC-01"
+    assert result.provenance.geometry_type == "beam"
+    assert result.provenance.mesher == "unit-provenance-mesher"
+    assert result.provenance.element_type == "B31"
+    assert result.provenance.quality_gate.status == "passed"
+    assert result.provenance.quality_metrics == {"max_aspect_ratio": 20.0}
+    assert result.provenance.mesh_sha256 == result.metadata["mesh_sha256"]
+
+
 def test_mesh_agent_passes_model_seed_size_to_mesher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

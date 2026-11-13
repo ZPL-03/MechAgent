@@ -54,7 +54,13 @@ from mechagent.core.factory import (
     unregister_solver,
 )
 from mechagent.core.materials import BUILTIN_MATERIALS, MaterialDefinition, match_builtin_material
-from mechagent.core.mesher import AbstractMesher, MeshConfig, MeshResult
+from mechagent.core.mesher import (
+    AbstractMesher,
+    MeshConfig,
+    MeshProvenance,
+    MeshQualityGate,
+    MeshResult,
+)
 from mechagent.core.postproc import PostProcessor
 from mechagent.core.results import (
     attach_case_result_fields,
@@ -98,6 +104,8 @@ __all__ = [
     "MaterialDefinition",
     "MechAgentCoreError",
     "MeshConfig",
+    "MeshProvenance",
+    "MeshQualityGate",
     "MeshError",
     "MeshResult",
     "GmshCADInpMesher",

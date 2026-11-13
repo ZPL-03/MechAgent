@@ -10,7 +10,7 @@ from typing import Any
 
 from mechagent.config import MechAgentConfig
 from mechagent.core.factory import create_mesher
-from mechagent.core.mesher import MeshConfig, MeshResult
+from mechagent.core.mesher import MeshConfig, MeshProvenance, MeshQualityGate, MeshResult
 from mechagent.core.models import ElementType, ModelParams
 from mechagent.evidence import sha256
 from mechagent.orchestrator.capabilities import get_capability
@@ -111,6 +111,7 @@ class MeshAgent:
         )
         result = mesher.generate(model_for_mesh)
         result = _apply_quality_gate(result, self.config.mesher.min_quality)
+        result = _attach_provenance(result, model_for_mesh, mesher_name)
         if (
             result.success
             and model_for_mesh.mesh.seed_size != model_params.mesh.seed_size
@@ -217,6 +218,72 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
             },
         }
     )
+
+
+def _attach_provenance(
+    result: MeshResult,
+    model_params: ModelParams,
+    mesher_name: str,
+) -> MeshResult:
+    """为成功网格生成类型化来源摘要。"""
+
+    if not result.success:
+        return result
+    gate_payload = result.metadata.get("quality_gate")
+    mesh_sha256 = result.metadata.get("mesh_sha256")
+    if not isinstance(gate_payload, dict):
+        return result.model_copy(
+            update={
+                "success": False,
+                "error_message": "网格结果缺少可验证的 quality_gate，无法生成来源摘要。",
+            }
+        )
+    if not isinstance(mesh_sha256, str):
+        return result.model_copy(
+            update={
+                "success": False,
+                "error_message": "网格结果缺少可验证的 mesh_sha256，无法生成来源摘要。",
+            }
+        )
+    region_names: set[str] = set()
+    for key in ("region_node_sets", "case_regions"):
+        value = result.metadata.get(key)
+        if isinstance(value, dict):
+            region_names.update(str(name) for name in value if str(name).strip())
+    try:
+        provenance = MeshProvenance(
+            case_id=model_params.case_id,
+            geometry_type=model_params.geometry.type.value,
+            mesher=mesher_name,
+            seed_size_mm=model_params.mesh.seed_size,
+            element_type=model_params.mesh.element_type.value,
+            mesh_sha256=mesh_sha256,
+            quality_metrics=dict(result.quality),
+            quality_gate=MeshQualityGate.model_validate(gate_payload),
+            region_names=sorted(region_names),
+            cad_source_sha256=_optional_digest(result.metadata.get("source_sha256")),
+            topology_digest=_optional_text(result.metadata.get("topology_digest")),
+        )
+    except (TypeError, ValueError) as exc:
+        return result.model_copy(
+            update={
+                "success": False,
+                "error_message": f"网格来源摘要无效: {exc}",
+            }
+        )
+    return result.model_copy(update={"provenance": provenance})
+
+
+def _optional_digest(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return None
+
+
+def _optional_text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 def _quality_gate(

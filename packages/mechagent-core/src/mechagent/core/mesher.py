@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,6 +48,60 @@ class MeshConfig(BaseModel):
         return value
 
 
+class MeshQualityGate(BaseModel):
+    """网格质量门禁的结构化结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float = Field(ge=0.0, le=1.0)
+    lower_bound_metrics: list[str] = Field(default_factory=list)
+    status: Literal["passed", "failed"]
+
+    @field_validator("threshold")
+    @classmethod
+    def _threshold_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("网格质量门禁阈值必须是有限数值。")
+        return value
+
+
+class MeshProvenance(BaseModel):
+    """成功网格的输入、输出和门禁摘要。
+
+    该对象只记录可由网格器和 MeshAgent 直接核验的事实；网格收敛、
+    CAD 修复报告和跨网格器等价性不属于此对象的证明范围。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    case_id: str = Field(default="", max_length=128)
+    geometry_type: str = Field(min_length=1, max_length=64)
+    mesher: str = Field(min_length=1, max_length=128)
+    seed_size_mm: float = Field(gt=0.0)
+    element_type: str = Field(min_length=1, max_length=32)
+    mesh_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    quality_metrics: dict[str, float] = Field(default_factory=dict)
+    quality_gate: MeshQualityGate
+    region_names: list[str] = Field(default_factory=list, max_length=4096)
+    cad_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    topology_digest: str | None = Field(default=None, max_length=128)
+
+    @field_validator("seed_size_mm")
+    @classmethod
+    def _seed_size_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("MeshProvenance.seed_size_mm 必须是有限数值。")
+        return value
+
+    @field_validator("quality_metrics")
+    @classmethod
+    def _quality_metrics_must_be_finite(cls, value: dict[str, float]) -> dict[str, float]:
+        if any(not math.isfinite(metric) for metric in value.values()):
+            raise ValueError("MeshProvenance.quality_metrics 必须全部是有限数值。")
+        return value
+
+
 class MeshResult(BaseModel):
     """网格生成结果。
 
@@ -75,6 +129,7 @@ class MeshResult(BaseModel):
     mesh_file: Optional[Path] = None
     quality: dict[str, float] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: MeshProvenance | None = None
     error_message: Optional[str] = None
 
 

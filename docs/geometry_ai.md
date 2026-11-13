@@ -88,7 +88,7 @@
 | `RegionBinding` | 语义名、拓扑 ID、映射方法、置信度、几何版本、歧义状态、人工确认 | 每个载荷/边界区域唯一映射且版本匹配 |
 | `MeshProvenance` | 网格器和版本、CAD 摘要、单元类型、尺寸场、质量指标、区域集合、收敛状态 | 网格文件存在、质量门禁和区域门禁通过 |
 
-这些对象属于规划项。现有 `CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 覆盖其中的部分字段，完整版本化契约仍待建立。
+`MeshProvenance` 已作为版本化 core 契约由 `MeshAgent` 在成功网格后生成，记录案例标识、几何类型、网格器、种子尺寸、单元类型、网格文件 SHA-256、质量指标、质量门禁、区域名称以及可用的 CAD 源摘要和拓扑摘要；`SolverAgent` 将其随求解摘要传递。该对象不证明网格收敛、CAD 修复报告或跨网格器等价性。`CADArtifact`、`GeometryValidation` 和 `RegionBinding` 仍需独立建立完整版本化契约；现有 `CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 继续作为兼容输入和诊断扩展。
 
 ## 开源项目调研与采用边界
 

@@ -100,6 +100,8 @@ class SolverAgent:
         if mesh_result is not None:
             result["mesh_file"] = str(mesh_result.mesh_file)
             result["mesh_metadata"] = mesh_result.metadata
+            if mesh_result.provenance is not None:
+                result["mesh_provenance"] = mesh_result.provenance.model_dump(mode="json")
         result["solver_llm_trace"] = trace.model_dump(mode="json")
         evaluated = capability.evaluator(
             ResultEvaluationContext(

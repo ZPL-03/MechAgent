@@ -10,6 +10,8 @@ import pytest
 from mechagent.config import MechAgentConfig, SolverSettings
 from mechagent.core import (
     AbstractSolver,
+    MeshProvenance,
+    MeshQualityGate,
     MeshResult,
     SolverResult,
     register_solver,
@@ -207,6 +209,62 @@ def test_solver_agent_uses_capability_solver_over_global_default(tmp_path: Path)
     finally:
         unregister_capability("unit_solver_tool_capability")
         unregister_solver("unit-capability-solver")
+
+
+def test_solver_agent_carries_mesh_provenance_into_summary(tmp_path: Path) -> None:
+    register_solver("unit-provenance-solver", _EvalDummySolver)
+    register_capability(
+        SimulationCapability(
+            capability_id="unit_provenance_capability",
+            task_case_id="UNIT-PROVENANCE",
+            title="网格来源能力",
+            analysis_type="static",
+            physics_domain="structural",
+            parser=_unit_eval_parser,
+            matcher=lambda _request: False,
+            geometry_detector=lambda _request: "beam",
+            evaluator=_unit_eval_evaluator,
+            solver_name="unit-provenance-solver",
+        )
+    )
+    mesh_file = tmp_path / "mesh.inp"
+    mesh_file.write_text("*NODE\n1, 0, 0, 0\n", encoding="utf-8")
+    digest = sha256(mesh_file)
+    provenance = MeshProvenance(
+        case_id="TC-01",
+        geometry_type="beam",
+        mesher="unit-provenance-mesher",
+        seed_size_mm=10.0,
+        element_type="B31",
+        mesh_sha256=digest,
+        quality_metrics={"min_jacobian": 1.0},
+        quality_gate=MeshQualityGate(
+            threshold=0.3,
+            lower_bound_metrics=["min_jacobian"],
+            status="passed",
+        ),
+    )
+    try:
+        summary = SolverAgent(MechAgentConfig(), tmp_path / "solver").solve(
+            TaskItem(
+                task_id="TASK_1",
+                case_id="UNIT-PROVENANCE",
+                capability_id="unit_provenance_capability",
+                title="网格来源能力",
+            ),
+            tc01_model_params(),
+            MeshResult(
+                success=True,
+                mesh_file=mesh_file,
+                metadata={"mesh_sha256": digest},
+                provenance=provenance,
+            ),
+        )
+    finally:
+        unregister_capability("unit_provenance_capability")
+        unregister_solver("unit-provenance-solver")
+
+    assert summary.get("mesh_provenance") == provenance.model_dump(mode="json")
 
 
 def test_solver_agent_revalidates_mesh_file_hash(tmp_path: Path) -> None:
