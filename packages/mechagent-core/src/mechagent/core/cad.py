@@ -104,6 +104,20 @@ class CADTopologyEntity(BaseModel):
     children: list[str] = Field(default_factory=list)
 
 
+class CADPartSummary(BaseModel):
+    """一个三维实体及其边界拓扑成员的摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    part_id: str = Field(min_length=1, max_length=128)
+    bbox_min: tuple[float, float, float]
+    bbox_max: tuple[float, float, float]
+    volume: float = Field(ge=0)
+    surface_area: float = Field(ge=0)
+    face_ids: list[str] = Field(default_factory=list)
+    edge_ids: list[str] = Field(default_factory=list)
+
+
 class CADGeometrySummary(BaseModel):
     """CAD 几何摘要。
 
@@ -118,7 +132,9 @@ class CADGeometrySummary(BaseModel):
         face_count: 面数量。
         edge_count: 边数量。
         watertight: 形体是否封闭水密。
+        healing_applied: 是否对导入结果执行了内核级修复。
         features: 由具体适配器确认的几何特征列表；为空表示没有提供特征识别结果。
+        parts: 按三维实体划分的零件摘要。
 
     Returns:
         CADGeometrySummary: 统一几何摘要，供边界/载荷区域映射与网格策略消费。
@@ -154,8 +170,10 @@ class CADGeometrySummary(BaseModel):
     face_count: int = Field(ge=0)
     edge_count: int = Field(ge=0)
     watertight: bool = True
+    healing_applied: bool = False
     features: list[CADGeometryFeature] = Field(default_factory=list)
     topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
+    parts: list[CADPartSummary] = Field(default_factory=list)
     region_candidates: list["RegionCandidate"] = Field(default_factory=list)
 
     @field_validator("volume", "surface_area")
@@ -395,6 +413,7 @@ class GeometryCandidate(BaseModel):
         bbox_min: 包围盒最小角点。
         bbox_max: 包围盒最大角点。
         region_candidates: 边界/载荷区域候选列表。
+        parts: 按三维实体划分的零件摘要。
         missing_fields: 几何无法确定、需补充的字段。
 
     Returns:
@@ -432,7 +451,9 @@ class GeometryCandidate(BaseModel):
     source_sha256: str = ""
     topology_digest: str = ""
     watertight: bool | None = None
+    healing_applied: bool = False
     topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
+    parts: list[CADPartSummary] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
 
 
@@ -478,7 +499,9 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
             source_sha256=summary.source_sha256,
             topology_digest=summary.topology_digest,
             watertight=summary.watertight,
+            healing_applied=summary.healing_applied,
             topology_entities=summary.topology_entities,
+            parts=summary.parts,
             missing_fields=["material", "loads", "bcs"],
         )
     for axis, index, _extent in axes:
@@ -509,7 +532,9 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
         source_sha256=summary.source_sha256,
         topology_digest=summary.topology_digest,
         watertight=summary.watertight,
+        healing_applied=summary.healing_applied,
         topology_entities=summary.topology_entities,
+        parts=summary.parts,
         missing_fields=["material", "loads", "bcs"],
     )
 

@@ -309,6 +309,30 @@ def test_cad_direct_mesh_rejects_multi_solid_assembly(tmp_path: Path) -> None:
     assert output.mesh_result.metadata["solid_count"] == 2
 
 
+def test_multi_solid_cad_exposes_part_topology_without_execution_claim(tmp_path: Path) -> None:
+    step = tmp_path / "assembly.step"
+    _write_assembly_step(step)
+
+    config = MechAgentConfig()
+    analysis = GeometryAgent(config, tmp_path).analyze(step)
+
+    assert analysis.success is True
+    assert analysis.candidate is not None
+    assert analysis.candidate.healing_applied is False
+    assert len(analysis.candidate.parts) == 2
+    assert all(len(part.face_ids) == 6 for part in analysis.candidate.parts)
+    assert all(len(part.edge_ids) == 12 for part in analysis.candidate.parts)
+
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    parts = params.metadata["cad_geometry"]["parts"]
+    assert len(parts) == 2
+    assert {part["part_id"] for part in parts} == {
+        item.part_id for item in analysis.candidate.parts
+    }
+
+
 @pytest.mark.real_solver
 def test_cad_to_solve_closed_loop(tmp_path: Path) -> None:
     step = tmp_path / "beam.step"

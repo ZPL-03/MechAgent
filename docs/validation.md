@@ -70,13 +70,13 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 路由与旧 `/api` 兼容入口的弃用响应头；指标门禁检查 `/api/v1/metrics` 的项目范围、admin
 全局范围、脱敏输出、数据库重启后的统计一致性以及结果大小和证据清单完整性计数。
 
-CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑实体和六向区域候选是否随 `GeometryCandidate` 进入
+CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑实体、零件摘要和六向区域候选是否随 `GeometryCandidate` 进入
 `ModelParams.metadata.cad_geometry`；案例提升只接受唯一、已映射且置信度不低于 0.80 的
 面/边拓扑 ID，并核对 ID 存在于同一份 `topology_entities` 且维度符合区域语义。`ambiguous`、
 `unresolved`、缺少拓扑 ID 或引用未知拓扑 ID 的区域必须生成 `unknown` 区域并使
 `SimulationCase.execution_ready` 为 `False`。案例投影到兼容模型时，`regions` 写入
 `metadata.case_regions`；直接 CAD 网格对已声明的案例区域只使用该契约，未声明区域才允许由候选区域补充兼容别名，并在生成节点集合时拒绝未知或重复拓扑 ID。
-直接 CAD 网格适配器同样要求区域候选置信度至少为 0.80，并拒绝区域名称或别名冲突，避免绕过案例门禁或覆盖区域语义。
+直接 CAD 网格适配器同样要求区域候选置信度至少为 0.80，并拒绝区域名称或别名冲突；多实体文件保留零件级检查结果，但在没有装配、接触和连接契约时拒绝直接网格，避免绕过案例门禁或覆盖区域语义。
 
 实体 CAD 直接网格的本机证据使用以下命令生成。两个清单均要求源文件摘要、案例区域契约、拓扑区域节点集合、
 C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、能量字段全部有效；带孔案例额外

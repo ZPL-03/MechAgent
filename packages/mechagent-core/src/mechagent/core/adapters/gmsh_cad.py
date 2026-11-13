@@ -17,6 +17,7 @@ import gmsh
 from mechagent.core.cad import (
     AbstractCADKernel,
     CADGeometrySummary,
+    CADPartSummary,
     CADTopologyEntity,
     RegionCandidate,
 )
@@ -105,16 +106,22 @@ class GmshCADKernel(AbstractCADKernel):
             gmsh.option.setNumber("General.Terminal", 0)
             gmsh.model.add("mechagent_cad")
             gmsh.model.occ.importShapes(str(source))
-            if self.config.healing:
+            gmsh.model.occ.synchronize()
+            initial_solids = gmsh.model.getEntities(3)
+            healing_applied = self.config.healing and len(initial_solids) == 1
+            if healing_applied:
                 gmsh.model.occ.healShapes()
             gmsh.model.occ.synchronize()
             bbox = gmsh.model.getBoundingBox(-1, -1)
             solids = gmsh.model.getEntities(3)
+            if initial_solids and not solids:
+                raise CADError("CAD 修复后未保留三维实体，拒绝使用丢失实体拓扑的摘要。")
             faces = gmsh.model.getEntities(2)
             edges = gmsh.model.getEntities(1)
             volume = sum(gmsh.model.occ.getMass(3, tag) for _dim, tag in solids)
             area = sum(gmsh.model.occ.getMass(2, tag) for _dim, tag in faces)
             topology = _topology_entities(solids, faces, edges)
+            parts = _part_summaries(topology)
             region_candidates = _face_region_candidates(topology, bbox)
             topology_digest = _topology_digest(topology)
             return CADGeometrySummary(
@@ -129,7 +136,9 @@ class GmshCADKernel(AbstractCADKernel):
                 face_count=len(faces),
                 edge_count=len(edges),
                 watertight=_is_watertight(faces),
+                healing_applied=healing_applied,
                 topology_entities=topology,
+                parts=parts,
                 region_candidates=region_candidates,
             )
         except CADError:
@@ -212,6 +221,42 @@ def _is_watertight(faces: list[tuple[int, int]]) -> bool:
             if boundary_dimension == 1:
                 edge_use[abs(int(boundary_tag))] += 1
     return bool(edge_use) and all(count == 2 for count in edge_use.values())
+
+
+def _part_summaries(topology: list[CADTopologyEntity]) -> list[CADPartSummary]:
+    """按三维实体建立面和边的归属摘要。"""
+
+    by_id = {entity.stable_id: entity for entity in topology}
+    parts: list[CADPartSummary] = []
+    for solid in sorted(
+        (entity for entity in topology if entity.dimension == 3),
+        key=lambda entity: entity.stable_id,
+    ):
+        face_ids = sorted(
+            child_id
+            for child_id in solid.children
+            if child_id in by_id and by_id[child_id].dimension == 2
+        )
+        edge_ids = sorted(
+            {
+                edge_id
+                for face_id in face_ids
+                for edge_id in by_id[face_id].children
+                if edge_id in by_id and by_id[edge_id].dimension == 1
+            }
+        )
+        parts.append(
+            CADPartSummary(
+                part_id=solid.stable_id,
+                bbox_min=solid.bbox_min,
+                bbox_max=solid.bbox_max,
+                volume=solid.measure,
+                surface_area=sum(by_id[face_id].measure for face_id in face_ids),
+                face_ids=face_ids,
+                edge_ids=edge_ids,
+            )
+        )
+    return parts
 
 
 def _stable_topology_id(dimension: int, box: tuple[float, ...], measure: float, index: int) -> str:

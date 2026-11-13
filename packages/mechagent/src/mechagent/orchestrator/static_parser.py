@@ -240,10 +240,12 @@ def parse_static_model_params_from_geometry(
         "source_sha256": candidate.source_sha256,
         "topology_digest": candidate.topology_digest,
         "watertight": candidate.watertight,
+        "healing_applied": candidate.healing_applied,
         "bbox_min": list(candidate.bbox_min),
         "bbox_max": list(candidate.bbox_max),
         "region_candidates": [item.model_dump(mode="json") for item in candidate.region_candidates],
         "topology_entities": [item.model_dump(mode="json") for item in candidate.topology_entities],
+        "parts": [item.model_dump(mode="json") for item in candidate.parts],
     }
     metadata = {
         **params.metadata,
