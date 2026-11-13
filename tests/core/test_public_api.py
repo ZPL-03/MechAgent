@@ -11,6 +11,8 @@ from mechagent import (
     MechAgentInspection,
     MechAgentResult,
     SimulationExample,
+    StudioClient,
+    StudioClientError,
 )
 from mechagent import core as mechagent_core
 from mechagent.config import MechAgentConfig
@@ -22,12 +24,16 @@ def test_public_api_exports_version_and_sdk() -> None:
     assert MechAgent.__name__ == "MechAgent"
     assert MechAgentInspection.__name__ == "MechAgentInspection"
     assert MechAgentResult.__name__ == "MechAgentResult"
+    assert StudioClient.__name__ == "StudioClient"
+    assert StudioClientError.__name__ == "StudioClientError"
     assert isinstance(mechagent.__version__, str)
     assert mechagent.__version__
     assert {
         "MechAgent",
         "MechAgentInspection",
         "MechAgentResult",
+        "StudioClient",
+        "StudioClientError",
         "DEFAULT_SHOWCASE_EXAMPLE_ID",
         "SimulationExample",
         "all_examples",

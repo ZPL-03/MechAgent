@@ -80,6 +80,35 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 
 旧兼容入口包含同一路径的 `/api/metrics`，其响应头声明弃用周期。
 
+### Python HTTP 客户端
+
+`mechagent.StudioClient` 是 `/api/v1` 的同步客户端。构造时传入带版本前缀的绝对 `base_url`；
+客户端拒绝带 query 或 fragment 的地址，并将 `api_key` 作为 `Authorization: Bearer` 请求头发送。
+`health()`、`diagnostics()`、`capabilities()`、`examples()`、`inspect()`、`create_job()`、`run()`、
+作业查询与操作、`metrics()` 和主体目录方法分别对应上表接口，返回值保留服务端 JSON 结构。
+
+`create_job()`、`run()` 和 `retry_job()` 在未传入 `idempotency_key` 时生成随机键；传入的键按原值发送，
+长度必须为 1–128 个非空白字符。客户端不自动重试，调用方需要在重试可安全执行时复用幂等键。
+`list_jobs()` 支持 `cursor` 或兼容的 `offset`，两者不能同时使用；`list_audit()` 使用稳定游标。
+后续页面通过响应中的 `pagination.next_cursor` 读取，游标为空表示没有后续页面。
+
+HTTP 非 2xx 响应抛出 `StudioClientError`，字段 `status_code`、`code`、`detail` 和 `request_url`
+分别表示 HTTP 状态、机器可读错误码、服务端诊断和请求地址。无法建立 HTTP 请求时，错误码为
+`transport_error`、状态码为 `0`，服务端没有可用的 `request_url`。客户端不打印 API key，也不会把
+服务端错误转换为成功结果。
+
+```python
+from mechagent import StudioClient, StudioClientError
+
+try:
+    with StudioClient("http://127.0.0.1:8765/api/v1", api_key="<api-key>") as studio:
+        page = studio.list_jobs(project_id="default", limit=50)
+        while page["pagination"]["next_cursor"]:
+            page = studio.list_jobs(cursor=page["pagination"]["next_cursor"])
+except StudioClientError as exc:
+    print(exc.code, exc.status_code, exc.detail)
+```
+
 作业、诊断、报告和主体目录类 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
 幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，组织和项目范围共同决定可见作业；配置主体和受管理主体的密钥均只以 SHA-256 摘要保存。受管理主体只属于一个组织，管理员只能管理本组织主体；组织为 `*` 的管理员可跨组织管理。当前实现使用单个 SQLite 数据库；外部身份提供商、集中审计和分布式配额需要部署扩展。
 兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、

@@ -15,6 +15,23 @@ python -m mechagent.cli studio --open-browser
 
 SDK 入口为 `MechAgent.from_config()`、`inspect()` 和 `run()`。Studio、CLI 与 SDK 共用能力、执行门禁和结果契约。复合请求拆分为独立任务，单任务失败时保留诊断，其余任务继续执行。
 
+Studio 的同步 Python HTTP 客户端为 `StudioClient`，公开接口从 `mechagent` 导出。客户端的
+`base_url` 使用带 `/api/v1` 的绝对 URL，`api_key` 通过 `Authorization: Bearer` 发送；
+`create_job()`、`run()` 和 `retry_job()` 在未提供幂等键时生成随机键。列表方法返回服务端分页对象，
+调用方应使用 `pagination.next_cursor` 读取后续页面。HTTP 错误转换为 `StudioClientError`，其中
+`status_code`、`code`、`detail` 和 `request_url` 保留服务端错误契约；传输失败使用
+`code="transport_error"` 和 `status_code=0`。客户端不自动重试请求，重试策略由调用方结合幂等键和服务端状态决定。
+
+```python
+from mechagent import StudioClient
+
+with StudioClient("http://127.0.0.1:8765/api/v1", api_key="<api-key>") as studio:
+    inspection = studio.inspect("求解悬臂梁的结构静力响应")
+    page = studio.list_jobs(limit=20)
+    while page["pagination"]["next_cursor"]:
+        page = studio.list_jobs(cursor=page["pagination"]["next_cursor"])
+```
+
 ## 产品与边界
 
 Studio 支持中英文界面、明暗与系统主题、几何/网格/结果视口、验收检查和 Markdown 报告。Three.js 懒加载并按需渲染。界面只消费公开摘要，原始 LLM prompt 与 response 不进入公开输出。

@@ -137,7 +137,7 @@ def verify_backup(backup: Path) -> list[str]:
             continue
         try:
             path.relative_to(backup)
-        except ValueError:  # 防御性检查，_member_path 已覆盖该分支。
+        except ValueError:  # `_member_path` 已验证路径位于备份目录内。
             errors.append(f"非法备份路径：{relative}")
             listed.add(relative)
             continue
