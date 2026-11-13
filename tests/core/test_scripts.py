@@ -458,6 +458,40 @@ output:
     assert (output_dir / "benchmark_results.json").exists()
 
 
+def test_run_benchmarks_script_writes_independent_evidence_manifest(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("output:\n  output_dir: reports\n", encoding="utf-8")
+    evidence_dir = tmp_path / "evidence"
+
+    monkeypatch.setattr(
+        run_benchmarks,
+        "run_core_benchmarks",
+        lambda **_kwargs: [
+            BenchmarkResult(
+                case_id="TC-XX",
+                description="unit",
+                predicted=1.0,
+                reference=1.0,
+                relative_error=0.0,
+                tolerance=0.01,
+                quantity="u",
+                unit="mm",
+                solver="unit",
+            )
+        ],
+    )
+
+    result = run_benchmarks.main(["--config", str(config_path), "--output-dir", str(evidence_dir)])
+
+    manifest = evidence_dir / "manifest.json"
+    assert result == 0
+    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "passed"
+    assert verify_manifest(manifest) == []
+
+
 def test_run_natural_language_cases_uses_configured_output_dir(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -512,6 +546,53 @@ def test_run_natural_language_cases_uses_configured_output_dir(
 
     assert result == 0
     assert captured["output_dir"] == output_dir / "natural_language_cases"
+    assert (output_dir / "natural_language_cases" / "results.json").is_file()
+    assert (output_dir / "natural_language_cases" / "manifest.json").is_file()
+
+
+def test_run_natural_language_cases_records_case_failure_in_manifest(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    output_dir = tmp_path / "runs"
+    config = MechAgentConfig(output=OutputSettings(output_dir=output_dir))
+
+    class FakeAgent:
+        @classmethod
+        def from_config(cls, _path: Path) -> "FakeAgent":
+            return cls(config)
+
+        def __init__(self, active_config: MechAgentConfig) -> None:
+            self.config = active_config
+
+        def run(self, _request: str) -> object:
+            raise RuntimeError("求解器返回码为 7")
+
+    monkeypatch.setattr(run_natural_language_cases, "MechAgent", FakeAgent)
+    monkeypatch.setattr(
+        run_natural_language_cases,
+        "STATIC_LANGUAGE_CASES",
+        [
+            natural_language_cases.StaticLanguageCase(
+                case_id="SC-FAIL",
+                request="unit",
+                geometry_type="beam",
+                load_type="force",
+                model_case_id="STATIC-BEAM",
+            )
+        ],
+    )
+
+    result = run_natural_language_cases.main(["--config", str(tmp_path / "config.yaml")])
+
+    evidence_dir = output_dir / "natural_language_cases"
+    payload = json.loads((evidence_dir / "results.json").read_text(encoding="utf-8"))
+    manifest = json.loads((evidence_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert result == 1
+    assert payload[0]["passed"] is False
+    assert payload[0]["error"] == "求解器返回码为 7"
+    assert manifest["status"] == "failed"
+    assert verify_manifest(evidence_dir / "manifest.json") == []
 
 
 def test_run_llm_smoke_uses_configured_output_dir_and_validates_trace_summary(

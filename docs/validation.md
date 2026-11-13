@@ -7,7 +7,7 @@
 标准验证由独立命令执行：
 
 ```powershell
-python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYYMMDD
+python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks-YYYYMMDD/runs --output-dir mechagent_output/benchmarks-YYYYMMDD
 ```
 
 | 编号 | 物理量 | CalculiX | 解析参考 | 相对误差 | 阈值 | 状态 |
@@ -20,13 +20,13 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks/RUN-YYYY
 
 解析参考公式见 [求解器、网格与后处理](solver_mesh.md)。
 
-本机标准算例的当前运行结果保存在 `mechagent_output/benchmark_results.json`，求解中间产物位于
-`mechagent_output/benchmarks/`，对应清单为 `mechagent_output/benchmarks/manifest.json`。Abaqus
+本机标准算例的当前运行结果保存在 `mechagent_output/benchmarks-current/benchmark_results.json`，求解中间产物位于
+`mechagent_output/benchmarks-current/runs/`，对应清单为 `mechagent_output/benchmarks-current/manifest.json`。Abaqus
 多步、跨工具比较和 CAD 拓扑证据分别使用各自目录下的 `manifest.json`。这些清单都使用相对路径、文件大小
 和 SHA-256；统一校验命令如下：
 
 ```powershell
-python -m mechagent.cli verify-evidence mechagent_output/benchmarks/manifest.json
+python -m mechagent.cli verify-evidence mechagent_output/benchmarks-current/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/abaqus-multistep-evidence/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/backend-comparison-current/manifest.json
 python -m mechagent.cli verify-evidence mechagent_output/cad-topology-evidence/manifest.json
@@ -39,7 +39,7 @@ python -m mechagent.cli verify-evidence mechagent_output/mesh-convergence-tc01/m
 
 ## 自然语言与 LLM
 
-案例定义位于 `scripts/natural_language_cases.py`，不进入生产 Planner。`scripts/run_natural_language_cases.py` 校验能力、几何、载荷、求解状态和参考误差：SC-01 至 SC-20 有参考验收；SC-21 至 SC-28 覆盖中心孔、偏心孔、多孔和槽孔，仅确认真实求解成功，状态为 `unverified`。
+案例定义位于 `scripts/natural_language_cases.py`，不进入生产 Planner。`scripts/run_natural_language_cases.py` 要求新的空输出目录，校验能力、几何、载荷、求解状态和参考误差，并写入 `results.json` 与 `manifest.json`；SC-01 至 SC-20 有参考验收；SC-21 至 SC-28 覆盖中心孔、偏心孔、多孔和槽孔，仅确认真实求解成功，状态为 `unverified`。任何单个案例异常都会保留错误字段并使整体命令返回非零状态。
 
 `scripts/run_llm_smoke.py` 检查结构化补参、Agent 调用记录、真实梁求解及报告中的工程解释。远端模型响应和可用性具有时效性，该检查需要本机凭据，便携 CI 不执行。
 
@@ -112,7 +112,7 @@ python -m ruff check packages tests scripts
 python -m mypy packages scripts tests
 python -m pytest
 python scripts/run_benchmarks.py
-python scripts/run_natural_language_cases.py
+python scripts/run_natural_language_cases.py --output-dir mechagent_output/natural-language-cases-YYYYMMDD
 python scripts/run_llm_smoke.py
 python scripts/studio_http_smoke.py --output-dir mechagent_output/studio-http-evidence-live
 python scripts/build_knowledge.py

@@ -11,8 +11,8 @@
 | 知识库 | `build_knowledge.py` | 将原始公开知识源标准化为外部文档产物 |
 | 知识库 | `index_knowledge.py` | 将标准化文档写成 JSONL 检索索引 |
 | 标准案例 | `natural_language_cases.py` | 提供自然语言案例数据和测试导入，不单独执行求解 |
-| 标准案例 | `run_natural_language_cases.py` | 运行自然语言案例并检查解析、求解和参考验收 |
-| 标准案例 | `run_benchmarks.py` | 运行 core 标准验证和参考公式检查 |
+| 标准案例 | `run_natural_language_cases.py` | 在新的空目录运行自然语言案例，检查解析、求解和参考验收并写入结果清单 |
+| 标准案例 | `run_benchmarks.py` | 在独立证据目录运行 core 标准验证和参考公式检查并写入结果清单 |
 | LLM | `run_llm_smoke.py` | 在显式配置 LLM 后验证结构化 trace；数值正确性由求解和参考验收记录 |
 | 网格 | `run_mesh_convergence.py` | 使用真实 CalculiX 运行多尺寸网格并评估收敛；输出是独立证据 |
 | CAD | `run_cad_topology_case.py` | 生成或导入 CAD，检查拓扑、区域、C3D4 网格和 CalculiX 链路 |
