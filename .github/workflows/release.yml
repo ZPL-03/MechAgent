@@ -51,6 +51,30 @@ jobs:
             packages/mechagent/dist/*
             dist/mechagent-sbom.spdx.json
             dist/mechagent-release-manifest.json
+      - name: Verify build provenance
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $workflow = "github.com/${{ github.repository }}/.github/workflows/release.yml"
+          $sourceRef = "refs/tags/${{ github.ref_name }}"
+          $subjects = @(
+            (Get-ChildItem packages/mechagent-core/dist -File),
+            (Get-ChildItem packages/mechagent/dist -File),
+            (Get-Item dist/mechagent-sbom.spdx.json),
+            (Get-Item dist/mechagent-release-manifest.json)
+          )
+          foreach ($subject in $subjects) {
+            gh attestation verify $subject.FullName `
+              --repo $repo `
+              --signer-workflow $workflow `
+              --source-ref $sourceRef `
+              --cert-oidc-issuer "https://token.actions.githubusercontent.com"
+            if ($LASTEXITCODE -ne 0) {
+              throw "构建 provenance 验证失败: $($subject.FullName)"
+            }
+          }
       - name: Sign release manifest with GitHub OIDC
         shell: pwsh
         env:

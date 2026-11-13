@@ -153,6 +153,9 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
     assert "id-token: write" in release_workflow
     assert "--certificate-identity" in release_workflow
     assert "scripts/verify_release.py" in release_workflow
+    assert "gh attestation verify" in release_workflow
+    assert "--signer-workflow" in release_workflow
+    assert "--source-ref" in release_workflow
     for forbidden in (
         "D:/anaconda3",
         "self-hosted",
