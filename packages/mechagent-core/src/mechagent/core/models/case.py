@@ -563,9 +563,22 @@ class SimulationCase(BaseModel):
         metadata.setdefault("canonical_unit_system", UnitSystem().model_dump(mode="json"))
         if self.request is not None:
             metadata.setdefault("request_provenance", self.request.model_dump(mode="json"))
+        metadata["case_regions"] = {
+            name: region.model_dump(mode="json") for name, region in sorted(self.regions.items())
+        }
         metadata["load_steps"] = [step.model_dump(mode="json") for step in self.load_steps]
         metadata["result_fields"] = [field.model_dump(mode="json") for field in self.result_fields]
         return model.model_copy(update={"metadata": metadata})
+
+    def attach_region_contract(self, model: ModelParams | None = None) -> ModelParams:
+        """将案例区域契约附加到兼容模型，不改变模型单位或分析步。"""
+
+        candidate = self.model if model is None else model
+        metadata = dict(candidate.metadata)
+        metadata["case_regions"] = {
+            name: region.model_dump(mode="json") for name, region in sorted(self.regions.items())
+        }
+        return candidate.model_copy(update={"metadata": metadata})
 
     def to_step_model_params(self, step_id: str) -> ModelParams:
         """将一个分析步投影为求解器使用的单位和载荷模型。
@@ -589,6 +602,9 @@ class SimulationCase(BaseModel):
         ]
         metadata = dict(model.metadata)
         metadata["case_schema_version"] = self.schema_version
+        metadata["case_regions"] = {
+            name: region.model_dump(mode="json") for name, region in sorted(self.regions.items())
+        }
         metadata["load_step"] = step.model_dump(mode="json")
         metadata["result_fields"] = [field.model_dump(mode="json") for field in self.result_fields]
         return model.model_copy(
@@ -661,6 +677,25 @@ def _region_spec_from_model_metadata(
     if not isinstance(candidates, list):
         return _unresolved_region_spec(region_name, "cad_geometry.region_candidates 缺失")
 
+    topology_entities = cad_geometry.get("topology_entities")
+    topology_dimensions: dict[str, int] = {}
+    duplicate_topology_ids: set[str] = set()
+    if isinstance(topology_entities, list):
+        for item in topology_entities:
+            if not isinstance(item, dict):
+                continue
+            stable_id = item.get("stable_id")
+            dimension = item.get("dimension")
+            if (
+                isinstance(stable_id, str)
+                and stable_id
+                and isinstance(dimension, int)
+                and dimension in {1, 2, 3}
+            ):
+                if stable_id in topology_dimensions:
+                    duplicate_topology_ids.add(stable_id)
+                topology_dimensions[stable_id] = dimension
+
     alias = {
         "root": "x_min",
         "fixed_end": "x_min",
@@ -675,10 +710,12 @@ def _region_spec_from_model_metadata(
         "bottom_surface": "z_min",
         "bottom": "z_min",
     }.get(region_name, region_name)
-    candidate = next(
-        (item for item in candidates if isinstance(item, dict) and item.get("name") == alias),
-        None,
-    )
+    matching_candidates = [
+        item for item in candidates if isinstance(item, dict) and item.get("name") == alias
+    ]
+    if len(matching_candidates) > 1:
+        return _unresolved_region_spec(region_name, f"cad.region_candidates.{alias} 重复")
+    candidate = matching_candidates[0] if matching_candidates else None
     if candidate is not None:
         status = candidate.get("status")
         topology_ids = candidate.get("topology_ids")
@@ -692,14 +729,47 @@ def _region_spec_from_model_metadata(
             and math.isfinite(float(confidence))
             and float(confidence) >= MIN_EXECUTION_CONFIDENCE
         ):
+            if not isinstance(topology_entities, list):
+                return _unresolved_region_spec(
+                    region_name, "cad_geometry.topology_entities 缺失，无法核验拓扑区域"
+                )
+            normalized_ids = [str(item) for item in topology_ids]
+            if len(set(normalized_ids)) != len(normalized_ids):
+                return _unresolved_region_spec(
+                    region_name, "cad.region_candidates 区域拓扑 ID 重复"
+                )
+            missing_ids = sorted(set(normalized_ids) - topology_dimensions.keys())
+            if missing_ids:
+                return _unresolved_region_spec(
+                    region_name,
+                    "cad.region_candidates 区域拓扑 ID 不存在: " + ", ".join(missing_ids),
+                )
+            duplicate_ids = sorted(set(normalized_ids) & duplicate_topology_ids)
+            if duplicate_ids:
+                return _unresolved_region_spec(
+                    region_name,
+                    "cad.topology_entities 区域拓扑 ID 重复: " + ", ".join(duplicate_ids),
+                )
+            expected_dimension = 1 if region_name == "all_edges" else 2
+            wrong_dimension = sorted(
+                topology_id
+                for topology_id in normalized_ids
+                if topology_dimensions[topology_id] != expected_dimension
+            )
+            if wrong_dimension:
+                return _unresolved_region_spec(
+                    region_name,
+                    f"cad.region_candidates 区域需要 {expected_dimension}D 拓扑实体: "
+                    + ", ".join(wrong_dimension),
+                )
             stable_id = (
-                str(topology_ids[0]) if len(topology_ids) == 1 else _topology_set_id(topology_ids)
+                normalized_ids[0] if len(normalized_ids) == 1 else _topology_set_id(normalized_ids)
             )
             return RegionSpec(
                 name=region_name,
                 kind="topology",
                 stable_id=stable_id,
-                topology_ids=list(topology_ids),
+                topology_ids=normalized_ids,
                 provenance=Provenance(
                     source="import",
                     reference=f"cad.region_candidates.{alias}",

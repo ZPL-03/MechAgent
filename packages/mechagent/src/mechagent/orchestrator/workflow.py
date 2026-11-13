@@ -104,7 +104,9 @@ class SequentialWorkflow:
             try:
                 emit_progress("designer", "running", _stage_message("designer", "running"))
                 design_output = designer.design_with_trace(task)
-                model_params = design_output.model_params
+                model_params = design_output.simulation_case.attach_region_contract(
+                    design_output.model_params
+                )
                 record.model_params = model_params
                 record.simulation_case = design_output.simulation_case
                 record.designer_llm_trace = design_output.designer_llm_trace

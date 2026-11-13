@@ -217,11 +217,14 @@ def _mesh_node(state: MechAgentState, config: MechAgentConfig) -> dict[str, Any]
     traces: list[AgentLLMTrace] = []
     errors: list[ErrorRecord] = []
     failed_records: list[TaskRunRecord] = []
+    simulation_cases = state.get("simulation_cases", [])
     for index, (task_value, params_value) in enumerate(
         zip(active_tasks, model_params_values, strict=False)
     ):
         task = _task_item(task_value)
         params = _model_params(params_value)
+        if index < len(simulation_cases):
+            params = simulation_cases[index].attach_region_contract(params)
         designer_trace = _designer_trace(state, index)
         mesh_agent = MeshAgent(config, _task_work_dir(state, task))
         try:

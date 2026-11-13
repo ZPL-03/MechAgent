@@ -14,7 +14,7 @@ from mechagent.core.cad import (
     GeometryCandidate,
     geometry_candidate_from_summary,
 )
-from mechagent.core.models import GeometryType
+from mechagent.core.models import GeometryType, Provenance, RegionSpec
 from mechagent.orchestrator.agents import GeometryAgent
 from mechagent.orchestrator.agents.mesh import MeshAgent
 from mechagent.orchestrator.static_parser import (
@@ -126,6 +126,96 @@ def test_cad_topology_regions_reach_execution_case(tmp_path: Path) -> None:
     assert case.regions["root"].topology_ids
     assert case.regions["tip"].kind == "topology"
     assert case.execution_ready is True
+
+
+def test_simulation_case_projection_preserves_region_topology_contract(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    params = GeometryAgent(MechAgentConfig(), tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+    projected = case.to_model_params()
+    attached = case.attach_region_contract(params)
+
+    regions = projected.metadata["case_regions"]
+    assert regions["root"]["kind"] == "topology"
+    assert regions["root"]["topology_ids"] == case.regions["root"].topology_ids
+    assert regions["end_face"]["stable_id"] == case.regions["end_face"].stable_id
+    assert attached.metadata["case_regions"] == regions
+
+
+def test_cad_region_with_unknown_topology_id_is_not_executable(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    params = GeometryAgent(MechAgentConfig(), tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    cad_geometry = dict(params.metadata["cad_geometry"])
+    candidates = [dict(item) for item in cad_geometry["region_candidates"]]
+    x_min = next(item for item in candidates if item["name"] == "x_min")
+    x_min["topology_ids"] = ["topology-2d-missing"]
+    cad_geometry["region_candidates"] = candidates
+    bad_params = params.model_copy(
+        update={"metadata": {**params.metadata, "cad_geometry": cad_geometry}}
+    )
+
+    case = bad_params.to_simulation_case(provenance_confidence=1.0)
+
+    assert case.execution_ready is False
+    assert any("未完成拓扑或语义映射" in item for item in case.execution_readiness().blockers)
+
+
+def test_cad_mesh_rejects_unknown_explicit_case_region(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+    bad_region = RegionSpec(
+        name="root",
+        kind="topology",
+        stable_id="topology-2d-missing",
+        topology_ids=["topology-2d-missing"],
+        provenance=Provenance(source="import", reference="test", confidence=1.0),
+    )
+    bad_case = case.model_copy(update={"regions": {**case.regions, "root": bad_region}})
+
+    output = MeshAgent(config, tmp_path / "mesh-explicit-drift").generate_with_trace(
+        bad_case.to_model_params()
+    )
+
+    assert output.mesh_result.success is False
+    assert "未知拓扑 ID" in (output.mesh_result.error_message or "")
+
+
+def test_cad_mesh_does_not_fallback_for_unresolved_case_region(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+    unresolved = RegionSpec(
+        name="root",
+        kind="unknown",
+        provenance=Provenance(source="import", reference="test", confidence=1.0),
+    )
+    bad_case = case.model_copy(update={"regions": {**case.regions, "root": unresolved}})
+
+    output = MeshAgent(config, tmp_path / "mesh-unresolved").generate_with_trace(
+        bad_case.to_model_params()
+    )
+
+    assert output.mesh_result.success is False
+    assert "没有映射到网格节点集合" in (output.mesh_result.error_message or "")
 
 
 def test_cad_region_without_unique_topology_is_not_executable() -> None:

@@ -108,13 +108,14 @@ def main(argv: list[str] | None = None) -> int:
             parser="cad-import",
             provenance_confidence=1.0,
         )
+        mesh_params = case.attach_region_contract(params)
         mesh = GmshCADInpMesher(
             MeshConfig(
                 work_dir=args.output_dir / "mesh",
                 seed_size=args.seed_size,
                 min_quality=0.3,
             )
-        ).generate(params)
+        ).generate(mesh_params)
         if not mesh.success or mesh.mesh_file is None:
             raise RuntimeError(mesh.error_message or "CAD 直接网格失败。")
         case = case.model_copy(
@@ -186,6 +187,7 @@ def _checks(
         "case_load_topology": (
             regions.get("end_face").kind == "topology" if "end_face" in regions else False
         ),
+        "case_region_contract": bool(metadata.get("case_regions")),
         "direct_cad_mesh": bool(metadata.get("direct_cad")),
         "c3d4_mesh": metadata.get("element_type") == "C3D4",
         "root_node_set": bool(metadata.get("region_node_sets", {}).get("root")),

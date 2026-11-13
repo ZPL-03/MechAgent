@@ -95,14 +95,6 @@ class GmshCADInpMesher(AbstractMesher):
                     ),
                     metadata={"solid_count": len(volumes)},
                 )
-            gmsh.model.mesh.generate(3)
-            nodes = _gmsh_nodes()
-            tetrahedra = _gmsh_tetrahedra()
-            if not nodes or not tetrahedra:
-                return MeshResult(
-                    success=False,
-                    error_message="Gmsh 未生成可用的 C3D4 四面体网格。",
-                )
             topology = _topology_entities(volumes, faces, gmsh.model.getEntities(1))
             expected_topology_digest = cad_geometry.get("topology_digest")
             actual_topology_digest = _topology_digest(topology)
@@ -121,8 +113,17 @@ class GmshCADInpMesher(AbstractMesher):
                         "actual_topology_digest": actual_topology_digest,
                     },
                 )
+            gmsh.model.mesh.generate(3)
+            nodes = _gmsh_nodes()
+            tetrahedra = _gmsh_tetrahedra()
+            if not nodes or not tetrahedra:
+                return MeshResult(
+                    success=False,
+                    error_message="Gmsh 未生成可用的 C3D4 四面体网格。",
+                )
             topology_by_id = {item.stable_id: item for item in topology}
-            region_sets = _region_node_sets(cad_geometry, topology_by_id)
+            case_regions = model_params.metadata.get("case_regions")
+            region_sets = _region_node_sets(cad_geometry, topology_by_id, case_regions)
             required = _required_region_names(model_params)
             missing = sorted(name for name in required if not region_sets.get(name))
             if missing:
@@ -162,6 +163,7 @@ class GmshCADInpMesher(AbstractMesher):
                     "region_node_sets": {
                         name: sorted(set(values)) for name, values in region_sets.items()
                     },
+                    "case_regions": case_regions if isinstance(case_regions, dict) else {},
                     "node_count": len(nodes),
                     "element_count": len(tetrahedra),
                 },
@@ -196,12 +198,44 @@ def _gmsh_tetrahedra() -> list[tuple[int, int, int, int]]:
 
 
 def _region_node_sets(
-    cad_geometry: dict[str, Any], topology_by_id: dict[str, Any]
+    cad_geometry: dict[str, Any],
+    topology_by_id: dict[str, Any],
+    case_regions: Any = None,
 ) -> dict[str, list[int]]:
+    result: dict[str, list[int]] = {}
+    blocked_names: set[str] = set()
+    if isinstance(case_regions, dict):
+        for raw_name, raw_region in sorted(case_regions.items()):
+            name = _region_alias(str(raw_name))
+            if not name:
+                continue
+            family = _region_family(name)
+            overlap = sorted(set(family) & blocked_names)
+            if overlap:
+                raise ValueError(f"CAD 案例区域名称或别名重复: {name}")
+            blocked_names.update(family)
+            if not isinstance(raw_region, dict):
+                raise ValueError(f"CAD 案例区域 {name} 不是有效对象。")
+            if raw_region.get("kind") != "topology":
+                continue
+            topology_ids = raw_region.get("topology_ids")
+            provenance = raw_region.get("provenance")
+            confidence = provenance.get("confidence") if isinstance(provenance, dict) else None
+            if (
+                not isinstance(topology_ids, list)
+                or not topology_ids
+                or not isinstance(confidence, (int, float))
+                or not math.isfinite(float(confidence))
+                or float(confidence) < _MIN_REGION_CONFIDENCE
+            ):
+                continue
+            if name in result:
+                raise ValueError(f"CAD 案例区域名称重复: {name}")
+            result[name] = _nodes_for_topology_ids(topology_ids, topology_by_id, name)
+
     candidates = cad_geometry.get("region_candidates")
     if not isinstance(candidates, list):
-        return {}
-    result: dict[str, list[int]] = {}
+        return result
     for candidate in candidates:
         if not isinstance(candidate, dict) or candidate.get("status") != "mapped":
             continue
@@ -215,26 +249,42 @@ def _region_node_sets(
         topology_ids = candidate.get("topology_ids")
         if not isinstance(topology_ids, list) or not topology_ids:
             continue
-        node_ids: set[int] = set()
-        for stable_id in topology_ids:
-            entity = topology_by_id.get(stable_id)
-            if entity is None:
-                continue
-            node_tags, _, _ = gmsh.model.mesh.getNodes(
-                int(entity.dimension), int(entity.native_tag), True
-            )
-            node_ids.update(int(tag) for tag in node_tags)
-        if not node_ids:
-            continue
         name = _region_alias(str(candidate.get("name", "")))
         if not name:
             continue
         names = (name, *_REGION_ALIASES.get(name, ()))
-        for region_name in names:
+        available_names = tuple(
+            region_name for region_name in names if region_name not in blocked_names
+        )
+        if not available_names:
+            continue
+        node_ids = set(_nodes_for_topology_ids(topology_ids, topology_by_id, name))
+        for region_name in available_names:
             if region_name in result:
                 raise ValueError(f"CAD 区域名称或别名重复: {region_name}")
             result[region_name] = sorted(node_ids)
     return result
+
+
+def _nodes_for_topology_ids(
+    topology_ids: list[Any], topology_by_id: dict[str, Any], region_name: str
+) -> list[int]:
+    normalized_ids = [item for item in topology_ids if isinstance(item, str) and item]
+    if len(normalized_ids) != len(topology_ids) or len(set(normalized_ids)) != len(normalized_ids):
+        raise ValueError(f"CAD 区域 {region_name} 的拓扑 ID 无效或重复。")
+    missing = sorted(set(normalized_ids) - topology_by_id.keys())
+    if missing:
+        raise ValueError(f"CAD 区域 {region_name} 引用了未知拓扑 ID: {', '.join(missing)}")
+    node_ids: set[int] = set()
+    for stable_id in normalized_ids:
+        entity = topology_by_id[stable_id]
+        node_tags, _, _ = gmsh.model.mesh.getNodes(
+            int(entity.dimension), int(entity.native_tag), True
+        )
+        node_ids.update(int(tag) for tag in node_tags)
+    if not node_ids:
+        raise ValueError(f"CAD 区域 {region_name} 没有映射到网格节点。")
+    return sorted(node_ids)
 
 
 def _required_region_names(model_params: ModelParams) -> set[str]:
@@ -245,6 +295,14 @@ def _required_region_names(model_params: ModelParams) -> set[str]:
 
 def _region_alias(value: str) -> str:
     return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _region_family(value: str) -> tuple[str, ...]:
+    normalized = _region_alias(value)
+    for canonical, aliases in _REGION_ALIASES.items():
+        if normalized == canonical or normalized in aliases:
+            return (canonical, *aliases)
+    return (normalized,)
 
 
 def _quality_metrics(dimension: int) -> dict[str, float]:
