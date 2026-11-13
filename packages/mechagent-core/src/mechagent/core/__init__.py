@@ -18,6 +18,12 @@ from mechagent.core.cad import (
     region_bindings_from_summary,
     validate_cad_summary,
 )
+from mechagent.core.cad_convergence import (
+    CADMeshConvergenceReport,
+    CADMeshConvergenceRun,
+    evaluate_cad_mesh_convergence,
+    region_contract_digest,
+)
 from mechagent.core.compare import BackendComparison, ComparisonTolerance, compare_backend_results
 from mechagent.core.convergence import (
     ConvergencePoint,
@@ -88,6 +94,8 @@ __all__ = [
     "AbstractSolver",
     "BUILTIN_MATERIALS",
     "CADConfig",
+    "CADMeshConvergenceReport",
+    "CADMeshConvergenceRun",
     "CADArtifact",
     "CADError",
     "CADGeometryFeature",
@@ -99,6 +107,8 @@ __all__ = [
     "ConvergencePoint",
     "MeshConvergenceReport",
     "evaluate_mesh_convergence",
+    "evaluate_cad_mesh_convergence",
+    "region_contract_digest",
     "ExecutorConfig",
     "GeometryCandidate",
     "RegionBinding",

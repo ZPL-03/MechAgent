@@ -91,6 +91,26 @@ python scripts/run_cad_topology_case.py --generate-hole-box --calculix D:/Calcul
 
 网格独立性使用同一案例、递减 seed size 和同一求解器重复运行；收敛状态同时检查终点相邻网格变化和解析参考误差。当前 TC-01 的四级真实运行证据为 `mechagent_output/mesh-convergence-tc01/manifest.json`，seed size 为 40、20、10、5 mm，终点节点/单元数为 201/200，终点相邻网格相对变化为 2.014e-5，解析参考相对误差为 0.1031%，清单状态为 `passed`。质量指标名称和 `min_quality` 门禁已在参数化梁、板、开孔板、结构化实体和 CAD 直接网格路径中统一记录；该证据只覆盖参数化 B31 梁，CAD 实体、多区域映射、其他单元族的网格独立性以及跨网格器质量指标的工程等价性仍需独立验收。
 
+CAD 实体网格独立性使用 `scripts/run_cad_mesh_convergence.py`。脚本在同一源文件上复用一次 CAD 几何分析，并要求每个 seed size 的运行保持源文件 SHA-256、拓扑摘要、区域契约摘要、区域节点集合、C3D4 质量指标和 CalculiX 求解状态一致；每个运行目录保存完整结果场、网格和运行记录。没有参考值时，稳定的网格结果为 `unverified`，不能作为工程验收；提供与案例单位一致的解析或独立参考值及容差后，终点相邻网格变化、参考误差和质量门禁全部通过才为 `passed`。
+
+```powershell
+python scripts/run_cad_mesh_convergence.py `
+  --generate-box `
+  --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe `
+  --output-dir mechagent_output/cad-mesh-convergence-box `
+  --seed-size 20 --seed-size 10 --seed-size 5 `
+  --reference 0.0047619048 --reference-tolerance 0.03
+
+python scripts/run_cad_mesh_convergence.py `
+  --generate-hole-box `
+  --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe `
+  --output-dir mechagent_output/cad-mesh-convergence-hole-box `
+  --seed-size 8 --seed-size 6 --seed-size 4 `
+  --stabilization-tolerance 0.02
+```
+
+实体块参考值为均匀端面压力下的轴向位移 `pL/E`，其中 `p=10 MPa`、`L=100 mm`、`E=210000 MPa`；该公式只适用于脚本默认的完整矩形实体和轴向线弹性工况。贯穿孔案例没有内置解析参考值，清单只能记录网格稳定性和 `unverified` 状态。
+
 ```powershell
 python scripts/run_mesh_convergence.py `
   --case-id TC-01 `

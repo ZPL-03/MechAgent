@@ -16,6 +16,7 @@
 | LLM | `run_llm_smoke.py` | 在显式配置 LLM 后验证结构化 trace；数值正确性由求解和参考验收记录 |
 | 网格 | `run_mesh_convergence.py` | 使用真实 CalculiX 运行多尺寸网格并评估收敛；输出是独立证据 |
 | CAD | `run_cad_topology_case.py` | 生成或导入 CAD，检查拓扑、区域、C3D4 网格和 CalculiX 链路 |
+| CAD/网格 | `run_cad_mesh_convergence.py` | 在固定 CAD 来源、拓扑摘要和区域契约下运行多尺寸 C3D4 网格；提供参考值时才可判定为 `passed` |
 | 求解器 | `run_abaqus_smoke.py` | 独立 Abaqus 工具基准；适配器验收单独记录 |
 | 求解器 | `run_abaqus_multistep.py` | 验证同一 `SimulationCase` 的 Abaqus 多步输入和 ODB 字段 |
 | 求解器 | `run_calculix_multistep.py` | 验证 CalculiX 多步输入和 FRD 位移、应力、应变、体积、反力、能量字段 |
