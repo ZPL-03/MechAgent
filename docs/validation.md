@@ -74,6 +74,7 @@ CAD 区域门禁检查源文件摘要、当前导入摘要内可复现的拓扑�
 `ModelParams.metadata.cad_geometry`；案例提升只接受唯一、已映射且置信度不低于 0.80 的
 面/边拓扑 ID。`ambiguous`、`unresolved` 或缺少拓扑 ID 的区域必须生成 `unknown` 区域并使
 `SimulationCase.execution_ready` 为 `False`。该门禁验证区域语义传递和失败行为；直接 CAD 网格、网格质量和收敛由对应门禁执行。
+直接 CAD 网格适配器同样要求区域候选置信度至少为 0.80，并拒绝区域名称或别名冲突，避免绕过案例门禁或覆盖区域语义。
 
 实体 CAD 直接网格的本机证据使用以下命令生成。两个清单均要求源文件摘要、拓扑区域节点集合、
 C3D4 单元、最小 `min_sicn`、CalculiX 结果和位移、应力、反力、能量字段全部有效；带孔案例额外

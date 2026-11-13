@@ -20,6 +20,14 @@ from mechagent.core.models import GeometryType, ModelParams
 
 from .gmsh_cad import _topology_digest, _topology_entities
 
+_MIN_REGION_CONFIDENCE = 0.80
+_REGION_ALIASES = {
+    "x_min": ("root", "fixed_end", "left_end"),
+    "x_max": ("tip", "right_end", "loaded_end", "end_face", "free_end"),
+    "z_max": ("top_surface", "top"),
+    "z_min": ("bottom_surface", "bottom"),
+}
+
 
 class GmshCADInpMesher(AbstractMesher):
     """将带有 CAD 拓扑摘要的实体直接网格为 CalculiX INP。"""
@@ -194,14 +202,15 @@ def _region_node_sets(
     if not isinstance(candidates, list):
         return {}
     result: dict[str, list[int]] = {}
-    aliases = {
-        "x_min": ("root", "fixed_end", "left_end"),
-        "x_max": ("tip", "right_end", "loaded_end", "end_face", "free_end"),
-        "z_max": ("top_surface", "top"),
-        "z_min": ("bottom_surface", "bottom"),
-    }
     for candidate in candidates:
         if not isinstance(candidate, dict) or candidate.get("status") != "mapped":
+            continue
+        confidence = candidate.get("confidence")
+        if (
+            not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or float(confidence) < _MIN_REGION_CONFIDENCE
+        ):
             continue
         topology_ids = candidate.get("topology_ids")
         if not isinstance(topology_ids, list) or not topology_ids:
@@ -217,12 +226,14 @@ def _region_node_sets(
             node_ids.update(int(tag) for tag in node_tags)
         if not node_ids:
             continue
-        name = str(candidate.get("name", ""))
+        name = _region_alias(str(candidate.get("name", "")))
         if not name:
             continue
-        result[name] = sorted(node_ids)
-        for alias in aliases.get(name, ()):
-            result[alias] = sorted(node_ids)
+        names = (name, *_REGION_ALIASES.get(name, ()))
+        for region_name in names:
+            if region_name in result:
+                raise ValueError(f"CAD 区域名称或别名重复: {region_name}")
+            result[region_name] = sorted(node_ids)
     return result
 
 

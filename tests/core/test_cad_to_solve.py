@@ -182,6 +182,28 @@ def test_cad_mesh_rejects_topology_digest_drift(tmp_path: Path) -> None:
     assert "拓扑摘要" in (output.mesh_result.error_message or "")
 
 
+def test_cad_mesh_rejects_low_confidence_region_mapping(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    cad_geometry = dict(params.metadata["cad_geometry"])
+    candidates = [dict(item) for item in cad_geometry["region_candidates"]]
+    candidates[0]["confidence"] = 0.79
+    cad_geometry["region_candidates"] = candidates
+    bad_params = params.model_copy(
+        update={"metadata": {**params.metadata, "cad_geometry": cad_geometry}}
+    )
+
+    output = MeshAgent(config, tmp_path / "mesh-low-confidence").generate_with_trace(bad_params)
+
+    assert output.mesh_result.success is False
+    assert "区域没有映射" in (output.mesh_result.error_message or "")
+
+
 def test_cad_direct_mesh_rejects_multi_solid_assembly(tmp_path: Path) -> None:
     step = tmp_path / "assembly.step"
     _write_assembly_step(step)
