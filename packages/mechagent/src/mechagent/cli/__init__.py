@@ -248,7 +248,7 @@ def run(
     request: str = typer.Argument(..., help="自然语言仿真请求。"),
     config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
     json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON 摘要。"),
-    llm_agents: bool = typer.Option(False, "--llm-agents", help="本次运行启用 Agent LLM trace。"),
+    llm_agents: bool = typer.Option(False, "--llm-agents", help="启用 Agent LLM trace。"),
 ) -> None:
     """执行单次仿真请求。"""
 
@@ -278,7 +278,7 @@ def inspect(
     request: str = typer.Argument(..., help="自然语言仿真请求。"),
     config: Path = typer.Option(Path("config/mechagent.yaml"), help="配置文件路径。"),
     json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON 预检结果。"),
-    llm_agents: bool = typer.Option(False, "--llm-agents", help="本次预检启用 Planner LLM。"),
+    llm_agents: bool = typer.Option(False, "--llm-agents", help="启用 Planner LLM 参与预检。"),
 ) -> None:
     """预检自然语言请求，不执行求解。"""
 
