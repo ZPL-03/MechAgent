@@ -34,6 +34,52 @@ def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
     assert result.differences[0]["reason"] == "case_digest_mismatch"
 
 
+@pytest.mark.parametrize(
+    ("key", "left_value", "right_value", "reason"),
+    [
+        (
+            "units",
+            {"length": "mm", "force": "N"},
+            {"length": "m", "force": "N"},
+            "units_mismatch",
+        ),
+        (
+            "coordinate_system",
+            {"name": "global", "axes": ["x", "y", "z"]},
+            {"name": "local", "axes": ["x", "y", "z"]},
+            "coordinate_system_mismatch",
+        ),
+    ],
+)
+def test_backend_comparison_rejects_result_contract_mismatch(
+    key: str, left_value: dict[str, object], right_value: dict[str, object], reason: str
+) -> None:
+    result = compare_backend_results(
+        {key: left_value, "requested_fields": {"u": {"values": {"1": 1.0}}}},
+        {key: right_value, "requested_fields": {"u": {"values": {"1": 1.0}}}},
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.differences[0]["reason"] == reason
+
+
+def test_backend_comparison_rejects_one_sided_result_contract_metadata() -> None:
+    result = compare_backend_results(
+        {
+            "units": {"length": "mm"},
+            "requested_fields": {"u": {"values": {"1": 1.0}}},
+        },
+        {"requested_fields": {"u": {"values": {"1": 1.0}}}},
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.differences[0]["reason"] == "units_missing"
+
+
 def test_backend_comparison_passes_within_tolerance() -> None:
     left = {"requested_fields": {"u": {"values": {"1": [1.0, 0.0, 0.0]}}}}
     right = {"requested_fields": {"u": {"values": {"1": [1.0001, 0.0, 0.0]}}}}

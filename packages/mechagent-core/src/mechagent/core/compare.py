@@ -91,6 +91,16 @@ def compare_backend_results(
                     }
                 ],
             )
+    contract_mismatches = _result_contract_mismatches(left, right)
+    if contract_mismatches:
+        return BackendComparison(
+            status="failed",
+            left_backend=left_backend,
+            right_backend=right_backend,
+            field_source=field_source,
+            tolerance=selected_tolerance,
+            differences=contract_mismatches,
+        )
     left_fields = left.get(field_source)
     right_fields = right.get(field_source)
     if not isinstance(left_fields, dict) or not isinstance(right_fields, dict):
@@ -282,6 +292,53 @@ def _raw_field_has_incompatible_semantics(left: dict[str, Any], right: dict[str,
     left_unit = str(left.get("unit", ""))
     right_unit = str(right.get("unit", ""))
     return left_unit != right_unit
+
+
+def _result_contract_mismatches(
+    left: dict[str, Any], right: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """检查结果级单位和坐标契约是否一致。
+
+    适配器结果通常携带案例级 ``units`` 和 ``coordinate_system``。两侧只要
+    有一侧声明了这些字段，就必须同时声明并保持完全一致；缺失或不一致时
+    不进入场量数值比较。两侧都未提供元数据时保留兼容行为，适用于脱离
+    案例契约的低层比较工具。
+    """
+
+    missing = object()
+    mismatches: list[dict[str, Any]] = []
+    for key in ("units", "coordinate_system"):
+        left_value = left.get(key, missing)
+        right_value = right.get(key, missing)
+        if left_value is missing and right_value is missing:
+            continue
+        if left_value is missing or right_value is missing:
+            mismatches.append(
+                {
+                    "reason": f"{key}_missing",
+                    "left": None if left_value is missing else left_value,
+                    "right": None if right_value is missing else right_value,
+                }
+            )
+            continue
+        if not isinstance(left_value, dict) or not isinstance(right_value, dict):
+            mismatches.append(
+                {
+                    "reason": f"{key}_invalid",
+                    "left": left_value,
+                    "right": right_value,
+                }
+            )
+            continue
+        if left_value != right_value:
+            mismatches.append(
+                {
+                    "reason": f"{key}_mismatch",
+                    "left": left_value,
+                    "right": right_value,
+                }
+            )
+    return mismatches
 
 
 def _pairs_cover_fields(
