@@ -9,6 +9,7 @@ import pytest
 from mechagent.core.cad_convergence import (
     CADMeshConvergenceRun,
     evaluate_cad_mesh_convergence,
+    local_size_field_digest,
     region_contract_digest,
 )
 
@@ -94,3 +95,30 @@ def test_region_contract_digest_is_order_independent() -> None:
     assert region_contract_digest({"root": {"id": 1}, "end_face": {"id": 2}}) == (
         region_contract_digest({"end_face": {"id": 2}, "root": {"id": 1}})
     )
+
+
+def test_local_size_field_digest_is_order_independent() -> None:
+    assert local_size_field_digest({"root": {"size": 2.0}}) == local_size_field_digest(
+        {"root": {"size": 2.0}}
+    )
+
+
+def test_cad_convergence_requires_matching_local_size_contract() -> None:
+    digest = local_size_field_digest({"root": {"size_mm": 2.0, "distance_mm": 8.0}})
+    with pytest.raises(ValueError, match="同一源文件、拓扑摘要和区域契约"):
+        evaluate_cad_mesh_convergence(
+            case_id="CAD-BOX",
+            quantity="end_face_mean_ux",
+            unit="mm",
+            solver="calculix",
+            source_sha256=_SOURCE,
+            topology_digest=_TOPOLOGY,
+            region_contract_digest=_REGIONS,
+            runs=[
+                _run(20.0, 0.0045).model_copy(update={"local_size_field_digest": digest}),
+                _run(10.0, 0.0047).model_copy(update={"local_size_field_digest": ""}),
+            ],
+            stabilization_tolerance=0.1,
+            quality_threshold=0.3,
+            local_size_field_digest=digest,
+        )

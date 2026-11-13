@@ -10,7 +10,13 @@ from typing import Any, Literal
 
 from mechagent.config import MechAgentConfig
 from mechagent.core.factory import create_mesher
-from mechagent.core.mesher import MeshConfig, MeshProvenance, MeshQualityGate, MeshResult
+from mechagent.core.mesher import (
+    MeshConfig,
+    MeshLocalSizeProvenance,
+    MeshProvenance,
+    MeshQualityGate,
+    MeshResult,
+)
 from mechagent.core.models import ElementType, ModelParams
 from mechagent.evidence import sha256
 from mechagent.orchestrator.capabilities import get_capability
@@ -266,6 +272,10 @@ def _attach_provenance(
             solid_count=_solid_count(result.metadata),
             part_ids=_part_ids(result.metadata),
             connection_semantics=_connection_semantics(result.metadata),
+            local_size_fields=[
+                MeshLocalSizeProvenance.model_validate(item)
+                for item in result.metadata.get("local_size_fields", [])
+            ],
         )
     except (TypeError, ValueError) as exc:
         return result.model_copy(

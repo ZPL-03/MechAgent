@@ -30,6 +30,7 @@ from mechagent.core.models.params import (
     GeometrySpec,
     LoadSpec,
     MaterialSpec,
+    MeshSizeFieldSpec,
     MeshSpec,
     ModelParams,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "LoadType",
     "MaterialSpec",
     "MaterialType",
+    "MeshSizeFieldSpec",
     "MeshSpec",
     "ModelParams",
     "CASE_SCHEMA_VERSION",

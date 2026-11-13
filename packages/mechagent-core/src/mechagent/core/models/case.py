@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mechagent.core.models.geometry import AnalysisType, LoadType
 from mechagent.core.models.params import CompositeSpec, ModelParams
+from mechagent.core.regions import canonical_region_name
 
 CASE_SCHEMA_VERSION = 1
 MIN_EXECUTION_CONFIDENCE = 0.8
@@ -94,7 +95,18 @@ class UnitSystem(BaseModel):
                 "loads": loads,
                 "bcs": bcs,
                 "mesh": model.mesh.model_copy(
-                    update={"seed_size": _scaled(model.mesh.seed_size, length_factor)}
+                    update={
+                        "seed_size": _scaled(model.mesh.seed_size, length_factor),
+                        "local_size_fields": [
+                            item.model_copy(
+                                update={
+                                    "size": _scaled(item.size, length_factor),
+                                    "distance": _scaled(item.distance, length_factor),
+                                }
+                            )
+                            for item in model.mesh.local_size_fields
+                        ],
+                    }
                 ),
             }
         )
@@ -711,20 +723,7 @@ def _region_spec_from_model_metadata(
                     if isinstance(topology_id, str) and topology_id:
                         parts_by_topology.setdefault(topology_id, set()).add(part_id)
 
-    alias = {
-        "root": "x_min",
-        "fixed_end": "x_min",
-        "left_end": "x_min",
-        "tip": "x_max",
-        "loaded_end": "x_max",
-        "right_end": "x_max",
-        "end_face": "x_max",
-        "free_end": "x_max",
-        "top_surface": "z_max",
-        "top": "z_max",
-        "bottom_surface": "z_min",
-        "bottom": "z_min",
-    }.get(region_name, region_name)
+    alias = canonical_region_name(region_name)
     matching_candidates = [
         item for item in candidates if isinstance(item, dict) and item.get("name") == alias
     ]

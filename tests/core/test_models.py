@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from mechagent.core.exceptions import SolverError
-from mechagent.core.mesher import MeshConfig
+from mechagent.core.mesher import (
+    MeshConfig,
+    MeshLocalSizeProvenance,
+    MeshProvenance,
+    MeshQualityGate,
+)
 from mechagent.core.models import (
     BCSpec,
     BCType,
@@ -22,6 +28,7 @@ from mechagent.core.models import (
     LoadStepSpec,
     LoadType,
     MaterialSpec,
+    MeshSizeFieldSpec,
     MeshSpec,
     ModelParams,
     ResultFieldSpec,
@@ -88,6 +95,117 @@ def test_core_numeric_specs_reject_non_finite_values() -> None:
 
     with pytest.raises(ValidationError, match="wall_time"):
         SolverResult(success=True, wall_time=float("inf"))
+
+
+def test_mesh_local_size_field_contract_is_finite_and_refining() -> None:
+    field = MeshSizeFieldSpec(region="root", size=2.0, distance=8.0)
+    mesh = MeshSpec(
+        element_type=ElementType.C3D4,
+        seed_size=10.0,
+        local_size_fields=[field],
+    )
+
+    assert mesh.local_size_fields[0].size == 2.0
+    with pytest.raises(ValidationError, match="distance"):
+        MeshSizeFieldSpec(region="root", size=8.0, distance=2.0)
+    with pytest.raises(ValidationError, match="不能大于全局"):
+        MeshSpec(
+            element_type=ElementType.C3D4,
+            seed_size=5.0,
+            local_size_fields=[MeshSizeFieldSpec(region="root", size=6.0, distance=8.0)],
+        )
+    with pytest.raises(ValidationError, match="region 不能重复"):
+        MeshSpec(
+            element_type=ElementType.C3D4,
+            seed_size=10.0,
+            local_size_fields=[
+                MeshSizeFieldSpec(region="root", size=2.0, distance=8.0),
+                MeshSizeFieldSpec(region="x_min", size=3.0, distance=8.0),
+            ],
+        )
+
+
+def test_unit_conversion_scales_mesh_local_size_fields() -> None:
+    params = tc01_model_params().model_copy(
+        update={
+            "mesh": MeshSpec(
+                element_type=ElementType.B31,
+                seed_size=1.0,
+                local_size_fields=[MeshSizeFieldSpec(region="root", size=0.5, distance=2.0)],
+            )
+        }
+    )
+
+    converted = UnitSystem(length="cm").to_canonical_model(params)
+
+    assert converted.mesh.seed_size == pytest.approx(10.0)
+    assert converted.mesh.local_size_fields[0].size == pytest.approx(5.0)
+    assert converted.mesh.local_size_fields[0].distance == pytest.approx(20.0)
+
+
+def test_mesh_provenance_rejects_inconsistent_local_size_fields() -> None:
+    base: dict[str, Any] = {
+        "case_id": "CAD-BOX",
+        "geometry_type": "solid",
+        "mesher": "gmsh-cad-inp",
+        "seed_size_mm": 10.0,
+        "element_type": "C3D4",
+        "mesh_sha256": "a" * 64,
+        "quality_metrics": {"min_sicn": 0.4},
+        "quality_gate": MeshQualityGate(
+            threshold=0.3,
+            lower_bound_metrics=["min_sicn"],
+            status="passed",
+        ),
+    }
+    with pytest.raises(ValidationError, match="不能大于 seed_size"):
+        MeshProvenance(
+            **base,
+            local_size_fields=[
+                MeshLocalSizeProvenance(
+                    region="root",
+                    topology_ids=["face:1"],
+                    topology_dimensions=[2],
+                    size_mm=12.0,
+                    distance_mm=20.0,
+                )
+            ],
+        )
+
+    with pytest.raises(ValidationError, match="region 不能重复"):
+        MeshProvenance(
+            **base,
+            local_size_fields=[
+                MeshLocalSizeProvenance(
+                    region="root",
+                    topology_ids=["face:1"],
+                    topology_dimensions=[2],
+                    size_mm=2.0,
+                    distance_mm=8.0,
+                ),
+                MeshLocalSizeProvenance(
+                    region="ROOT",
+                    topology_ids=["face:2"],
+                    topology_dimensions=[2],
+                    size_mm=3.0,
+                    distance_mm=8.0,
+                ),
+            ],
+        )
+
+    with pytest.raises(ValidationError, match="topology_ids 不能包含重复"):
+        MeshProvenance(
+            **base,
+            local_size_fields=[
+                MeshLocalSizeProvenance(
+                    region="root",
+                    topology_ids=["face:1", "face:1"],
+                    topology_dimensions=[2],
+                    size_mm=2.0,
+                    distance_mm=8.0,
+                )
+            ],
+        )
 
 
 def test_solver_result_records_relative_artifact_hashes(tmp_path: Path) -> None:

@@ -10,6 +10,23 @@
 - 板：`seed_size = max(min(length, width) / 40, 1.0)`。
 - 实体块：`seed_size = max(min(length, width, height) / 2, 1.0)`。
 
+`MeshSpec.local_size_fields` 可为 CAD 拓扑区域声明局部尺寸场。每项包含 `region`、`size` 和
+`distance`：`size` 是区域附近的目标单元尺寸，`distance` 是向全局 `seed_size` 过渡的最大距离，
+单位均为 mm。`size` 必须为正数且不大于全局尺寸，`distance` 不得小于 `size`，区域名称在同一
+案例中不能重复。案例的单位转换同时缩放这三个长度值。
+
+`gmsh-cad-inp` 仅接受已映射且置信度不低于 0.80 的 CAD 面或边区域。适配器在三维网格生成前
+将区域的稳定拓扑 ID解析为当前 Gmsh 实体，创建 Distance/Threshold 尺寸场，并将多个区域场
+按最小尺寸合并。区域缺失、拓扑 ID 不存在、绑定置信度不足、区域含三维实体或拓扑摘要不一致
+都会阻断网格生成并返回具体诊断；不会使用包围盒或其他未绑定区域替代。成功结果的
+`metadata.local_size_fields` 和 `MeshResult.provenance.local_size_fields` 记录实际绑定的拓扑 ID、
+维度、目标尺寸和影响距离；来源摘要还校验区域别名、拓扑 ID、拓扑维度和全局尺寸之间的一致性。
+该能力当前只覆盖 `gmsh-cad-inp` 的三维 C3D4 网格，参数化梁、板和
+实体网格仍使用全局尺寸及其既有特征尺寸规则。
+
+`calculix-inp` 收到局部尺寸场时直接失败并返回适配器诊断，避免把未执行的局部约束当作全局
+尺寸结果继续使用。
+
 启用 LLM Agent 时，MeshAgent 在调用网格器前把 `ModelParams`、当前网格设置和网格策略规则发送给 LLM，并解析 `seed_size`、`element_type` 和 `rationale`。`seed_size` 必须是有限正数，且位于当前结构化网格尺寸 `1/5` 至 `5` 倍范围内；`element_type` 必须与几何类型兼容。未通过校验的 LLM 网格策略只进入 `mesh_llm_trace.error`，不改变网格生成参数。
 
 MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元数据中记录该文件的 `mesh_sha256`；同时生成版本化 `MeshResult.provenance`，记录案例、几何、网格器、尺寸、单元类型、质量门禁、区域名称、实体数量、零件 ID、连接语义和可用 CAD 摘要。多实体检查网格的连接语义为 `unconnected_parts`，不表示存在接触或连接关系。SolverAgent 在启动求解器前重新读取文件并校验摘要，并将该来源对象放入求解摘要。文件缺失、摘要缺失或摘要不一致会阻断求解。`MeshResult.quality` 中的数值必须为有限数值。`MeshConfig.seed_size`、`MeshConfig.min_quality` 和 `SolverResult.wall_time` 在公共模型层拒绝非有限数值。运行配置模型同样拒绝非有限 `llm.temperature`、`mesher.min_quality`、`knowledge.bm25_weight` 和 `knowledge.tfidf_weight`。

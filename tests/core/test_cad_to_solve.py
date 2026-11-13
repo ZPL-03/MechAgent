@@ -16,7 +16,13 @@ from mechagent.core.cad import (
     geometry_candidate_from_summary,
 )
 from mechagent.core.exceptions import SolverError
-from mechagent.core.models import GeometryType, Provenance, RegionSpec
+from mechagent.core.models import (
+    ElementType,
+    GeometryType,
+    MeshSizeFieldSpec,
+    Provenance,
+    RegionSpec,
+)
 from mechagent.core.solver import SolverConfig
 from mechagent.orchestrator.agents import GeometryAgent
 from mechagent.orchestrator.agents.mesh import MeshAgent
@@ -302,6 +308,129 @@ def test_cad_solid_direct_mesh_preserves_region_node_sets(tmp_path: Path) -> Non
     assert "*ELEMENT, TYPE=C3D4" in mesh_text
     assert "*NSET, NSET=ROOT" in mesh_text
     assert "*NSET, NSET=END_FACE" in mesh_text
+
+
+def test_cad_mesh_applies_region_bound_local_size_field(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    params = params.model_copy(
+        update={
+            "mesh": params.mesh.model_copy(
+                update={
+                    "seed_size": 20.0,
+                    "element_type": ElementType.C3D4,
+                    "local_size_fields": [
+                        MeshSizeFieldSpec(region="root", size=4.0, distance=12.0)
+                    ],
+                }
+            )
+        }
+    )
+
+    output = MeshAgent(config, tmp_path / "mesh-local-size").generate_with_trace(params)
+
+    assert output.mesh_result.success is True
+    fields = output.mesh_result.metadata["local_size_fields"]
+    assert len(fields) == 1
+    assert fields[0]["region"] == "root"
+    assert fields[0]["size_mm"] == pytest.approx(4.0)
+    assert fields[0]["distance_mm"] == pytest.approx(12.0)
+    assert fields[0]["topology_dimensions"] == [2]
+    assert output.mesh_result.provenance is not None
+    assert output.mesh_result.provenance.local_size_fields[0].topology_ids
+
+
+def test_cad_mesh_merges_multiple_local_size_fields(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig().model_copy(
+        update={"mesher": MechAgentConfig().mesher.model_copy(update={"min_quality": 0.25})}
+    )
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    params = params.model_copy(
+        update={
+            "mesh": params.mesh.model_copy(
+                update={
+                    "seed_size": 20.0,
+                    "element_type": ElementType.C3D4,
+                    "local_size_fields": [
+                        MeshSizeFieldSpec(region="root", size=4.0, distance=12.0),
+                        MeshSizeFieldSpec(region="tip", size=6.0, distance=14.0),
+                    ],
+                }
+            )
+        }
+    )
+
+    output = MeshAgent(config, tmp_path / "mesh-local-size-multiple").generate_with_trace(params)
+
+    assert output.mesh_result.success is True
+    assert [item["region"] for item in output.mesh_result.metadata["local_size_fields"]] == [
+        "root",
+        "tip",
+    ]
+
+
+def test_cad_mesh_rejects_unresolved_local_size_region(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    params = params.model_copy(
+        update={
+            "mesh": params.mesh.model_copy(
+                update={
+                    "local_size_fields": [
+                        MeshSizeFieldSpec(region="unresolved", size=4.0, distance=12.0)
+                    ]
+                }
+            )
+        }
+    )
+
+    result = MeshAgent(config, tmp_path / "mesh-local-size-failure").generate(params)
+
+    assert result.success is False
+    assert "局部网格尺寸场无效" in (result.error_message or "")
+    assert "没有唯一的 CAD 拓扑绑定" in (result.error_message or "")
+
+
+def test_cad_mesh_rejects_local_size_region_alias_duplicates(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    params = params.model_copy(
+        update={
+            "mesh": params.mesh.model_copy(
+                update={
+                    "local_size_fields": [
+                        MeshSizeFieldSpec(region="root", size=4.0, distance=12.0),
+                        MeshSizeFieldSpec(region="x_min", size=3.0, distance=10.0),
+                    ]
+                }
+            )
+        }
+    )
+
+    result = MeshAgent(config, tmp_path / "mesh-local-size-duplicate").generate(params)
+
+    assert result.success is False
+    assert "区域 x_min 与已有局部尺寸场区域重复" in (result.error_message or "")
 
 
 def test_cad_mesh_rejects_geometry_validation_not_ready(tmp_path: Path) -> None:

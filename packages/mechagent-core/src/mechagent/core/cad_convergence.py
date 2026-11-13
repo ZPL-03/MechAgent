@@ -30,6 +30,7 @@ class CADMeshConvergenceRun(BaseModel):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     topology_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     region_contract_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    local_size_field_digest: str = Field(default="", pattern=r"^(|[0-9a-f]{64})$")
     region_node_counts: dict[str, int] = Field(min_length=1)
     solver_success: bool
     relative_change: float | None = Field(default=None, ge=0.0)
@@ -62,6 +63,7 @@ class CADMeshConvergenceReport(BaseModel):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     topology_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     region_contract_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    local_size_field_digest: str = Field(default="", pattern=r"^(|[0-9a-f]{64})$")
     stabilization_tolerance: float = Field(gt=0.0)
     quality_threshold: float = Field(ge=0.0)
     reference: float | None = None
@@ -80,11 +82,16 @@ class CADMeshConvergenceReport(BaseModel):
         if any(left <= right for left, right in zip(sizes, sizes[1:], strict=False)):
             raise ValueError("CAD 收敛运行必须按 seed_size 严格递减排列。")
         identities = {
-            (run.source_sha256, run.topology_digest, run.region_contract_digest)
+            (
+                run.source_sha256,
+                run.topology_digest,
+                run.region_contract_digest,
+                run.local_size_field_digest,
+            )
             for run in self.runs
         }
         if len(identities) != 1:
-            raise ValueError("CAD 收敛运行必须使用同一源文件、拓扑摘要和区域契约。")
+            raise ValueError("CAD 收敛运行必须使用同一源文件、拓扑摘要和区域契约及局部尺寸场契约。")
         if self.status == "passed" and self.failure_reasons:
             raise ValueError("passed CAD 收敛报告不能包含 failure_reasons。")
         return self
@@ -94,6 +101,13 @@ def region_contract_digest(regions: Mapping[str, object]) -> str:
     """为案例区域契约生成稳定摘要。"""
 
     payload = json.dumps(regions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def local_size_field_digest(fields: Mapping[str, object]) -> str:
+    """为局部尺寸场契约生成稳定摘要。"""
+
+    payload = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -109,6 +123,7 @@ def evaluate_cad_mesh_convergence(
     runs: list[CADMeshConvergenceRun],
     stabilization_tolerance: float,
     quality_threshold: float,
+    local_size_field_digest: str = "",
     reference: float | None = None,
     reference_tolerance: float | None = None,
 ) -> CADMeshConvergenceReport:
@@ -120,6 +135,8 @@ def evaluate_cad_mesh_convergence(
         raise ValueError("topology_digest 必须是小写 SHA-256。")
     if not _SHA256.fullmatch(region_contract_digest):
         raise ValueError("region_contract_digest 必须是小写 SHA-256。")
+    if local_size_field_digest and not _SHA256.fullmatch(local_size_field_digest):
+        raise ValueError("local_size_field_digest 必须是小写 SHA-256 或空字符串。")
     if not math.isfinite(stabilization_tolerance) or stabilization_tolerance <= 0:
         raise ValueError("stabilization_tolerance 必须是正有限数值。")
     if not math.isfinite(quality_threshold) or quality_threshold < 0:
@@ -141,6 +158,8 @@ def evaluate_cad_mesh_convergence(
             failures.append(f"运行 {index} 的拓扑摘要不一致。")
         if run.region_contract_digest != region_contract_digest:
             failures.append(f"运行 {index} 的区域契约摘要不一致。")
+        if run.local_size_field_digest != local_size_field_digest:
+            failures.append(f"运行 {index} 的局部尺寸场契约摘要不一致。")
         if run.quality_threshold != quality_threshold:
             failures.append(f"运行 {index} 的质量阈值不一致。")
         if not run.solver_success:
@@ -189,6 +208,7 @@ def evaluate_cad_mesh_convergence(
         source_sha256=source_sha256,
         topology_digest=topology_digest,
         region_contract_digest=region_contract_digest,
+        local_size_field_digest=local_size_field_digest,
         stabilization_tolerance=stabilization_tolerance,
         quality_threshold=quality_threshold,
         reference=reference,

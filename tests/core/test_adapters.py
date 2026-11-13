@@ -49,6 +49,7 @@ from mechagent.core.models import (
     LoadStepSpec,
     LoadType,
     MaterialType,
+    MeshSizeFieldSpec,
     ResultFieldSpec,
     SimulationCase,
 )
@@ -1088,6 +1089,23 @@ def test_calculix_inp_mesher_generates_solid_calculix_mesh(tmp_path: Path) -> No
     assert failed.success is False
     assert failed.error_message is not None
     assert "缺少几何尺寸字段: height" in failed.error_message
+
+
+def test_calculix_inp_mesher_rejects_unimplemented_local_size_fields(tmp_path: Path) -> None:
+    params = tc01_model_params().model_copy(
+        update={
+            "mesh": tc01_model_params().mesh.model_copy(
+                update={
+                    "local_size_fields": [MeshSizeFieldSpec(region="root", size=2.0, distance=8.0)]
+                }
+            )
+        }
+    )
+
+    result = CalculiXInpMesher(MeshConfig(work_dir=tmp_path, seed_size=10.0)).generate(params)
+
+    assert result.success is False
+    assert "不支持 CAD 局部尺寸场" in (result.error_message or "")
 
 
 def test_calculix_beam_input_distributes_line_load(tmp_path: Path) -> None:

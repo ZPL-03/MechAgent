@@ -72,7 +72,10 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `material`：`E`、`nu`、`rho`，单位为 MPa、无量纲、tonne/mm^3；各向同性材料 `nu` 的稳定范围为 `(-1, 0.5)`，材料数值必须为有限数值。
 - `loads`：载荷类型、大小、作用区域和方向，载荷幅值和方向向量必须为有限数值，且必须非零。
 - `bcs`：边界类型、区域、自由度和值；约束值必须为有限数值。
-- `mesh`：单元类型和网格种子尺寸；`mesh.seed_size` 必须为有限正数。
+- `mesh`：单元类型、全局网格种子尺寸和可选的 CAD 局部尺寸场；`mesh.seed_size` 必须为有限正数。
+  `local_size_fields` 的区域名称不能重复，局部 `size` 不得大于全局尺寸，`distance` 不得小于
+  `size`，三个长度值均使用 mm。当前只有带受控 CAD 拓扑摘要的 `gmsh-cad-inp` 执行该契约；
+  内置参数化 `calculix-inp` 在收到局部尺寸场时明确失败。
 - `analysis`：分析类型和几何非线性开关。
 - `case_id`：模型能力或标准验证案例编号，例如 `STATIC-BEAM`、`STATIC-PLATE`、`STATIC-PERFORATED-PLATE`、`STATIC-SOLID`。
 - `load_case`：载荷工况编号，例如 `cantilever_tip_force`、`cantilever_uniform_line_load`、`simply_supported_pressure`、`perforated_plate_pressure`、`fixed_solid_axial_pressure`。

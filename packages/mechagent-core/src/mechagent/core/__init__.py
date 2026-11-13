@@ -22,6 +22,7 @@ from mechagent.core.cad_convergence import (
     CADMeshConvergenceReport,
     CADMeshConvergenceRun,
     evaluate_cad_mesh_convergence,
+    local_size_field_digest,
     region_contract_digest,
 )
 from mechagent.core.compare import (
@@ -74,6 +75,7 @@ from mechagent.core.materials import BUILTIN_MATERIALS, MaterialDefinition, matc
 from mechagent.core.mesher import (
     AbstractMesher,
     MeshConfig,
+    MeshLocalSizeProvenance,
     MeshProvenance,
     MeshQualityGate,
     MeshResult,
@@ -122,6 +124,7 @@ __all__ = [
     "MeshConvergenceReport",
     "evaluate_mesh_convergence",
     "evaluate_cad_mesh_convergence",
+    "local_size_field_digest",
     "region_contract_digest",
     "ExecutorConfig",
     "GeometryCandidate",
@@ -138,6 +141,7 @@ __all__ = [
     "MaterialDefinition",
     "MechAgentCoreError",
     "MeshConfig",
+    "MeshLocalSizeProvenance",
     "MeshProvenance",
     "MeshQualityGate",
     "MeshError",

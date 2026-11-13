@@ -18,16 +18,15 @@ import gmsh
 
 from mechagent.core.mesher import AbstractMesher, MeshResult
 from mechagent.core.models import GeometryType, ModelParams
+from mechagent.core.regions import (
+    canonical_region_name,
+    normalize_region_name,
+    region_family,
+)
 
 from .gmsh_cad import _topology_digest, _topology_entities
 
 _MIN_REGION_CONFIDENCE = 0.80
-_REGION_ALIASES = {
-    "x_min": ("root", "fixed_end", "left_end"),
-    "x_max": ("tip", "right_end", "loaded_end", "end_face", "free_end"),
-    "z_max": ("top_surface", "top"),
-    "z_min": ("bottom_surface", "bottom"),
-}
 
 
 class GmshCADInpMesher(AbstractMesher):
@@ -172,6 +171,19 @@ class GmshCADInpMesher(AbstractMesher):
                         "actual_topology_digest": actual_topology_digest,
                     },
                 )
+            try:
+                local_size_fields = _apply_local_size_fields(
+                    model_params,
+                    cad_geometry,
+                    topology_by_id={item.stable_id: item for item in topology},
+                    global_size=self.config.seed_size,
+                )
+            except ValueError as exc:
+                return MeshResult(
+                    success=False,
+                    metadata={"local_size_fields_error": str(exc)},
+                    error_message=f"CAD 局部网格尺寸场无效: {exc}",
+                )
             gmsh.model.mesh.generate(3)
             nodes = _gmsh_nodes()
             tetrahedra = _gmsh_tetrahedra()
@@ -234,6 +246,7 @@ class GmshCADInpMesher(AbstractMesher):
                     "region_node_sets": {
                         name: sorted(set(values)) for name, values in region_sets.items()
                     },
+                    "local_size_fields": local_size_fields,
                     "case_regions": case_regions if isinstance(case_regions, dict) else {},
                     "node_count": len(nodes),
                     "element_count": len(tetrahedra),
@@ -277,10 +290,10 @@ def _region_node_sets(
     blocked_names: set[str] = set()
     if isinstance(case_regions, dict):
         for raw_name, raw_region in sorted(case_regions.items()):
-            name = _region_alias(str(raw_name))
+            name = normalize_region_name(str(raw_name))
             if not name:
                 continue
-            family = _region_family(name)
+            family = region_family(name)
             overlap = sorted(set(family) & blocked_names)
             if overlap:
                 raise ValueError(f"CAD 案例区域名称或别名重复: {name}")
@@ -320,10 +333,10 @@ def _region_node_sets(
         topology_ids = candidate.get("topology_ids")
         if not isinstance(topology_ids, list) or not topology_ids:
             continue
-        name = _region_alias(str(candidate.get("name", "")))
+        name = normalize_region_name(str(candidate.get("name", "")))
         if not name:
             continue
-        names = (name, *_REGION_ALIASES.get(name, ()))
+        names = region_family(name)
         available_names = tuple(
             region_name for region_name in names if region_name not in blocked_names
         )
@@ -337,6 +350,141 @@ def _region_node_sets(
     return result
 
 
+def _apply_local_size_fields(
+    model_params: ModelParams,
+    cad_geometry: dict[str, Any],
+    *,
+    topology_by_id: dict[str, Any],
+    global_size: float,
+) -> list[dict[str, Any]]:
+    """把局部尺寸契约绑定到当前导入会话中的 CAD 拓扑实体。"""
+
+    fields = model_params.mesh.local_size_fields
+    if not fields:
+        return []
+    case_regions = model_params.metadata.get("case_regions")
+    applied: list[dict[str, Any]] = []
+    threshold_fields: list[int] = []
+    seen_regions: set[str] = set()
+    for spec in fields:
+        canonical_region = canonical_region_name(spec.region)
+        if canonical_region in seen_regions:
+            raise ValueError(f"区域 {spec.region} 与已有局部尺寸场区域重复。")
+        seen_regions.add(canonical_region)
+        if spec.size > global_size:
+            raise ValueError(
+                f"区域 {spec.region} 的局部尺寸 {spec.size:.6g} mm "
+                f"大于全局尺寸 {global_size:.6g} mm。"
+            )
+        topology_ids = _resolve_local_size_region(
+            spec.region,
+            cad_geometry,
+            case_regions,
+            topology_by_id,
+        )
+        entities = [topology_by_id[item] for item in topology_ids]
+        dimensions = sorted({int(entity.dimension) for entity in entities})
+        unsupported = [dimension for dimension in dimensions if dimension not in {1, 2}]
+        if unsupported:
+            raise ValueError(
+                f"区域 {spec.region} 的拓扑维度 {unsupported} 不支持局部尺寸场；"
+                "局部尺寸场需要面或边区域。"
+            )
+        distance_field = gmsh.model.mesh.field.add("Distance")
+        for dimension, option in ((1, "CurvesList"), (2, "SurfacesList")):
+            tags = [
+                int(entity.native_tag) for entity in entities if int(entity.dimension) == dimension
+            ]
+            if tags:
+                gmsh.model.mesh.field.setNumbers(distance_field, option, tags)
+        threshold_field = gmsh.model.mesh.field.add("Threshold")
+        gmsh.model.mesh.field.setNumber(threshold_field, "InField", distance_field)
+        gmsh.model.mesh.field.setNumber(threshold_field, "SizeMin", float(spec.size))
+        gmsh.model.mesh.field.setNumber(threshold_field, "SizeMax", float(global_size))
+        gmsh.model.mesh.field.setNumber(threshold_field, "DistMin", 0.0)
+        gmsh.model.mesh.field.setNumber(threshold_field, "DistMax", float(spec.distance))
+        threshold_fields.append(threshold_field)
+        applied.append(
+            {
+                "region": normalize_region_name(spec.region),
+                "topology_ids": topology_ids,
+                "topology_dimensions": dimensions,
+                "size_mm": float(spec.size),
+                "distance_mm": float(spec.distance),
+            }
+        )
+    if len(threshold_fields) == 1:
+        gmsh.model.mesh.field.setAsBackgroundMesh(threshold_fields[0])
+    else:
+        minimum_field = gmsh.model.mesh.field.add("Min")
+        gmsh.model.mesh.field.setNumbers(minimum_field, "FieldsList", threshold_fields)
+        gmsh.model.mesh.field.setAsBackgroundMesh(minimum_field)
+    return applied
+
+
+def _resolve_local_size_region(
+    requested_name: str,
+    cad_geometry: dict[str, Any],
+    case_regions: Any,
+    topology_by_id: dict[str, Any],
+) -> list[str]:
+    """解析局部尺寸场的区域名称并校验来源、拓扑 ID 与置信度。"""
+
+    normalized = normalize_region_name(requested_name)
+    canonical = canonical_region_name(normalized)
+    matches: list[tuple[Any, Any, str]] = []
+    if isinstance(case_regions, dict):
+        for raw_name, raw_region in case_regions.items():
+            if canonical_region_name(str(raw_name)) != canonical:
+                continue
+            if not isinstance(raw_region, dict):
+                raise ValueError(f"区域 {requested_name} 的案例绑定不是有效对象。")
+            matches.append(
+                (
+                    raw_region.get("topology_ids"),
+                    raw_region.get("provenance"),
+                    f"case_regions.{raw_name}",
+                )
+            )
+    if not matches:
+        candidates = cad_geometry.get("region_candidates")
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                candidate_name = normalize_region_name(str(candidate.get("name", "")))
+                if candidate_name and canonical_region_name(candidate_name) == canonical:
+                    matches.append(
+                        (
+                            candidate.get("topology_ids"),
+                            {"confidence": candidate.get("confidence")},
+                            f"region_candidates.{candidate_name}",
+                        )
+                    )
+    if len(matches) != 1:
+        if not matches:
+            raise ValueError(f"区域 {requested_name} 没有唯一的 CAD 拓扑绑定。")
+        raise ValueError(f"区域 {requested_name} 存在多个 CAD 拓扑绑定。")
+    raw_ids, provenance, source = matches[0]
+    confidence = provenance.get("confidence") if isinstance(provenance, dict) else None
+    if (
+        not isinstance(confidence, (int, float))
+        or not math.isfinite(float(confidence))
+        or float(confidence) < _MIN_REGION_CONFIDENCE
+    ):
+        raise ValueError(f"区域 {requested_name} 的拓扑绑定置信度不足 ({source})。")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise ValueError(f"区域 {requested_name} 缺少拓扑 ID ({source})。")
+    if any(not isinstance(item, str) or not item.strip() for item in raw_ids):
+        raise ValueError(f"区域 {requested_name} 的拓扑 ID 无效 ({source})。")
+    if len(set(raw_ids)) != len(raw_ids):
+        raise ValueError(f"区域 {requested_name} 的拓扑 ID 重复 ({source})。")
+    missing = sorted(set(raw_ids) - topology_by_id.keys())
+    if missing:
+        raise ValueError(f"区域 {requested_name} 引用了未知拓扑 ID: {', '.join(missing)}")
+    return sorted(raw_ids)
+
+
 def _nodes_for_topology_ids(
     topology_ids: list[Any], topology_by_id: dict[str, Any], region_name: str
 ) -> list[int]:
@@ -346,7 +494,7 @@ def _nodes_for_topology_ids(
     missing = sorted(set(normalized_ids) - topology_by_id.keys())
     if missing:
         raise ValueError(f"CAD 区域 {region_name} 引用了未知拓扑 ID: {', '.join(missing)}")
-    expected_dimension = 1 if _region_alias(region_name) == "all_edges" else 2
+    expected_dimension = 1 if normalize_region_name(region_name) == "all_edges" else 2
     wrong_dimension = sorted(
         stable_id
         for stable_id in normalized_ids
@@ -370,21 +518,9 @@ def _nodes_for_topology_ids(
 
 
 def _required_region_names(model_params: ModelParams) -> set[str]:
-    names = {_region_alias(item.region) for item in model_params.loads}
-    names.update(_region_alias(item.region) for item in model_params.bcs)
+    names = {normalize_region_name(item.region) for item in model_params.loads}
+    names.update(normalize_region_name(item.region) for item in model_params.bcs)
     return names
-
-
-def _region_alias(value: str) -> str:
-    return value.strip().lower().replace("-", "_").replace(" ", "_")
-
-
-def _region_family(value: str) -> tuple[str, ...]:
-    normalized = _region_alias(value)
-    for canonical, aliases in _REGION_ALIASES.items():
-        if normalized == canonical or normalized in aliases:
-            return (canonical, *aliases)
-    return (normalized,)
 
 
 def _quality_metrics(dimension: int) -> dict[str, float]:

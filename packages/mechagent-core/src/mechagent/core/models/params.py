@@ -16,6 +16,7 @@ from mechagent.core.models.geometry import (
     LoadType,
     MaterialType,
 )
+from mechagent.core.regions import canonical_region_name
 
 if TYPE_CHECKING:
     from mechagent.core.models.case import SimulationCase
@@ -234,12 +235,38 @@ class BCSpec(BaseModel):
         return self
 
 
+class MeshSizeFieldSpec(BaseModel):
+    """按 CAD 区域定义的局部网格尺寸场。
+
+    `region` 必须解析为当前 CAD 摘要中的唯一拓扑区域。`size` 是区域附近
+    的目标单元尺寸，`distance` 是从该区域过渡到全局尺寸的最大距离；两者
+    均使用 mm。该契约只描述尺寸场输入，不保证区域已完成拓扑映射。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    region: str = Field(min_length=1, max_length=128)
+    size: float = Field(gt=0, description="局部目标单元尺寸，单位为 mm。")
+    distance: float = Field(gt=0, description="局部尺寸场影响距离，单位为 mm。")
+
+    @model_validator(mode="after")
+    def _size_field_numbers_must_be_valid(self) -> "MeshSizeFieldSpec":
+        if not self.region.strip():
+            raise ValueError("mesh.local_size_fields.region 不能是空白字符串。")
+        if not math.isfinite(self.size) or not math.isfinite(self.distance):
+            raise ValueError("mesh.local_size_fields 的尺寸和影响距离必须是有限数值。")
+        if self.distance < self.size:
+            raise ValueError("mesh.local_size_fields.distance 不能小于 size。")
+        return self
+
+
 class MeshSpec(BaseModel):
     """网格参数。
 
     Args:
         element_type: 单元类型。
         seed_size: 全局网格种子尺寸，单位为 mm。
+        local_size_fields: 绑定到 CAD 拓扑区域的局部尺寸场。
 
     Returns:
         MeshSpec: 经过校验的网格参数。
@@ -249,13 +276,18 @@ class MeshSpec(BaseModel):
 
     Example:
         >>> MeshSpec(element_type="B31", seed_size=10)
-        MeshSpec(element_type=<ElementType.B31: 'B31'>, seed_size=10.0)
+        MeshSpec(element_type=<ElementType.B31: 'B31'>, seed_size=10.0, local_size_fields=[])
     """
 
     model_config = ConfigDict(extra="forbid")
 
     element_type: ElementType
     seed_size: float = Field(gt=0, description="全局网格种子尺寸，单位为 mm。")
+    local_size_fields: list[MeshSizeFieldSpec] = Field(
+        default_factory=list,
+        max_length=128,
+        description="CAD 区域局部尺寸场，尺寸单位为 mm。",
+    )
 
     @field_validator("seed_size")
     @classmethod
@@ -264,6 +296,19 @@ class MeshSpec(BaseModel):
             msg = "mesh.seed_size 必须是有限数值。"
             raise ValueError(msg)
         return value
+
+    @model_validator(mode="after")
+    def _local_size_fields_must_be_unique_and_refine(self) -> "MeshSpec":
+        names = [canonical_region_name(item.region) for item in self.local_size_fields]
+        if len(names) != len(set(names)):
+            raise ValueError("mesh.local_size_fields.region 不能重复。")
+        oversized = [item.region for item in self.local_size_fields if item.size > self.seed_size]
+        if oversized:
+            raise ValueError(
+                "mesh.local_size_fields.size 不能大于全局 seed_size: "
+                + ", ".join(sorted(oversized))
+            )
+        return self
 
 
 class AnalysisSpec(BaseModel):

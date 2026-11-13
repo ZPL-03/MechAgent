@@ -65,6 +65,14 @@ class CalculiXInpMesher(AbstractMesher):
             MeshResult(success=True, ...)
         """
 
+        if model_params.mesh.local_size_fields:
+            return MeshResult(
+                success=False,
+                error_message=(
+                    "calculix-inp 当前不支持 CAD 局部尺寸场；"
+                    "请使用带受控 CAD 拓扑摘要的 gmsh-cad-inp 路径。"
+                ),
+            )
         if model_params.geometry.type is GeometryType.BEAM:
             missing = _missing_dimensions(model_params, ("length",))
             if missing:

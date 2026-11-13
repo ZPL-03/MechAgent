@@ -21,12 +21,13 @@ from mechagent.config import MechAgentConfig  # noqa: E402
 from mechagent.core import (  # noqa: E402
     CADMeshConvergenceRun,
     evaluate_cad_mesh_convergence,
+    local_size_field_digest,
     region_contract_digest,
 )
 from mechagent.core.adapters.calculix import CalculiXAdapter  # noqa: E402
 from mechagent.core.adapters.gmsh_cad_mesh import GmshCADInpMesher  # noqa: E402
 from mechagent.core.mesher import MeshConfig  # noqa: E402
-from mechagent.core.models import ElementType  # noqa: E402
+from mechagent.core.models import ElementType, MeshSizeFieldSpec  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.evidence import write_manifest  # noqa: E402
 from mechagent.orchestrator.agents.geometry import GeometryAgent  # noqa: E402
@@ -65,6 +66,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reference", type=float)
     parser.add_argument("--reference-tolerance", type=float)
     parser.add_argument("--quality-threshold", type=float, default=0.3)
+    parser.add_argument(
+        "--local-size-field",
+        action="append",
+        metavar="REGION:SIZE_MM:DISTANCE_MM",
+        help="CAD 区域局部尺寸场，可重复指定。",
+    )
     parser.add_argument("--timeout", type=int, default=3600)
     args = parser.parse_args(argv)
     args.case_id = args.case_id or ("CAD-HOLE-BOX" if args.generate_hole_box else "CAD-BOX")
@@ -95,11 +102,12 @@ def main(argv: list[str] | None = None) -> int:
 
     source = _source_path(args.cad, args.output_dir, args.generate_box, args.generate_hole_box)
     try:
-        analysis, params, contract_digest = _prepare_case(args, source)
+        analysis, params, contract_digest, local_digest = _prepare_case(args, source)
         runs = _run_sizes(
             args,
             params=params,
             contract_digest=contract_digest,
+            local_digest=local_digest,
             source=source,
             seeds=seeds,
         )
@@ -114,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             runs=runs,
             stabilization_tolerance=args.stabilization_tolerance,
             quality_threshold=args.quality_threshold,
+            local_size_field_digest=local_digest,
             reference=args.reference,
             reference_tolerance=args.reference_tolerance,
         )
@@ -164,14 +173,19 @@ def _source_path(
     return source
 
 
-def _prepare_case(args: argparse.Namespace, source: Path) -> tuple[Any, Any, str]:
+def _prepare_case(args: argparse.Namespace, source: Path) -> tuple[Any, Any, str, str]:
     geometry = GeometryAgent(MechAgentConfig(), args.output_dir / "cad-work")
     analysis = geometry.analyze(source)
     if not analysis.success or analysis.candidate is None:
         raise RuntimeError(analysis.error_message or "CAD 几何分析失败。")
     params = geometry.to_model_params(source, args.completion, analysis=analysis)
+    local_fields = _parse_local_size_fields(args.local_size_field or [])
     params = params.model_copy(
-        update={"mesh": params.mesh.model_copy(update={"element_type": ElementType.C3D4})}
+        update={
+            "mesh": params.mesh.model_copy(
+                update={"element_type": ElementType.C3D4, "local_size_fields": local_fields}
+            )
+        }
     )
     case = params.to_simulation_case(
         raw_request=args.completion,
@@ -183,7 +197,13 @@ def _prepare_case(args: argparse.Namespace, source: Path) -> tuple[Any, Any, str
     contract = {
         name: region.model_dump(mode="json") for name, region in sorted(case.regions.items())
     }
-    return analysis, params, region_contract_digest(contract)
+    local_contract = {item.region: item.model_dump(mode="json") for item in local_fields}
+    return (
+        analysis,
+        params,
+        region_contract_digest(contract),
+        local_size_field_digest(local_contract),
+    )
 
 
 def _run_sizes(
@@ -191,6 +211,7 @@ def _run_sizes(
     *,
     params: Any,
     contract_digest: str,
+    local_digest: str,
     source: Path,
     seeds: tuple[float, ...],
 ) -> list[CADMeshConvergenceRun]:
@@ -269,6 +290,7 @@ def _run_sizes(
                     source_sha256=source_hash,
                     topology_digest=run_topology_digest,
                     region_contract_digest=contract_digest,
+                    local_size_field_digest=local_digest,
                     region_node_counts={
                         name: len(values)
                         for name, values in region_node_sets.items()
@@ -281,6 +303,22 @@ def _run_sizes(
             _write_json(run_dir / "failure.json", {"seed_size": seed, "error": str(exc)})
             raise CADMeshRunError(str(exc), runs, seed) from exc
     return runs
+
+
+def _parse_local_size_fields(values: list[str]) -> list[MeshSizeFieldSpec]:
+    fields: list[MeshSizeFieldSpec] = []
+    for value in values:
+        parts = value.split(":")
+        if len(parts) != 3:
+            raise ValueError("--local-size-field 必须使用 REGION:SIZE_MM:DISTANCE_MM 格式。")
+        region, raw_size, raw_distance = (item.strip() for item in parts)
+        try:
+            size = float(raw_size)
+            distance = float(raw_distance)
+        except ValueError as exc:
+            raise ValueError(f"--local-size-field 数值无效: {value}。") from exc
+        fields.append(MeshSizeFieldSpec(region=region, size=size, distance=distance))
+    return fields
 
 
 def _end_face_mean_ux(result: dict[str, Any], metadata: dict[str, Any]) -> float:
