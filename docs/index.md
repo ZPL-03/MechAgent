@@ -9,11 +9,13 @@ MechAgent 将自然语言工程请求编排为可执行、可追踪的仿真任�
 | 安装、配置 Python、CalculiX 与 LLM | [本地开发配置](local_setup.md) |
 | 提交请求、操作视口、检查报告与导出 | [Studio 使用指南](studio_ui.md) |
 | 判断模型、材料、载荷是否受支持 | [能力与自然语言解析](capabilities.md) |
+| 理解 CAD 导入、AI 建模、几何清理和网格可信边界 | [几何、AI 建模与网格边界](geometry_ai.md) |
 | 理解产品目标与工程使用边界 | [产品蓝图](product_blueprint.md) |
 | 理解包边界、注册 API 和数据模型 | [架构与数据契约](architecture.md) |
 | 理解任务状态、Agent 输入输出与错误隔离 | [编排与 Agent 通信](orchestration.md) |
 | 理解网格、求解器与后处理 | [求解器、网格与后处理](solver_mesh.md) |
 | 运行检查与解读验证证据 | [验证与质量门禁](validation.md) |
+| 查找脚本用途和清理边界 | [脚本职责目录](script_catalog.md) |
 | 查看当前架构、能力、证据和发布条件汇总 | [技术报告](technical_report.md) |
 | 评估运行、数据、身份和供应链风险 | [威胁模型](MechAgent-threat-model.md) |
 | 维护前端模块、语言与主题 | [前端架构](frontend_architecture.md)、[设计系统](design_system.md) |

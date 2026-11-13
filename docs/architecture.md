@@ -1,6 +1,6 @@
 # 架构与数据契约
 
-本文描述 MechAgent 的项目定位、分层架构、包结构、核心 Schema 与求解器契约。Agent 编排与通信见 [编排与 Agent 通信](orchestration.md)，能力与解析见 [能力与自然语言解析](capabilities.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
+本文描述 MechAgent 的项目定位、分层架构、包结构、核心 Schema 与求解器契约。Agent 编排与通信见 [编排与 Agent 通信](orchestration.md)，能力与解析见 [能力与自然语言解析](capabilities.md)，几何和 AI 建模边界见 [几何、AI 建模与网格边界](geometry_ai.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
 
 ## 依赖与扩展边界
 
@@ -60,7 +60,7 @@ Agent 编排层
 
 后处理使用 `PostProcessor`，材料使用内置目录；二者没有独立工厂注册 API。求解器、网格器、CAD 内核和执行器采用注册/工厂/配置模式。除求解器（`AbstractSolver`）与网格器（`AbstractMesher`）外，core 提供 CAD 内核抽象 `AbstractCADKernel`（`load -> repair -> summarize` 模板，产出 `CADGeometrySummary` 与 `CADImportResult`）和作业执行器抽象 `AbstractJobExecutor`（`submit / status / result / cancel` 契约与 `run` 模板，内置同步 `LocalCommandExecutor` 默认后端）。对应工厂为 `register_cad_kernel()`/`create_cad_kernel()` 与 `register_executor()`/`create_executor()`，配置项为 `cad.default` 与 `executor.default`（默认 `local`）。
 
-CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积、实体/面/边数量、源文件摘要和稳定拓扑关系；`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、保留拓扑实体和六向区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams`。案例提升时，`SimulationCase` 按唯一方向候选将受支持的工程区域映射到面/边拓扑 ID；歧义或未解析区域以 `unknown` 保留并在执行前拒绝。`gmsh-cad-inp` 已把受控三维 STEP/IGES/BREP 的拓扑面/边映射为 C3D4 网格节点集合，并在区域缺失时失败；当前真实证据覆盖确定性实体和带贯穿圆孔实体。通用几何修复、特征识别、装配体、复杂薄壁件和远程/HPC/容器执行器仍需独立满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
+CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积、实体/面/边数量、源文件摘要和当前摘要内可复现的拓扑关系；这些 ID 不是 CAD 原生的长期 persistent ID。`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、保留拓扑实体和六向区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams` 候选。案例提升时，`SimulationCase` 按唯一方向候选将受支持的工程区域映射到面/边拓扑 ID；歧义或未解析区域以 `unknown` 保留并在执行前拒绝。`gmsh-cad-inp` 已把受控三维 STEP/IGES/BREP 的拓扑面/边映射为 C3D4 网格节点集合，并在区域缺失时失败；当前真实证据覆盖确定性实体和带贯穿圆孔实体。通用几何修复、特征识别、装配体、复杂薄壁件和远程/HPC/容器执行器仍需独立满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
 
 ## 核心 Schema
 
@@ -83,7 +83,7 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `schema_version`：当前案例契约版本为 `1`；未知未来版本拒绝校验。
 - `units`：显式的输入单位系统；当前支持长度 `mm`/`cm`/`m`/`in`、力 `N`/`kN`/`lbf`、应力 `MPa`/`kPa`/`Pa`/`GPa`/`psi`、密度 `tonne/mm^3`/`kg/m^3`/`g/cm^3` 和温度 `C`。`SimulationCase.to_model_params()` 将已声明的几何、材料、载荷、边界位移、网格和坐标转换为 N-mm-MPa-tonne/mm³ 基线；未声明的量不会按字段名推断单位。
 - `coordinate_system`：右手坐标系名称、原点和轴名称。
-- `regions`：载荷和边界区域的命名、区域类型、稳定标识及来源。
+- `regions`：载荷和边界区域的命名、区域类型、当前几何摘要内可追踪的标识及来源。
 - `request`：原始用户请求、解析器名称和解析版本。
 - `provenance`：几何、材料、载荷、边界、网格和分析设置的来源与置信度。
 - `load_steps`：按 `sequence` 排序的分析步、载荷工况继承关系、载荷比例、增量和输出字段引用。
@@ -109,7 +109,7 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 用于在后续节点和失败记录中保持相同证据。Planner 对缺项的诊断置信度不会覆盖已完成
 结构化模型的执行证据。
 
-Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_ranges()`，并调用当前 `SimulationCapability.execution_validator` 声明的能力执行契约。内置结构静力能力绑定 `mechagent.core.rules.ensure_static_execution_contract()`；该契约约束结构静力执行路径的分析类型、材料类型、几何必需尺寸、几何-单元组合、边界条件、载荷区域和载荷方向。参数范围以 `mechagent.core.rules` 作为运行时单点来源；执行契约由能力注册项显式绑定。网格尺寸范围按参与网格划分的代表长度判断：梁使用长度，板、壳和加筋板使用面内长宽，实体使用三维尺寸最小值。
+Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_ranges()`，并调用当前 `SimulationCapability.execution_validator` 声明的能力执行契约。内置结构静力能力绑定 `mechagent.core.rules.ensure_static_execution_contract()`；该契约约束结构静力执行路径的分析类型、材料类型、几何必需尺寸、几何-单元组合、边界条件、载荷区域和载荷方向。参数范围以 `mechagent.core.rules` 作为运行时单点来源；执行契约由能力注册项显式绑定。网格尺寸范围按参与网格划分的代表长度判断：梁使用长度，`PLATE`、`SHELL` 和 `STIFFENED_PANEL` 使用面内长宽，其他实体使用三维尺寸最小值；枚举存在不等于对应网格器和求解器已经发布。
 
 ### 求解摘要状态
 

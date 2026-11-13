@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -256,10 +257,18 @@ class S3ArtifactStore:
             raise ValueError("S3 对象缺失或完整性校验失败。")
         destination = destination.resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
-        self.client.download_file(self.bucket, self._key(digest), str(destination))
-        if _sha256_file(destination) != digest:
-            destination.unlink(missing_ok=True)
-            raise ValueError("S3 对象恢复后完整性校验失败。")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            self.client.download_file(self.bucket, self._key(digest), str(temporary))
+            if _sha256_file(temporary) != digest:
+                raise ValueError("S3 对象恢复后完整性校验失败。")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
         return destination
 
     def prune_unreferenced(

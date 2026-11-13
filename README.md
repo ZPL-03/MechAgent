@@ -42,7 +42,8 @@ Studio 的稳定 HTTP 客户端边界为 `/api/v1`；旧 `/api` 路径只用于�
 
 - 生产入口接收工程请求；TC-01 至 TC-05 是独立验证案例，不是生产任务语言。
 - 内置模型族包括悬臂梁、四边简支矩形薄板、圆孔/多孔/长圆槽孔薄板和矩形实体块。材料执行路径为各向同性线弹性。
-- CAD 导入可生成源摘要、稳定拓扑实体和区域候选；具备明确三维实体区域时，`gmsh-cad-inp` 可直接生成 C3D4 网格、节点集合并交给 CalculiX。当前证据覆盖确定性实体和带贯穿圆孔实体，不代表任意装配体、薄板或复杂 CAD 均可直接求解。
+- CAD 导入可生成源摘要、可追踪拓扑实体和区域候选；这些拓扑 ID 只在同一导入摘要中可复用。具备明确三维实体区域时，`gmsh-cad-inp` 可直接生成 C3D4 网格、节点集合并交给 CalculiX。当前证据覆盖确定性实体和带贯穿圆孔实体，不代表任意装配体、薄板或复杂 CAD 均可直接求解。
+- 几何路线、AI 建模闭环、CAD 清理边界和直接 CAD 网格的限制见[几何、AI 建模与网格边界](docs/geometry_ai.md)。自然语言生成 CAD 只能产生候选，必须经过几何回读、区域绑定、网格质量和求解验证。
 - `success` 表示执行成功；`verification_status=passed` 表示参考验收通过。缺少参考值或阈值时为 `unverified`，求解完成不等于工程验证通过。
 - Studio 使用本机持久队列与独立 worker，支持取消、幂等提交、并发限制、项目级活动作业配额、结果大小上限、重启查询和显式重试。结果对象默认写入内容寻址文件存储，也可配置 S3 兼容对象存储；SDK/CLI/Studio 保存可校验的运行证据清单，文件完整性与工程验收分别判断。
 - 复合请求按任务目录隔离，任务失败保留阶段产物和错误，其余任务继续执行。公开摘要不包含原始 LLM prompt、response 或密钥。
@@ -67,10 +68,11 @@ python scripts/run_natural_language_cases.py
 | `packages/mechagent` | SDK、CLI、Studio 服务、编排、LLM 与知识层 |
 | `apps/mechagent-studio` | React/TypeScript 工作台与 Three.js 视口 |
 | `knowledge/sources` | 可随仓库发布的公开知识源 |
-| `scripts` / `tests` | 环境检查、验证、构建、清理与自动化测试 |
+| `scripts` / `tests` | 环境检查、验证、构建、清理与自动化测试；脚本职责见[脚本职责目录](docs/script_catalog.md) |
 | [架构](docs/architecture.md) | 模块依赖、注册 API、数据与状态契约 |
 | [产品蓝图](docs/product_blueprint.md) | 用户任务、交互入口和产品边界 |
 | [长周期开发计划书](docs/development_plan.md) | 能力成熟度、工具接入、依赖顺序和发布条件 |
 | [技术报告](docs/technical_report.md) | 当前架构、执行契约、验证证据和发布条件汇总 |
+| [几何路线](docs/geometry_ai.md) | CAD 导入、AI 建模、几何验证、网格可信边界和开源项目调研 |
 
 项目采用 Apache License 2.0。外部求解器与 CAD 软件的安装和许可由其各自条款管理。

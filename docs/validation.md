@@ -146,7 +146,7 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 611 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 629 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
 
 `scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单可作为发布前许可证审计输入，不替代许可证人工确认。
 
@@ -164,9 +164,10 @@ python scripts/clean_artifacts.py
 Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
 
 真实 S3 验收使用 `scripts/check_s3_storage.py --bucket <bucket>`，可附加
-`--endpoint-url <url>` 和 `--require-lifecycle-id <id>`。脚本通过 boto3 标准凭据链创建随机探针
-对象，验证 SHA-256 metadata、下载、前缀列举和默认删除，失败时返回非零并给出不含凭据的清理命令。
-通过该探针只表示指定桶当前权限和生命周期读取结果通过，不代表跨主机恢复、容量配额或灾备指标。
+`--endpoint-url <url>`、`--require-lifecycle-id <id>` 和 `--output-dir <directory>`。
+脚本通过 boto3 标准凭据链创建随机探针对象，验证 SHA-256 metadata、下载、前缀列举和默认删除；
+指定 `--output-dir` 时保存 `probe.json` 与可校验的 `manifest.json`。通过该探针只表示指定桶当前权限
+和生命周期读取结果通过，不代表跨主机恢复、容量配额或灾备指标。
 
 Studio 本机磁盘配额通过 `studio.max_storage_bytes` 配置。配额统计数据库父目录及本地 `artifact_root` 内的普通文件，提交前和成功结果写入后检查；超额提交返回 HTTP 507，超额结果记录 `storage_quota_exceeded`，不保留公开结果引用。`null` 表示不启用配额，S3 远端对象不计入本机目录用量。`tests/core/test_artifacts_backup.py` 覆盖提交前超额、结果写入后超额、外置本地对象目录和指标状态，`tests/core/test_studio.py` 覆盖 HTTP 507 映射。
 
@@ -212,17 +213,17 @@ S3 兼容对象存储通过 `pip install "mechagent[s3]"` 和 `studio.artifact_b
 `studio.artifact_s3_region` 可选择 S3 兼容私有端点和区域。当前仓库包含客户端、摘要校验和恢复
 接口，远端桶权限、跨主机备份保留和灾难恢复时间指标需要部署环境单独验收。
 
-真实桶验收命令：
-
 ```powershell
 python scripts/check_s3_storage.py `
   --bucket <bucket> `
   --prefix mechagent/probe `
-  --require-lifecycle-id <lifecycle-rule-id>
+  --require-lifecycle-id <lifecycle-rule-id> `
+  --output-dir mechagent_output/s3-storage-evidence
 ```
 
-退出码为 0 且 JSON 中 `status` 为 `passed` 才表示该桶的当前写入、读取、列举、删除和生命周期
-检查通过。该探针不证明跨主机备份恢复、容量配额或对象锁策略；这些仍需在部署环境执行独立演练。
+退出码为 0 且 JSON 或 `manifest.json` 中 `status` 为 `passed` 才表示该桶的当前写入、读取、列举、
+删除和生命周期检查通过。该探针不证明跨主机备份恢复、容量配额或对象锁策略；这些仍需在部署环境
+执行独立演练。
 
 结果对象保留清理按数据库中的 `result_hash` 引用保护对象，并拒绝在存在未终态作业时执行。默认
 只列出超过年龄阈值且无引用的对象；只有显式加入 `--apply` 才会删除。文件系统和 S3 使用同一

@@ -1,6 +1,6 @@
 # 求解器、网格与后处理
 
-本文描述网格生成与质量门禁、CalculiX 适配器、`.frd` 后处理与解析参考公式。能力解析见 [能力与自然语言解析](capabilities.md)，求解摘要状态见 [架构与数据契约](architecture.md)。
+本文描述网格生成与质量门禁、CalculiX 适配器、`.frd` 后处理与解析参考公式。能力解析见 [能力与自然语言解析](capabilities.md)，几何、AI 建模和 CAD 网格边界见 [几何、AI 建模与网格边界](geometry_ai.md)，求解摘要状态见 [架构与数据契约](architecture.md)。
 
 ## 网格生成与质量门禁
 
@@ -16,7 +16,7 @@ MeshAgent 要求成功网格结果提供 `mesh_file`，并要求 `MeshResult.qua
 
 配置项 `mesher.min_quality` 只应用于网格结果中的 `min_*` 质量指标；低于阈值的网格结果进入失败状态。`max_*` 等上界指标不使用最小质量阈值判定。工作流在 MeshAgent 阶段记录 `mesh_failed` 并停止该任务的求解。
 
-参数化网格器注册名为 `calculix-inp`。矩形板路径调用 Gmsh Python API 生成四边形壳网格；开孔薄板路径调用 Gmsh OCC 布尔建模生成圆孔、多圆孔或水平长圆槽孔壳网格，并按最小开孔特征使用更小网格尺度；梁路径生成 `structured_line` B31 结构化线网格；矩形实体块路径生成 `structured_hex` C3D8R 结构化六面体网格。具备受控 CAD 源摘要的三维实体使用 `gmsh-cad-inp`，通过 Gmsh OpenCASCADE 直接导入 STEP/IGES/BREP，生成一阶 C3D4 四面体网格，并将稳定拓扑面/边转换为节点集合；区域无法唯一映射时直接失败。各路径统一输出 CalculiX 可消费的 `.inp` 网格片段，并在 `MeshResult.metadata` 写入 `source`、`format`、`element_type`、`node_count`、`element_count`、`opening_count` 以及开孔参数摘要。Gmsh 路径使用 `gmsh.model.mesh.getElementQualities(..., "minSICN")` 提取单元质量，写入 `MeshResult.quality.min_sicn` 和 `MeshResult.quality.mean_sicn`；`MeshResult.metadata.quality_source` 记录为 `gmsh_minSICN`。结构化梁和实体网格保持确定性质量指标。
+参数化网格器注册名为 `calculix-inp`。矩形板路径调用 Gmsh Python API 生成四边形壳网格；开孔薄板路径调用 Gmsh OCC 布尔建模生成圆孔、多圆孔或水平长圆槽孔壳网格，并按最小开孔特征使用更小网格尺度；梁路径生成 `structured_line` B31 结构化线网格；矩形实体块路径生成 `structured_hex` C3D8R 结构化六面体网格。具备受控 CAD 源摘要的三维实体使用 `gmsh-cad-inp`，通过 Gmsh OpenCASCADE 直接导入 STEP/IGES/BREP，生成一阶 C3D4 四面体网格，并将当前摘要内可复现的拓扑面/边转换为节点集合；区域无法唯一映射时直接失败。各路径统一输出 CalculiX 可消费的 `.inp` 网格片段，并在 `MeshResult.metadata` 写入 `source`、`format`、`element_type`、`node_count`、`element_count`、`opening_count` 以及开孔参数摘要。Gmsh 路径使用 `gmsh.model.mesh.getElementQualities(..., "minSICN")` 提取单元质量，写入 `MeshResult.quality.min_sicn` 和 `MeshResult.quality.mean_sicn`；`MeshResult.metadata.quality_source` 记录为 `gmsh_minSICN`。结构化梁和实体网格保持确定性质量指标。
 
 ## CalculiX 适配器
 

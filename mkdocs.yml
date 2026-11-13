@@ -18,11 +18,13 @@ nav:
       - 架构与数据契约: architecture.md
       - 编排与 Agent 通信: orchestration.md
       - 能力与自然语言解析: capabilities.md
+      - 几何、AI 建模与网格边界: geometry_ai.md
       - 求解器、网格与后处理: solver_mesh.md
       - 技术报告: technical_report.md
   - 验证与开发:
       - 验证与质量门禁: validation.md
       - 本地开发配置: local_setup.md
+      - 脚本职责目录: script_catalog.md
       - 威胁模型: MechAgent-threat-model.md
 markdown_extensions:
   - admonition

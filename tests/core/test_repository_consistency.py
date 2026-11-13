@@ -192,6 +192,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "backup_studio.py",
         "restore_studio.py",
         "drill_studio_recovery.py",
+        "check_s3_storage.py",
         "studio_http_smoke.py",
         "prune_artifacts.py",
         "check_wheel_install.py",

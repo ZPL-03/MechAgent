@@ -19,6 +19,6 @@ SDK 入口为 `MechAgent.from_config()`、`inspect()` 和 `run()`。Studio、CLI
 
 Studio 支持中英文界面、明暗与系统主题、几何/网格/结果视口、验收检查和 Markdown 报告。Three.js 懒加载并按需渲染。界面只消费公开摘要，原始 LLM prompt 与 response 不进入公开输出。
 
-内置能力限定为结构线弹性静力，默认工具为 CalculiX 和 Gmsh；Abaqus/Standard 适配器已注册，覆盖当前结构静力族的输入、作业启动和 ODB 结果场提取。LLM 可参与能力选择、参数补全、网格建议和工程解释；输出必须满足工程契约。CAD 候选链路、Abaqus 适配器和独立工具基准的范围见[能力说明](../../docs/capabilities.md)与[工具说明](../../docs/solver_mesh.md)。
+内置能力限定为结构线弹性静力，默认工具为 CalculiX 和 Gmsh；Abaqus/Standard 适配器已注册，覆盖当前结构静力族的输入、作业启动和 ODB 结果场提取。LLM 可参与能力选择、参数补全、网格建议和工程解释；输出必须满足工程契约。CAD 候选链路、AI 建模闭环、Abaqus 适配器和独立工具基准的范围见[能力说明](../../docs/capabilities.md)、[几何路线](../../docs/geometry_ai.md)与[工具说明](../../docs/solver_mesh.md)。
 
 安装配置见[本地开发配置](../../docs/local_setup.md)，产品目标见[产品蓝图](../../docs/product_blueprint.md)，模块与状态见[架构](../../docs/architecture.md)和[编排说明](../../docs/orchestration.md)。本包采用 Apache License 2.0。

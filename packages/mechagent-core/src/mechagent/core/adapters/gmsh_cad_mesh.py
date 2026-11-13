@@ -1,7 +1,7 @@
 """基于 Gmsh OpenCASCADE 的 CAD 实体直接网格适配器。
 
 该适配器只处理带有可核验 CAD 来源的三维实体。网格由导入的 CAD 形体直接生成，
-并将稳定拓扑面/边转换为 CalculiX/Abaqus 可读取的节点集合。无法恢复来源、拓扑
+并将当前导入摘要中的拓扑面/边转换为 CalculiX/Abaqus 可读取的节点集合。无法恢复来源、拓扑
 或有效区域集合时显式失败，不回退到包围盒网格。
 """
 
@@ -62,7 +62,8 @@ class GmshCADInpMesher(AbstractMesher):
             gmsh.option.setNumber("Mesh.ElementOrder", 1)
             gmsh.model.add(case_id)
             gmsh.model.occ.importShapes(str(source))
-            gmsh.model.occ.healShapes()
+            if self.config.healing:
+                gmsh.model.occ.healShapes()
             gmsh.model.occ.synchronize()
             volumes = gmsh.model.getEntities(3)
             faces = gmsh.model.getEntities(2)
@@ -123,6 +124,7 @@ class GmshCADInpMesher(AbstractMesher):
                     "source": "gmsh_occ_cad",
                     "element_type": "C3D4",
                     "direct_cad": True,
+                    "healing": self.config.healing,
                     "source_path": str(source),
                     "source_sha256": expected_hash or _sha256_file(source),
                     "topology_digest": actual_topology_digest,

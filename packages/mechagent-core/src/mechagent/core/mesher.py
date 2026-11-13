@@ -19,6 +19,7 @@ class MeshConfig(BaseModel):
         work_dir: 网格输出目录。
         seed_size: 全局网格种子尺寸，单位为 mm。
         min_quality: 最小网格质量阈值。
+        healing: CAD 直接网格是否在导入后执行 Gmsh OCC 修复；参数化网格器忽略该字段。
 
     Returns:
         MeshConfig: 经过校验的网格器配置。
@@ -36,6 +37,7 @@ class MeshConfig(BaseModel):
     work_dir: Path = Field(default=Path("mechagent_output"))
     seed_size: float = Field(default=5.0, gt=0)
     min_quality: float = Field(default=0.3, ge=0, le=1)
+    healing: bool = True
 
     @field_validator("seed_size", "min_quality")
     @classmethod

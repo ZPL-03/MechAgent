@@ -224,7 +224,7 @@ def _stable_topology_id(dimension: int, box: tuple[float, ...], measure: float, 
 
 
 def _topology_digest(topology: list[CADTopologyEntity]) -> str:
-    """为拓扑实体及其父子关系生成稳定摘要。"""
+    """为当前导入的拓扑实体及其父子关系生成可复现摘要。"""
 
     return hashlib.sha256(
         json.dumps(

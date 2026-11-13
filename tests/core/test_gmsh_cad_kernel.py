@@ -60,6 +60,27 @@ def test_gmsh_cad_kernel_imports_step_box(tmp_path: Path) -> None:
     assert mapped_regions["x_min"].status == "mapped"
 
 
+def test_gmsh_cad_kernel_healing_switch_keeps_summary_traceable(tmp_path: Path) -> None:
+    step = tmp_path / "box.step"
+    _write_box_step(step, 100.0, 20.0, 20.0)
+
+    healed = GmshCADKernel(CADConfig(work_dir=tmp_path, healing=True)).import_model(step)
+    raw = GmshCADKernel(CADConfig(work_dir=tmp_path, healing=False)).import_model(step)
+
+    assert healed.success is True
+    assert raw.success is True
+    assert healed.summary is not None
+    assert raw.summary is not None
+    assert raw.summary.volume == pytest.approx(healed.summary.volume, rel=1.0e-9)
+    assert raw.summary.surface_area == pytest.approx(healed.summary.surface_area, rel=1.0e-9)
+    assert raw.summary.topology_digest
+    assert healed.summary.topology_digest
+    assert len(raw.summary.topology_entities) == len(healed.summary.topology_entities)
+    assert {item.name for item in raw.summary.region_candidates} == {
+        item.name for item in healed.summary.region_candidates
+    }
+
+
 def test_gmsh_cad_kernel_missing_file_returns_failure(tmp_path: Path) -> None:
     result = GmshCADKernel(CADConfig(work_dir=tmp_path)).import_model(tmp_path / "missing.step")
     assert result.success is False

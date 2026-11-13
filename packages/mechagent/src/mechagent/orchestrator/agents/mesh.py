@@ -105,6 +105,7 @@ class MeshAgent:
                 work_dir=self.work_dir,
                 seed_size=model_for_mesh.mesh.seed_size,
                 min_quality=self.config.mesher.min_quality,
+                healing=self.config.cad.healing,
             ),
         )
         result = mesher.generate(model_for_mesh)

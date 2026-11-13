@@ -1,8 +1,9 @@
 """CAD 内核抽象接口。
 
-定义把外部 CAD 形体（STEP/IGES/BREP 等）导入、修复、特征识别并归纳为可求解几何摘要的
-统一契约。具体内核（如基于 OpenCASCADE 的实现）通过工厂注册名、构造函数和配置接入，
-与求解器、网格器保持一致的注册/工厂/配置模式。
+定义把外部 CAD 形体（STEP/IGES/BREP 等）导入、按配置尝试处理并归纳为几何摘要的统一
+契约。摘要本身不证明特征识别、区域语义或有限元可求解性；这些结论由具体适配器、案例
+契约和执行前门禁分别提供。具体内核（如基于 OpenCASCADE 的实现）通过工厂注册名、构造
+函数和配置接入，与求解器、网格器保持一致的注册/工厂/配置模式。
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ class CADConfig(BaseModel):
 
     Args:
         work_dir: 几何处理输出目录。
-        linear_deflection: 离散化线性弦高，单位为 mm。
-        min_feature_size: 去特征阈值，单位为 mm；为 0 时不去特征。
+        linear_deflection: 预留的离散化线性弦高，单位为 mm；当前 Gmsh 摘要适配器不使用该字段。
+        min_feature_size: 预留的去特征阈值，单位为 mm。当前 Gmsh 适配器不使用该字段，
+            因此非零值不会自动删除 CAD 特征。
         healing: 是否在导入后执行几何修复。
 
     Returns:
@@ -60,7 +62,7 @@ class CADGeometryFeature(BaseModel):
 
     Args:
         kind: 特征类型，例如 ``hole``、``fillet``、``chamfer``、``boss``、``face``。
-        feature_id: 特征在内核中的稳定标识。
+        feature_id: 由具体适配器提供的特征标识；不保证是 CAD 内核的长期 persistent ID。
         dimensions: 特征关键尺寸，单位为 mm。
         location: 特征参考点坐标，单位为 mm。
 
@@ -84,7 +86,11 @@ class CADGeometryFeature(BaseModel):
 
 
 class CADTopologyEntity(BaseModel):
-    """可追踪的 CAD 拓扑实体。"""
+    """可追踪的 CAD 拓扑实体。
+
+    ``stable_id`` 是根据当前导入摘要的几何度量生成的可复现标识，只能在相同的
+    拓扑摘要和容差约定下复用；它不是 CAD 文件或内核提供的长期 persistent ID。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,7 +118,7 @@ class CADGeometrySummary(BaseModel):
         face_count: 面数量。
         edge_count: 边数量。
         watertight: 形体是否封闭水密。
-        features: 识别出的几何特征列表。
+        features: 由具体适配器确认的几何特征列表；为空表示没有提供特征识别结果。
 
     Returns:
         CADGeometrySummary: 统一几何摘要，供边界/载荷区域映射与网格策略消费。
@@ -165,9 +171,10 @@ class CADImportResult(BaseModel):
     """CAD 导入结果。
 
     Args:
-        success: 导入与修复是否成功。
+        success: 导入以及配置中启用的处理步骤是否成功。
         summary: 成功时的几何摘要。
-        geometry_file: 修复或标准化后导出的几何文件路径。
+        geometry_file: 可选的修复或标准化后导出文件路径；当前 Gmsh 适配器不导出标准化文件，
+            默认保持为空。
         wall_time: 处理耗时，单位为 s。
         metadata: 附加诊断信息，例如修复告警、去特征统计。
         error_message: 失败诊断信息。
@@ -205,8 +212,8 @@ class AbstractCADKernel(ABC):
     """所有 CAD 内核适配器必须实现的抽象基类。
 
     ``import_model()`` 是固定模板方法，按 ``load -> repair -> summarize`` 顺序执行；
-    子类只实现形体加载、修复和摘要归纳。硬失败通过抛出 ``CADError`` 表达，模板捕获后
-    返回 ``success=False`` 的结果对象。
+    子类只实现形体加载、处理和摘要归纳。硬失败通过抛出 ``CADError`` 表达，模板捕获后
+    返回 ``success=False`` 的结果对象。返回的摘要不自动获得特征识别或有限元可求解语义。
 
     Args:
         config: CAD 内核配置。
@@ -266,7 +273,9 @@ class AbstractCADKernel(ABC):
 
     @abstractmethod
     def repair(self, shape: Any) -> Any:
-        """修复形体，例如缝合面、修复自由边和移除微小特征。
+        """按具体内核契约尝试修复形体。
+
+        具体实现可以缝合面或修复自由边，但抽象接口不保证执行去特征、特征识别或导出。
 
         Args:
             shape: 内核形体句柄。
@@ -284,7 +293,7 @@ class AbstractCADKernel(ABC):
 
     @abstractmethod
     def summarize(self, shape: Any) -> CADGeometrySummary:
-        """归纳形体的几何摘要与特征。
+        """归纳形体的几何摘要和由适配器确认的特征。
 
         Args:
             shape: 内核形体句柄。
@@ -293,7 +302,7 @@ class AbstractCADKernel(ABC):
             CADGeometrySummary: 统一几何摘要。
 
         Raises:
-            CADError: 当几何度量或特征识别失败时抛出。
+            CADError: 当几何度量或适配器声明的摘要步骤失败时抛出。
 
         Example:
             >>> kernel.summarize(shape)
@@ -377,7 +386,8 @@ CADGeometrySummary.model_rebuild()
 class GeometryCandidate(BaseModel):
     """几何候选。
 
-    由 CAD 几何摘要派生的可求解几何草案，供 Designer/能力解析进一步补全材料、载荷与边界。
+    由 CAD 几何摘要派生的结构化几何草案，供 Designer/能力解析进一步补全材料、载荷与边界。
+    候选通过执行前门禁后才可能进入网格和求解，不代表任意 CAD 拓扑已经成为可求解模型。
 
     Args:
         geometry_type: 推断的几何类型。

@@ -221,7 +221,7 @@ class CADSettings(BaseModel):
 
     Args:
         default: 默认 CAD 内核名称；为空时不启用 CAD 导入能力。
-        linear_deflection: 离散化线性弦高，单位为 mm。
+        linear_deflection: 预留的离散化线性弦高，单位为 mm；当前 Gmsh 摘要适配器不使用该字段。
         healing: 是否在导入后执行几何修复。
 
     Returns:

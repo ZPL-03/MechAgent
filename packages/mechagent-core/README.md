@@ -12,7 +12,7 @@
 | `materials` / `postproc` | 钢铝材料目录、`PostProcessor` 摘要；没有独立工厂注册 API |
 | `adapters` / `validation` | CalculiX、Abaqus/Standard、Gmsh OCC/CAD mesh 适配与解析参考 |
 
-内置注册名为 `calculix`、`abaqus`、`calculix-inp`、`gmsh-occ`、`gmsh-cad-inp`、`local`。适配器封装后端格式和调用，不把单一求解器的专用模型设为通用默认契约。参数拒绝非有限数值，成功网格必须提供实际网格路径。支持范围和失败行为见[架构与数据契约](../../docs/architecture.md)、[工具说明](../../docs/solver_mesh.md)。
+内置注册名为 `calculix`、`abaqus`、`calculix-inp`、`gmsh-occ`、`gmsh-cad-inp`、`local`。适配器封装后端格式和调用，不把单一求解器的专用模型设为通用默认契约。参数拒绝非有限数值，成功网格必须提供实际网格路径。CAD 摘要、拓扑区域和直接 C3D4 网格的能力边界见[几何路线](../../docs/geometry_ai.md)。支持范围和失败行为见[架构与数据契约](../../docs/architecture.md)、[工具说明](../../docs/solver_mesh.md)。
 
 在已激活 Python 3.10+ 虚拟环境中安装：
 

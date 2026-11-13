@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from scripts import drill_studio_recovery
+from scripts import check_s3_storage, drill_studio_recovery
 
+from mechagent.evidence import verify_manifest
 from mechagent.runtime.artifacts import ArtifactStore, S3ArtifactStore
 from mechagent.runtime.backup import backup_studio, restore_studio, verify_backup
 from mechagent.runtime.store import JobStore, StorageQuotaError
@@ -93,6 +95,90 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     assert store.get_file(digest, destination).read_text(encoding="utf-8") == source.read_text(
         encoding="utf-8"
     )
+
+    fake.objects[("results", store._key(digest))] = (b"tampered", {"sha256": digest})
+    destination.write_text("keep", encoding="utf-8")
+    with pytest.raises(ValueError, match="恢复后完整性校验失败"):
+        store.get_file(digest, destination)
+    assert destination.read_text(encoding="utf-8") == "keep"
+    assert not list(tmp_path.glob(".restored.json.*.tmp"))
+
+
+def test_s3_probe_writes_verifiable_evidence_without_retaining_object(tmp_path: Path) -> None:
+    class FakeS3:
+        def __init__(self) -> None:
+            self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+
+        def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+            try:
+                content, metadata = self.objects[(Bucket, Key)]
+            except KeyError as exc:
+                error = type("NotFound", (Exception,), {})()
+                error.response = {"Error": {"Code": "404"}}
+                raise error from exc
+            return {"ContentLength": len(content), "Metadata": metadata}
+
+        def upload_fileobj(
+            self, stream: Any, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (stream.read(), dict(ExtraArgs["Metadata"]))
+
+        def download_file(self, bucket: str, key: str, destination: str) -> None:
+            Path(destination).write_bytes(self.objects[(bucket, key)][0])
+
+        def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
+            bucket = str(kwargs["Bucket"])
+            prefix = str(kwargs["Prefix"])
+            return {
+                "IsTruncated": False,
+                "Contents": [
+                    {"Key": key}
+                    for (item_bucket, key), _ in self.objects.items()
+                    if item_bucket == bucket and key.startswith(prefix)
+                ],
+            }
+
+        def delete_object(self, *, Bucket: str, Key: str) -> None:
+            self.objects.pop((Bucket, Key), None)
+
+    fake = FakeS3()
+    store = S3ArtifactStore("results", "probe", client=fake)
+    result = check_s3_storage.run_probe(
+        fake,
+        store,
+        require_lifecycle_id=None,
+        keep_object=False,
+    )
+    assert result["status"] == "passed"
+    assert fake.objects == {}
+    manifest = check_s3_storage.write_probe_evidence(result, tmp_path / "evidence")
+    assert verify_manifest(manifest) == []
+    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "passed"
+
+
+def test_s3_probe_reports_put_failure_without_raw_provider_diagnostics() -> None:
+    class FailingS3:
+        def upload_fileobj(
+            self, _stream: Any, _bucket: str, _key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            del ExtraArgs
+            error = type("Denied", (Exception,), {})()
+            error.response = {"Error": {"Code": "AccessDenied"}}
+            raise error
+
+    client = FailingS3()
+    store = S3ArtifactStore("results", "probe", client=client)
+    result = check_s3_storage.run_probe(
+        client,
+        store,
+        require_lifecycle_id=None,
+        keep_object=False,
+    )
+
+    assert result["status"] == "failed"
+    assert result["checks"] == {"put": False}
+    assert result["object_key"] is None
+    assert result["errors"] == ["对象写入失败：Denied(AccessDenied)"]
 
 
 def test_local_artifact_pruning_keeps_referenced_objects(tmp_path: Path) -> None:
@@ -221,6 +307,66 @@ def test_studio_backup_stages_and_restores_referenced_external_objects(tmp_path:
 
     assert target.verify(digest)
     restored_store = JobStore(restored_database, artifact_store=target)
+    assert restored_store.payload(restored_store.get(job["job_id"]))["result"] == {"ok": True}
+
+
+def test_studio_backup_round_trip_uses_s3_store_for_source_and_target(tmp_path: Path) -> None:
+    class FakeS3:
+        def __init__(self) -> None:
+            self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+
+        def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+            try:
+                content, metadata = self.objects[(Bucket, Key)]
+            except KeyError as exc:
+                error = type("NotFound", (Exception,), {})()
+                error.response = {"Error": {"Code": "404"}}
+                raise error from exc
+            return {"Metadata": metadata, "ContentLength": len(content)}
+
+        def upload_file(
+            self, source: str, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (
+                Path(source).read_bytes(),
+                dict(ExtraArgs["Metadata"]),
+            )
+
+        def upload_fileobj(
+            self, stream: Any, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (stream.read(), dict(ExtraArgs["Metadata"]))
+
+        def download_file(self, bucket: str, key: str, destination: str) -> None:
+            Path(destination).write_bytes(self.objects[(bucket, key)][0])
+
+    source_client = FakeS3()
+    source_artifacts = S3ArtifactStore("source", "results", client=source_client)
+    database = tmp_path / "studio" / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database, artifact_store=source_artifacts)
+    job = store.submit("s3 backup", False, config, max_queued=2)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+    digest = str(store.get(job["job_id"])["result_hash"])
+
+    backup = backup_studio(database, tmp_path / "s3-backup", artifact_store=source_artifacts)
+    manifest = json.loads((backup / "backup-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifact_backend"] == "s3"
+    assert manifest["artifact_references"] == 1
+
+    target_client = FakeS3()
+    target_artifacts = S3ArtifactStore("target", "restored", client=target_client)
+    restored_database = restore_studio(
+        backup,
+        tmp_path / "s3-restored",
+        artifact_store=target_artifacts,
+    )
+    assert target_artifacts.verify(digest)
+    restored_store = JobStore(restored_database, artifact_store=target_artifacts)
     assert restored_store.payload(restored_store.get(job["job_id"]))["result"] == {"ok": True}
 
 

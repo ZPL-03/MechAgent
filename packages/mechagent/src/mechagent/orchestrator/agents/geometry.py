@@ -1,7 +1,8 @@
 """GeometryAgent：CAD 形体导入与几何候选生成。
 
-消费 CAD 内核的 `CADImportResult`，把几何摘要映射为可求解的几何候选（几何类型、包围盒尺寸、
-边界/载荷区域候选与缺参诊断），供 Designer 与能力解析进一步补全材料、载荷与边界。
+消费 CAD 内核的 `CADImportResult`，把几何摘要映射为结构化几何候选（几何类型、包围盒尺寸、
+边界/载荷区域候选与缺参诊断），供 Designer 与能力解析进一步补全材料、载荷与边界。候选
+只有在执行前契约、区域映射和网格门禁通过后才可能进入求解。
 """
 
 from __future__ import annotations
@@ -118,17 +119,18 @@ class GeometryAgent:
         )
 
     def to_model_params(self, source: Path, completion: str) -> ModelParams:
-        """从 CAD 文件与自然语言补全生成可求解的结构化参数。
+        """从 CAD 文件与自然语言补全生成结构化参数候选。
 
         导入 CAD 形体得到几何候选，与描述材料、载荷与边界的自然语言补全合并解析为
-        `ModelParams`，可直接传递给网格器和求解器，打通「CAD 文件 → 求解」链路。
+        `ModelParams`。只有候选属于当前参数化能力、区域来源通过执行前门禁且网格器支持
+        该几何路径时，结果才可以进入网格和求解；该方法不证明任意 CAD 拓扑已被保留。
 
         Args:
             source: CAD 文件路径。
             completion: 描述材料、载荷与边界的自然语言补全。
 
         Returns:
-            ModelParams: 可求解的结构化仿真参数。
+            ModelParams: 结构化仿真参数候选；是否可执行由后续契约门禁决定。
 
         Raises:
             ValueError: 当 CAD 几何分析失败或合成请求缺少必要仿真参数时抛出。
