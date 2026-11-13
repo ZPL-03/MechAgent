@@ -41,7 +41,7 @@ class AbaqusExecutionPolicy:
     ``license_probe`` 是可选的只读命令模板，例如
     ``("abaqus", "licensing", "ru")``。命令返回非零状态时作业拒绝提交。
     ``queue_path`` 指向共享 SQLite 数据库时，多个 Python 进程会共同遵守
-    ``max_concurrent``；未配置时只约束当前进程。该队列不替代集群许可证服务。
+    ``max_concurrent``；未配置时只约束当前进程。集群许可证服务单独管理容量和可用性。
     """
 
     max_concurrent: int = 1

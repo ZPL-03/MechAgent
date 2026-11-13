@@ -60,7 +60,7 @@ export function usePersistentJob(onComplete: (request: string, result: StudioRun
         setRunning(false);
         callback.current(value.request, runError(message));
       } else {
-        // 网络断开不代表服务器求解失败，保留标识供重新连接。
+        // 网络断开时保留作业标识，重连后通过服务器状态确认求解结果。
         setDisconnected(true);
         setError(message);
       }

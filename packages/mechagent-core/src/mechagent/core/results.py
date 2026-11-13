@@ -224,7 +224,7 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
 
 
 def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase) -> dict[str, Any]:
-    """生成具有明确空间语义的跨后端单元场。
+    """生成具有明确空间语义的跨工具单元场。
 
     后端 ``fields`` 保留求解器原生位置和标签。本函数只对能够由单元拓扑、
     节点坐标和原始场值确定映射的字段生成 ``mapped_fields``：正应力/正应变

@@ -25,7 +25,7 @@ CalculiX 与 Abaqus/Standard 的 `run_case()` 路径支持线性静力多步和�
 
 进入网格和求解前，`SimulationCase.execution_readiness()` 检查几何、材料、载荷、边界、网格、分析六类来源以及全部载荷/边界区域来源的置信度。默认门槛为 `0.80`。缺失或低于门槛的旧兼容案例可以读取和迁移，但 `ensure_execution_ready()` 会阻断执行并生成 `execution_not_ready` 错误。参数范围、能力执行契约和工具注册检查在同一执行链路中生效。
 
-执行状态与工程验收分开表达：`success` 表示进程和结果提取完成，`verification_status` 表示参考验收状态，`passed` 表示在存在参考值和阈值时通过工程校核。缺少参考值的结果标记为 `unverified`，不等同于工程验收通过。
+执行状态与工程验收分开表达：`success` 表示进程和结果提取完成，`verification_status` 表示参考验收状态，`passed` 表示在存在参考值和阈值时通过工程校核。缺少参考值的结果标记为 `unverified`，工程验收状态保持未完成。
 
 ## 接口与运行层
 

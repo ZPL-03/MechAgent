@@ -4,7 +4,7 @@
 
 ## 依赖与扩展边界
 
-`mechagent` 依赖 `mechagent-core`；core 不依赖编排。`knowledge` 保持独立知识层职责，不反向引用 `orchestrator`。平台围绕能力注册、工具注册和结构化状态组织任务；单一后端的专用格式由适配器封装。产品职责见[产品蓝图](product_blueprint.md)，模型与输入范围见[能力说明](capabilities.md)。
+`mechagent` 依赖 `mechagent-core`；core 不依赖编排。`knowledge` 保持独立知识层职责，不反向引用 `orchestrator`。平台围绕能力注册、工具注册和结构化状态组织任务；各工具的专用格式由适配器封装。产品职责见[产品蓝图](product_blueprint.md)，模型与输入范围见[能力说明](capabilities.md)。
 
 ## 包结构
 
@@ -60,7 +60,7 @@ Agent 编排层
 
 后处理使用 `PostProcessor`，材料使用内置目录；二者没有独立工厂注册 API。求解器、网格器、CAD 内核和执行器采用注册/工厂/配置模式。除求解器（`AbstractSolver`）与网格器（`AbstractMesher`）外，core 提供 CAD 内核抽象 `AbstractCADKernel`（`load -> repair -> summarize` 模板，产出 `CADGeometrySummary` 与 `CADImportResult`）和作业执行器抽象 `AbstractJobExecutor`（`submit / status / result / cancel` 契约与 `run` 模板，内置同步 `LocalCommandExecutor` 默认后端）。对应工厂为 `register_cad_kernel()`/`create_cad_kernel()` 与 `register_executor()`/`create_executor()`，配置项为 `cad.default` 与 `executor.default`（默认 `local`）。
 
-CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积、实体/面/边数量、源文件摘要和当前摘要内可复现的拓扑关系；这些 ID 不是 CAD 原生的长期 persistent ID。`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、保留拓扑实体和六向区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams` 候选。案例提升时，`SimulationCase` 按唯一方向候选将受支持的工程区域映射到面/边拓扑 ID；歧义或未解析区域以 `unknown` 保留并在执行前拒绝。`gmsh-cad-inp` 已把受控三维 STEP/IGES/BREP 的拓扑面/边映射为 C3D4 网格节点集合，并在区域缺失时失败；当前真实证据覆盖确定性实体和带贯穿圆孔实体。通用几何修复、特征识别、装配体、复杂薄壁件和远程/HPC/容器执行器仍需独立满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
+CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `gmsh-occ`），导入 STEP/IGES/BREP 形体并归纳包围盒、体积、表面积、实体/面/边数量、源文件摘要和当前摘要内可复现的拓扑关系；这些 ID 的生命周期限于当前摘要，不具备 CAD 原生 persistent ID 语义。`geometry_candidate_from_summary()` 把几何摘要映射为 `GeometryCandidate`（按薄度与细长比推断几何类型、保留拓扑实体和六向区域候选、记录材料/载荷/边界缺参诊断）。`GeometryAgent` 串联 CAD 内核与该映射，输出 `GeometryAnalysis`，并可通过自然语言补全材料、载荷和边界生成结构静力 `ModelParams` 候选。案例提升时，`SimulationCase` 按唯一方向候选将受支持的工程区域映射到面/边拓扑 ID；歧义或未解析区域以 `unknown` 保留并在执行前拒绝。`gmsh-cad-inp` 已把受控三维 STEP/IGES/BREP 的拓扑面/边映射为 C3D4 网格节点集合，并在区域缺失时失败；当前真实证据覆盖确定性实体和带贯穿圆孔实体。通用几何修复、特征识别、装配体、复杂薄壁件和远程/HPC/容器执行器仍需独立满足成熟度门禁，详见 [长周期开发计划书](development_plan.md)。
 
 ## 核心 Schema
 
@@ -117,7 +117,7 @@ Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_r
 
 - `success`：求解器进程和结果提取是否成功。
 - `passed`：存在参考值和阈值时，工程校核是否通过。
-- `verification_status`：`passed`、`failed` 或 `unverified`。缺少参考值或阈值的工况标记为 `unverified`，报告展示为「未验证」，不等同于工程验收通过。
+- `verification_status`：`passed`、`failed` 或 `unverified`。缺少参考值或阈值的工况标记为 `unverified`，报告展示为「未验证」，工程验收状态单独判断。
 - 显式 `success=false`、`success=failed` 或等价失败值的求解器结果不能通过工程验收；即使主结果与参考值完全一致，也标记为 `failed`。
 - `SolverRunSummary.from_mapping()` 对第三方能力插件返回的矛盾状态执行失败优先归一化；`success` 为失败时，`passed` 固定为 `false`，`verification_status` 固定为 `failed`。
 - `predicted`：主结果计算值。能力评价器未显式提供 `predicted`，但提供了与 `quantity` 同名的数值字段时，工作流将该字段作为主结果值。
@@ -138,11 +138,11 @@ generate_input -> solve -> extract_results
 
 ## 持久执行与证据
 
-Studio 的运行层位于应用包 `runtime/`，不替代 core 的工具执行器契约。HTTP 提交、同步兼容入口和显式重试共用 SQLite 队列。`BEGIN IMMEDIATE` 事务串行化领取、取消和终态提交，并在数据库层限制活动 worker 数量；FastAPI 生命周期仅管理调度线程，每个任务由独立 Python 进程调用 SDK。SDK 和 CLI 直接运行不经过 Studio 队列。
+Studio 的运行层位于应用包 `runtime/`，与 core 的工具执行器契约分层。HTTP 提交、同步兼容入口和显式重试共用 SQLite 队列。`BEGIN IMMEDIATE` 事务串行化领取、取消和终态提交，并在数据库层限制活动 worker 数量；FastAPI 生命周期仅管理调度线程，每个任务由独立 Python 进程调用 SDK。SDK 和 CLI 直接运行时绕过 Studio 队列。
 
 状态依次为 `queued → starting → running → succeeded/failed`，取消经过 `cancelling → cancelled`；未登记或失联的执行进程为 `interrupted`。取消先于结果提交时，worker 不得覆盖取消状态。进程身份使用 PID 与创建时间核验；Windows worker 先加入带 `KILL_ON_JOB_CLOSE` 的 Job Object，再登记身份和执行工作，隔离失败不开始求解。Windows 下 worker 异常退出会终止其后代。POSIX 使用独立进程组处理主动取消；worker 被外部单独强杀后的孤儿回收尚无平台验证，不作完整进程树恢复承诺。
 
-`studio` 配置定义数据库路径、对象存储、并发、排队、启动登记、心跳、总执行时限、认证主体、组织、角色和项目范围。`max_storage_bytes` 为本机工作目录配额，统计数据库父目录及本地 `artifact_root` 内不跟随符号链接的普通文件；提交前和成功结果写入后均检查，超额提交返回 HTTP 507，超额结果以 `storage_quota_exceeded` 失败。空值不启用本机配额，S3 远端容量和保留策略不由该字段覆盖。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件限本机文件系统，不能据此推导网络文件系统或多机调度支持。数据库 schema 版本为 7。v1 队列结构可在事务内迁移到 v7；v2 保存配置文件哈希，v3 保存作业主体和项目归属，v4 保存结果字节数，v5 保存 worker 及可见子进程的 CPU 时间与峰值常驻内存，v6 增加主体目录，v7 增加作业和审计记录的组织归属。主体目录只保存 API key 的 SHA-256 摘要，管理员通过 `/api/v1/identities` 管理同组织主体的范围、停用和密钥轮换；创建或轮换响应只返回一次明文 key。缺少原配置文件的历史作业保留未验证哈希，worker 会拒绝执行并要求显式重新提交。未知未来版本拒绝打开。结果写入同目录的内容寻址对象存储并按 SHA-256 校验；冷备份要求停止调度器且所有任务终态，备份清单会校验数据库、作业目录和对象存储。结果对象按数据库引用和显式年龄阈值清理；维护命令默认只生成候选列表，必须显式确认删除，且存在未终态作业时拒绝执行。S3 清理需要对象前缀的 list 和 delete 权限，跨主机保留周期由部署环境管理。
+`studio` 配置定义数据库路径、对象存储、并发、排队、启动登记、心跳、总执行时限、认证主体、组织、角色和项目范围。`max_storage_bytes` 为本机工作目录配额，统计数据库父目录及本地 `artifact_root` 内不跟随符号链接的普通文件；提交前和成功结果写入后均检查，超额提交返回 HTTP 507，超额结果以 `storage_quota_exceeded` 失败。空值表示本机配额关闭，S3 远端容量和保留策略由对象存储配置管理。多个服务共享同一个数据库时须使用相同调度配置；SQLite 文件范围是本机文件系统，网络文件系统和多机调度需要独立验证。数据库 schema 版本为 7。v1 队列结构可在事务内迁移到 v7；v2 保存配置文件哈希，v3 保存作业主体和项目归属，v4 保存结果字节数，v5 保存 worker 及可见子进程的 CPU 时间与峰值常驻内存，v6 增加主体目录，v7 增加作业和审计记录的组织归属。主体目录只保存 API key 的 SHA-256 摘要，管理员通过 `/api/v1/identities` 管理同组织主体的范围、停用和密钥轮换；创建或轮换响应只返回一次明文 key。缺少原配置文件的历史作业保留未验证哈希，worker 会拒绝执行并要求显式重新提交。未知未来版本拒绝打开。结果写入同目录的内容寻址对象存储并按 SHA-256 校验；冷备份要求停止调度器且所有任务终态，备份清单会校验数据库、作业目录和对象存储。结果对象按数据库引用和显式年龄阈值清理；维护命令默认只生成候选列表，必须显式确认删除，且存在未终态作业时拒绝执行。S3 清理需要对象前缀的 list 和 delete 权限，跨主机保留周期由部署环境管理。
 
 Abaqus 适配器的 `solver.abaqus.license_queue_path` 可指向共享 SQLite 许可证队列。队列按启动器标识和
 容量登记租约，使用 WAL 事务防止同一资源超额领取，并通过心跳续租与过期回收处理进程异常退出。
@@ -152,6 +152,6 @@ Abaqus 适配器的 `solver.abaqus.license_queue_path` 可指向共享 SQLite �
 
 每个 Studio 作业使用数据库同目录下的 `jobs/<job_id>/`，其中 `runs/` 保存 SDK 运行、`result.json` 保存公开响应、`manifest.json` 保存清单。原始 `worker.log` 仅作本地故障诊断，不通过 API 公开，也不纳入清单；日志目录仍应按工程数据管理。队列保存请求、配置路径及其源文件哈希，不保存展开后的密钥。worker 执行前校验配置文件哈希，配置变化导致显式失败；`.env` 与进程环境在 worker 启动时解析，环境变更不在源文件哈希覆盖范围内。
 
-SDK 的运行清单包含 schema、Python/操作系统、包版本、脱敏有效配置、请求、公开摘要、产物相对路径、大小与 SHA-256。工具版本无法确定时明确为 `unknown`，不把包版本当作求解器二进制版本。异常、取消和中断保存已有产物；哈希不跟随目录外的符号链接。清单按临时文件、刷盘和原子替换写入，校验可发现清单列出的文件缺失与内容变化；该机制不是数字签名，不提供作者身份或物理正确性证明。数值复现依赖相同模型、工具和验收容差，不承诺文件逐字节一致。
+SDK 的运行清单包含 schema、Python/操作系统、包版本、脱敏有效配置、请求、公开摘要、产物相对路径、大小与 SHA-256。工具版本无法确定时明确为 `unknown`，包版本与求解器二进制版本分别记录。异常、取消和中断保存已有产物；哈希不跟随目录外的符号链接。清单按临时文件、刷盘和原子替换写入，校验可发现清单列出的文件缺失与内容变化；作者身份和物理正确性分别由签名与工程验收证据提供。数值复现依赖相同模型、工具和验收容差，文件内容可能存在逐字节差异。
 
-数据库和 `jobs/` 必须一起保留。冷备份要求所有任务终态并停止服务，完整复制数据库目录及其运行文件；不得在活动事务期间仅复制主 `.sqlite3` 文件而忽略 WAL。服务恢复提供状态与结果查询，不提供求解器内部断点续算或无声重算。
+数据库和 `jobs/` 必须一起保留。冷备份要求所有任务终态并停止服务，完整复制数据库目录及其运行文件；活动事务期间禁止只复制主 `.sqlite3` 文件而忽略 WAL。服务恢复提供状态与结果查询；求解器内部断点续算和自动重算由后续能力定义。

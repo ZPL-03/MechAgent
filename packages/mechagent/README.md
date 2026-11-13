@@ -1,6 +1,6 @@
 # mechagent
 
-`mechagent` 提供 SDK、CLI、Studio、LLM、知识库与多智能体编排。应用通过能力注册和 core 工具工厂完成工程请求到求解证据的链路，不绑定单一后端的内部表示。
+`mechagent` 提供 SDK、CLI、Studio、LLM、知识库与多智能体编排。应用通过能力注册和 core 工具工厂完成工程请求到求解证据的链路；工具内部表示由适配器隔离。
 
 ## 使用
 

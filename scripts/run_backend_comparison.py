@@ -1,4 +1,4 @@
-"""在同一个 SimulationCase 上运行 CalculiX/Abaqus 并生成双后端证据。"""
+"""在同一个 SimulationCase 上运行选定适配器并生成跨工具比较证据。"""
 
 from __future__ import annotations
 

@@ -59,8 +59,8 @@ Abaqus 的 `solver.abaqus.max_concurrent` 定义许可证槽位容量；未配�
 进程通过事务租约共同遵守容量，租约带心跳和过期回收；不同进程必须使用相同容量，配置漂移会拒绝
 执行。`solver.abaqus.license_lease_seconds` 控制异常进程租约的最长保留时间。
 `solver.abaqus.license_probe` 可配置只读命令片段，使用 `{launcher}` 引用启动器。探针返回非零
-状态时作业失败并保留诊断。共享队列只适用于同一可用文件系统，不等同于 Abaqus/FLEXnet 集群
-许可证服务或跨主机高可用调度。
+状态时作业失败并保留诊断。共享队列的适用范围是同一可用文件系统上的进程协调；Abaqus/FLEXnet 集群
+许可证服务和跨主机高可用调度需要独立部署。
 
 ## LLM
 
@@ -151,7 +151,7 @@ Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库
 python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 ```
 
-启动器路径由 `--abaqus` 指定。检查使用 Abaqus 自带 Python 运行几何、网格、求解与 ODB 提取；外层脚本使用项目 Python。平台适配器通过 `solver.default: abaqus` 和 `solver.abaqus.path` 配置，真实多步运行需另行保存 ODB 场量和双后端差异证据，范围见[工具说明](solver_mesh.md)。
+启动器路径由 `--abaqus` 指定。检查使用 Abaqus 自带 Python 运行几何、网格、求解与 ODB 提取；外层脚本使用项目 Python。平台适配器通过 `solver.default: abaqus` 和 `solver.abaqus.path` 配置，真实多步运行保存 ODB 场量和跨工具比较证据，范围见[工具说明](solver_mesh.md)。
 
 ## Studio 运行配置
 

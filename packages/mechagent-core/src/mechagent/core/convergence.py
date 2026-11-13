@@ -75,7 +75,7 @@ def evaluate_mesh_convergence(
 
     ``values`` 必须按从粗到细的顺序提供 ``(seed_size, value, nodes, elements)``。
     终点只有同时满足相邻两级变化阈值和参考误差阈值时才会判定为 ``passed``；
-    没有参考值时只能得到 ``unverified``，不能用稳定变化替代工程参考验收。
+    没有参考值时状态为 ``unverified``；稳定变化和工程参考验收分别记录。
     """
 
     if not math.isfinite(stabilization_tolerance) or stabilization_tolerance <= 0:

@@ -79,7 +79,7 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 旧兼容入口包含同一路径的 `/api/metrics`，其响应头声明弃用周期。
 
 作业、诊断、报告和主体目录类 `/api/v1` 接口保留同一路径结构的 `/api` 兼容入口。请求和响应字段、错误码、
-幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，组织和项目范围共同决定可见作业；配置主体和受管理主体的密钥均只以 SHA-256 摘要保存。受管理主体只属于一个组织，管理员只能管理本组织主体；组织为 `*` 的管理员可跨组织管理。该实现仍限于单个 SQLite 数据库，不提供外部身份提供商、集中审计或分布式配额。
+幂等语义与队列限制一致。启用 `studio.auth_required` 后，API 使用 `Authorization: Bearer <key>`，主体角色决定读取、提交、取消和重试权限，组织和项目范围共同决定可见作业；配置主体和受管理主体的密钥均只以 SHA-256 摘要保存。受管理主体只属于一个组织，管理员只能管理本组织主体；组织为 `*` 的管理员可跨组织管理。当前实现使用单个 SQLite 数据库；外部身份提供商、集中审计和分布式配额需要部署扩展。
 兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、
 `GET /api/examples`、`POST /api/inspect`、`POST /api/jobs`、`GET /api/jobs/{job_id}`、
 `GET /api/jobs`、`GET /api/audit`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
@@ -87,4 +87,4 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 
 `POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
 
-Studio 使用 SQLite WAL 本机持久队列，支持配置主体、受管理主体、角色、组织和项目范围，不提供分布式高可用或远程调度。默认仅监听回环地址；外网或多人部署需要独立的身份提供商、网络边界、集中审计和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。
+Studio 使用 SQLite WAL 本机持久队列，支持配置主体、受管理主体、角色、组织和项目范围；分布式高可用和远程调度需要部署扩展。默认仅监听回环地址；外网或多人部署需要独立的身份提供商、网络边界、集中审计和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。

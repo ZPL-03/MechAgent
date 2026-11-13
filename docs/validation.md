@@ -128,11 +128,11 @@ python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json -
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 下载或归档后独立校验清单中的所有文件摘要和签名身份
 python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
-# 两个后端结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields
+# 两侧结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --output dist/backend-comparison.json
 # 比较统一语义字段
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --field-source comparison_fields --output dist/backend-comparison-semantic.json
-# 在本机真实运行同一案例并保存输入摘要、两个后端结果和比较清单
+# 在本机真实运行同一案例并保存输入摘要、各工具结果和比较清单
 python scripts/run_backend_comparison.py --case-id TC-01 --case-id TC-03 --case-id TC-04 --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --abaqus D:/Abaqus2023/Commands/abaqus.bat --relative 0.03 --absolute 0.005 --output-dir mechagent_output/backend-comparison
 # 在同一 SimulationCase 上验证 Abaqus 多步执行、完整场量和逐步结果字段
 python scripts/run_abaqus_multistep.py --abaqus D:/Abaqus2023/Commands/abaqus.bat --output-dir mechagent_output/abaqus-multistep
@@ -152,11 +152,11 @@ python scripts/clean_artifacts.py
 `scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；签名、作者身份和可信构建服务证明由后续发布步骤提供。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；`scripts/verify_release.py` 可在独立环境重新校验所有 artifact 摘要和签名身份。发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
 `.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并用 `gh attestation verify` 校验每个发布 subject 的仓库、工作流、tag 和 OIDC issuer 身份，再由 cosign 对发布清单执行 keyless 签名和验证。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。该门禁只有 tag 工作流在目标仓库中成功运行后才形成外部验证证据。
 
-`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，否则以 `failed` 终止比较。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，不得用最终帧替代缺失分析步。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
+`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，其他情况标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，校验失败返回 `failed`。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，缺失分析步保持失败或未验证状态。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行选定工具并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
 
-本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段、统一单元质心字段和统一语义摘要均通过。当前权威清单为 `mechagent_output/backend-comparison-current/manifest.json`，状态为 `passed`。位移使用 `line-coordinate-centerline` 或 `node-coordinate` 对齐；统一单元质心字段包含 `stress_sxx`、`strain_exx` 和 `volume`，实体案例还包含 `strain_energy_density`，阈值为相对误差 10% 或绝对误差 0.005。统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力，阈值为相对误差 3% 或绝对误差 0.005。原始场比较仍因节点/积分点、截面展开和反力离散分布记录为 `unverified` 或 `failed`；该清单不证明逐积分点应力、逐节点反力或原始能量场等价，也不扩大到其他网格、单元族或物理域。
+本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段、统一单元质心字段和统一语义摘要均通过。当前权威清单为 `mechagent_output/backend-comparison-current/manifest.json`，状态为 `passed`。位移使用 `line-coordinate-centerline` 或 `node-coordinate` 对齐；统一单元质心字段包含 `stress_sxx`、`strain_exx` 和 `volume`，实体案例还包含 `strain_energy_density`，阈值为相对误差 10% 或绝对误差 0.005。统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力，阈值为相对误差 3% 或绝对误差 0.005。原始场比较因节点/积分点、截面展开和反力离散分布差异记录为 `unverified` 或 `failed`；逐积分点应力、逐节点反力、原始能量场、其他网格、单元族和物理域仍需独立验收。
 
-适配器测试覆盖许可证探针非零返回、进程内槽位等待超时、共享 SQLite 队列的跨进程容量限制、租约释放和容量漂移拒绝；这些是适配器和队列的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。共享队列只证明同一可用文件系统上的 Python 进程协调，不证明 FLEXnet 或集群许可证服务的容量状态。
+适配器测试覆盖许可证探针非零返回、进程内槽位等待超时、共享 SQLite 队列的跨进程容量限制、租约释放和容量漂移拒绝；这些记录适配器和队列的失败路径。Abaqus 实际许可证不可用时仍需保存本机审计记录。共享队列的验证范围是同一可用文件系统上的 Python 进程协调；FLEXnet 和集群许可证服务的容量状态需单独审计。
 
 `scripts/run_abaqus_multistep.py` 的本机验证清单为 `mechagent_output/abaqus-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 2 个 ODB 帧、101 个节点、400 个积分点应力和应变值、100 个单元体积值、400 个应变能密度值、101 个节点反力值、全局 `ALLIE` 能量值以及 4 个逐帧结果记录。两个步骤均保留 `ALLIE`、`ALLSE`、`ALLWK` 和 `ALLPD` 历史能量；`requested_fields` 与 `step_results` 均包含位移、应力分量、应变、体积和能量字段。该证据验证 Abaqus 适配器的本机多步执行与场提取路径，不扩大到非线性、接触或其他单元族。
 
@@ -165,8 +165,8 @@ Studio 备份必须在调度器停止且没有活动作业时创建；清单覆�
 真实 S3 验收使用 `scripts/check_s3_storage.py --bucket <bucket>`，可附加
 `--endpoint-url <url>`、`--require-lifecycle-id <id>` 和 `--output-dir <directory>`。
 脚本通过 boto3 标准凭据链创建随机探针对象，验证 SHA-256 metadata、下载、前缀列举和默认删除；
-指定 `--output-dir` 时保存 `probe.json` 与可校验的 `manifest.json`。通过该探针只表示指定桶当前权限
-和生命周期读取结果通过，不代表跨主机恢复、容量配额或灾备指标。
+指定 `--output-dir` 时保存 `probe.json` 与可校验的 `manifest.json`。该探针的证据范围是指定桶当前权限
+和生命周期读取结果；跨主机恢复、容量配额和灾备指标需单独验收。
 
 Studio 本机磁盘配额通过 `studio.max_storage_bytes` 配置。配额统计数据库父目录及本地 `artifact_root` 内的普通文件，提交前和成功结果写入后检查；超额提交返回 HTTP 507，超额结果记录 `storage_quota_exceeded`，不保留公开结果引用。`null` 表示不启用配额，S3 远端对象不计入本机目录用量。`tests/core/test_artifacts_backup.py` 覆盖提交前超额、结果写入后超额、外置本地对象目录和指标状态，`tests/core/test_studio.py` 覆盖 HTTP 507 映射。
 
@@ -195,7 +195,7 @@ python scripts/restore_studio.py `
 备份与恢复命令使用 boto3 标准凭据链，不在清单或日志写入凭据；目标桶权限和跨主机 RTO/RPO 仍须
 通过独立演练记录。
 
-灾难恢复演练使用独立的空 workspace，不覆盖既有备份或恢复目录。脚本记录源数据库和恢复数据库的完整性、作业数量、备份/恢复耗时、RPO 丢失作业数和总 RTO，并按显式目标判定退出码。RPO 基准是演练开始时可见的作业 ID；RTO 从演练开始计时到恢复数据库完成完整性检查。当前机器的实际 Studio 数据库演练证据为 `mechagent_output/studio-recovery-evidence/manifest.json`，源库含 1 个终态作业，恢复后作业 ID 丢失数为 0，RTO 约 0.089 秒，目标为 60 秒，清单状态为 `passed`。该证据只能证明指定机器、数据库、对象目录和目标阈值，不代表跨主机或 S3 部署已验收。
+灾难恢复演练使用独立的空 workspace，不覆盖既有备份或恢复目录。脚本记录源数据库和恢复数据库的完整性、作业数量、备份/恢复耗时、RPO 丢失作业数和总 RTO，并按显式目标判定退出码。RPO 基准是演练开始时可见的作业 ID；RTO 从演练开始计时到恢复数据库完成完整性检查。当前机器的实际 Studio 数据库演练证据为 `mechagent_output/studio-recovery-evidence/manifest.json`，源库含 1 个终态作业，恢复后作业 ID 丢失数为 0，RTO 约 0.089 秒，目标为 60 秒，清单状态为 `passed`。该证据范围是指定机器、数据库、对象目录和目标阈值；跨主机或 S3 部署需单独演练。
 
 ```powershell
 python scripts/drill_studio_recovery.py `
@@ -252,7 +252,7 @@ python -m pytest tests/core/test_runtime.py tests/core/test_studio.py
 python -m mechagent.cli verify-evidence path/to/run/manifest.json
 ```
 
-文件校验通过返回退出码 0，不匹配返回 1；校验不替代工程参考比较。Windows Job Object 进程树终止具有本机与 Windows CI 行为测试；其他操作系统的进程边界仍需独立验收。运行层不提供求解器内部断点续算。
+文件校验通过返回退出码 0，不匹配返回 1；工程参考比较单独执行。Windows Job Object 进程树终止具有本机与 Windows CI 行为测试；其他操作系统的进程边界仍需独立验收。运行层当前没有求解器内部断点续算接口。
 
 身份目录门禁使用组织管理员创建主体、验证项目和组织范围、轮换并停用 API key；数据库只保留
 SHA-256 摘要，创建和轮换响应中的明文 key 不会写入主体表。跨组织管理员可读取和管理全部组织，
@@ -262,7 +262,7 @@ SHA-256 摘要，创建和轮换响应中的明文 key 不会写入主体表。�
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Headers @{Authorization="Bearer <key>"}
 ```
 
-响应只包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数、本机工作目录字节数与配额、数据库文件系统容量以及 worker 和可见子进程的 CPU 时间与峰值常驻内存，不包含请求正文、凭据、文件路径或原始 worker 诊断。资源或文件系统字段可能为空，表示边界内没有可读取的采样，不代表零消耗；本机工作目录配额和文件系统指标不等同于 S3 容量或集中 telemetry。
+响应包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数、本机工作目录字节数与配额、数据库文件系统容量以及 worker 和可见子进程的 CPU 时间与峰值常驻内存；请求正文、凭据、文件路径和原始 worker 诊断位于响应字段之外。资源或文件系统字段为空时表示当前边界没有可读取的采样；本机工作目录配额和文件系统指标与 S3 容量、集中 telemetry 分别统计。
 
 独立 HTTP 验收使用 `scripts/studio_http_smoke.py`。脚本在临时输出目录生成只含 API key 摘要的配置，启动独立 Uvicorn 进程，并通过回环 TCP 请求验证缺少凭据、管理员认证、v1 响应头、主体创建、项目允许与拒绝、密钥轮换、旧密钥撤销、主体停用和审计读取。脚本只在进程结束后写入 `http-smoke.json` 和 `manifest.json`，不会输出明文 key；退出码为 0 且清单校验无错误才算通过：
 

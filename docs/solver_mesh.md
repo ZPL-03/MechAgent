@@ -39,8 +39,7 @@ MeshAgent 要求成功网格结果提供 `mesh_file`，并要求 `MeshResult.qua
 
 适配器检查 launcher、进程返回状态、ODB 文件、锁文件和 ODB 提取脚本结果。`SolverConfig` 或
 `solver.abaqus` 配置可提供本地并发槽位和只读许可证探针；探针失败或槽位等待超时会明确返回
-失败，不会降级为 CalculiX。Abaqus 许可证、版本和工作目录由本机安装负责；便携 CI 不依赖
-商业工具。`scripts/run_abaqus_smoke.py` 是独立工具基准，不能代替适配器真实多步运行证据。
+失败状态；该任务保持在 Abaqus 适配器路径。Abaqus 许可证、版本和工作目录由本机安装负责；便携 CI 不执行商业工具。`scripts/run_abaqus_smoke.py` 验证独立工具链，适配器真实多步运行证据由平台路径单独记录。
 `scripts/run_abaqus_multistep.py` 在同一 `SimulationCase` 上运行两个线性静力步，并在
 `manifest.json` 中验证步数、帧数、节点数、积分点场、能量场和逐步结果字段；该清单只有所有
 检查通过时才标记 `passed`。
@@ -98,6 +97,6 @@ A = b h
 
 `scripts/run_abaqus_smoke.py` 调用 `scripts/abaqus/linear_static_smoke.py.tmpl`，在唯一运行目录执行 Abaqus/CAE 建模、C3D8R 网格、Abaqus/Standard 静力与 ODB 提取。模型为 100 × 10 × 10 mm 实体，E=210000 MPa、nu=0.3、端面拉应力 1 MPa；约束消除刚体运动并允许泊松收缩。
 
-位移参考为 `pL/E=0.000476190476 mm`，应力参考为 1 MPa。检查要求体积 10000 mm³、正节点/单元数、求解器 `.sta` 明确成功、ODB 解锁且位移与应力相对误差均不大于 1%。CAE `job.status` 与求解器完成来源分别记录，不能只依据启动器退出码判定成功。
+位移参考为 `pL/E=0.000476190476 mm`，应力参考为 1 MPa。检查要求体积 10000 mm³、正节点/单元数、求解器 `.sta` 明确成功、ODB 解锁且位移与应力相对误差均不大于 1%。成功判定同时记录 CAE `job.status` 与求解器完成来源，并检查启动器退出码。
 
-结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是双后端工程验收。两个后端的案例结果均保留 `case_digest`、单位、坐标系、原始字段、逐步 `steps` 与逐帧场；比较器拒绝案例指纹不一致或缺失的结果。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`；真实对比还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和两个后端的运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一单元质心字段只表示明确的单元连接/坐标聚合，统一语义字段才能作为跨后端物理量门禁。Abaqus 适配器可通过 `solver.abaqus.license_queue_path` 使用共享 SQLite 租约队列，在同一可用文件系统上的多个 Python 进程之间限制许可证槽位；该队列不替代 FLEXnet 或集群许可证服务。商业工具的安装与许可由使用者维护。
+结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。该清单覆盖独立 Abaqus 工具链；平台适配器验收和跨工具工程比较分别记录。各适配器结果保留 `case_digest`、单位、坐标系、原始字段、逐步 `steps` 与逐帧场；比较器拒绝案例指纹不一致或缺失的结果。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`；跨工具比较还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和各工具运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一单元质心字段表示明确的单元连接/坐标聚合，统一语义字段用于跨工具物理量门禁。Abaqus 适配器可通过 `solver.abaqus.license_queue_path` 使用共享 SQLite 租约队列，在同一可用文件系统上的多个 Python 进程之间限制许可证槽位；该队列与 FLEXnet 或集群许可证服务分别管理。商业工具的安装与许可由使用者维护。

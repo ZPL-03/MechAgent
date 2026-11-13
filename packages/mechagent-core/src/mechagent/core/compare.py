@@ -19,7 +19,7 @@ class ComparisonTolerance(BaseModel):
 
 
 class BackendComparison(BaseModel):
-    """双后端比较结果。"""
+    """两个适配器结果的差异比较。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -352,12 +352,11 @@ def _pairs_cover_fields(
 def derive_comparison_fields(
     result: dict[str, Any], *, elastic_modulus: float, poisson_ratio: float
 ) -> dict[str, dict[str, Any]]:
-    """从两个后端均可得到的原始场生成统一语义比较字段。
+    """从两个适配器均可得到的原始场生成统一语义比较字段。
 
     返回的应力字段为全场绝对最大分量，能量字段按各向同性线弹性本构从
     应力重建应变能密度摘要，反力字段为最大跨度方向根部区域的合力。每个
-    字段都保留来源和推导说明；缺少必要原始场时不生成字段，由比较器报告
-    ``unverified``。
+    字段都保留来源和推导说明；缺少必要原始场时，比较器报告 ``unverified``，字段列表保持为空。
     """
 
     if not math.isfinite(elastic_modulus) or elastic_modulus <= 0.0:
@@ -756,7 +755,7 @@ def _compare_summaries(
 ) -> tuple[list[str], list[dict[str, Any]], float, float] | None:
     if not isinstance(left, dict) or not isinstance(right, dict):
         return None
-    # 网格不同会改变节点数量和极值位置；跨后端只比较可解释的场量幅值与均值。
+    # 网格不同会改变节点数量和极值位置；跨工具只比较可解释的场量幅值与均值。
     keys = sorted((set(left) & set(right)) & {"max_abs", "mean"})
     if not keys:
         return None

@@ -21,7 +21,7 @@
     {"path":"restore_studio.py","category":"operations","mutates_external_state":true,"real_solver":false,"description":"校验备份并恢复 Studio 数据。"},
     {"path":"run_abaqus_multistep.py","category":"solver","mutates_external_state":true,"real_solver":true,"description":"运行 Abaqus 多步适配器案例并提取 ODB 字段。"},
     {"path":"run_abaqus_smoke.py","category":"solver","mutates_external_state":true,"real_solver":true,"description":"运行独立 Abaqus 工具 smoke 案例。"},
-    {"path":"run_backend_comparison.py","category":"compare","mutates_external_state":true,"real_solver":true,"description":"运行两个后端并生成结果比较清单。"},
+    {"path":"run_backend_comparison.py","category":"compare","mutates_external_state":true,"real_solver":true,"description":"运行选定适配器并生成跨工具结果比较清单。"},
     {"path":"run_benchmarks.py","category":"validation","mutates_external_state":true,"real_solver":true,"description":"运行标准验证案例和参考公式检查。"},
     {"path":"run_cad_topology_case.py","category":"cad","mutates_external_state":true,"real_solver":true,"description":"验证 CAD 拓扑、区域、网格和求解链路。"},
     {"path":"run_llm_smoke.py","category":"validation","mutates_external_state":true,"real_solver":true,"description":"验证 LLM 结构化 trace 与真实案例链路。"},
