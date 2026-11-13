@@ -144,6 +144,11 @@ def test_s3_artifact_store_rejects_tampered_upload(tmp_path: Path) -> None:
         ) -> None:
             self.objects[(bucket, key)] = (b"tampered", dict(ExtraArgs["Metadata"]))
 
+        def upload_fileobj(
+            self, _stream: Any, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (b"tampered", dict(ExtraArgs["Metadata"]))
+
         def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
             try:
                 content, metadata = self.objects[(Bucket, Key)]
@@ -163,6 +168,8 @@ def test_s3_artifact_store_rejects_tampered_upload(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="内容校验失败"):
         store.put_file(source)
+    with pytest.raises(ValueError, match="内容校验失败"):
+        store.put_bytes(b"expected-bytes")
 
 
 def test_s3_probe_writes_verifiable_evidence_without_retaining_object(tmp_path: Path) -> None:
