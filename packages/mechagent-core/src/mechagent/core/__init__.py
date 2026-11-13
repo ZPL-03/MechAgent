@@ -98,6 +98,7 @@ from mechagent.core.solver import (
     SolverResult,
     collect_solver_artifacts,
     enrich_solver_result,
+    solver_result_provenance,
 )
 
 __all__ = [
@@ -159,6 +160,7 @@ __all__ = [
     "SolverResult",
     "collect_solver_artifacts",
     "enrich_solver_result",
+    "solver_result_provenance",
     "create_cad_kernel",
     "create_executor",
     "create_mesher",

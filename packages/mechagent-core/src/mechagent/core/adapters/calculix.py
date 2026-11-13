@@ -37,6 +37,7 @@ from mechagent.core.solver import (
     SolverConfig,
     SolverResult,
     enrich_solver_result,
+    solver_result_provenance,
 )
 
 _FRD_FLOAT_PATTERN = re.compile(r"[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[Ee][+-]\d{2,3})?")
@@ -268,8 +269,7 @@ class CalculiXAdapter(AbstractSolver):
         result_payload = {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
-            "input_sha256": result.input_sha256,
-            "artifacts": [item.model_dump(mode="json") for item in result.artifacts],
+            **solver_result_provenance(result),
             **parsed,
             **result.summary,
         }

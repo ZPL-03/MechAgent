@@ -35,6 +35,7 @@ from mechagent.core.solver import (
     SolverConfig,
     SolverResult,
     enrich_solver_result,
+    solver_result_provenance,
 )
 
 from .calculix import _beam_static_inp, _plate_static_inp, _solid_static_inp
@@ -247,8 +248,7 @@ class AbaqusAdapter(AbstractSolver):
         extracted: dict[str, Any] = {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
-            "input_sha256": result.input_sha256,
-            "artifacts": [item.model_dump(mode="json") for item in result.artifacts],
+            **solver_result_provenance(result),
             "fields": final_fields,
             "field_history": history,
             "steps": steps,

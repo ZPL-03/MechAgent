@@ -140,6 +140,15 @@ def enrich_solver_result(result: SolverResult, input_file: Path) -> SolverResult
     )
 
 
+def solver_result_provenance(result: SolverResult) -> dict[str, Any]:
+    """将求解结果的输入摘要和产物记录转换为公开结果字段。"""
+
+    return {
+        "input_sha256": result.input_sha256,
+        "artifacts": [item.model_dump(mode="json") for item in result.artifacts],
+    }
+
+
 class SolverResult(BaseModel):
     """求解器执行结果。
 
@@ -292,6 +301,8 @@ class AbstractSolver(ABC):
         if not result.success:
             raise SolverError(result.error_message or "求解器返回失败状态。")
         extracted = self.extract_results(result)
+        for key, value in solver_result_provenance(result).items():
+            extracted.setdefault(key, value)
         extracted.setdefault("wall_time_s", time.perf_counter() - start)
         return extracted
 
