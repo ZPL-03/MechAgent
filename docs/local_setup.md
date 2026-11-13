@@ -143,8 +143,6 @@ Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库
 
 `scripts/clean_artifacts.py --dry-run` 先列出待删除路径，不修改文件系统；确认后不带参数执行以删除缓存、构建产物和一次性工具文件。`--include-studio-runtime` 仅删除本地 `mechagent_output/.studio` 运行时目录；`--include-runs` 才会删除正式运行证据和 FEM 临时文件。执行前将需保留的运行证据和发布包存放到仓库外；`.env`、配置、公开知识源和正式源代码不属于再生成产物。可能属于正式证据的日志、ODB、输入和 FEM 输出不会按扩展名自动删除。
 
-清理目标被 Windows 其他进程占用时，脚本以失败退出并报告精确路径、已删除目标数量和可执行的 `Remove-Item -LiteralPath ... -Force` 命令。关闭占用该路径的 Python、Node、编辑器或求解器进程后重新运行 `python scripts/clean_artifacts.py`；需要手动处理时只执行脚本输出的精确命令，不扩大到其父目录。
-
 ## Abaqus 本机检查
 
 安装 Abaqus/CAE 与 Standard 并具备可用许可后执行独立基准：

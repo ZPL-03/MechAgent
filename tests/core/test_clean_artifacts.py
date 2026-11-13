@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -209,25 +208,6 @@ def test_cleanup_preserves_tracked_files(tmp_path: Path, monkeypatch: MonkeyPatc
     monkeypatch.setattr(clean_artifacts, "_tracked_paths", lambda: {formal})
     assert clean_artifacts.main(["--include-runs"]) == 0
     assert formal.exists()
-
-
-def test_cleanup_reports_locked_target_with_manual_command(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
-    monkeypatch.setattr(clean_artifacts, "REPO_ROOT", tmp_path)
-    target = tmp_path / "build"
-    target.mkdir()
-    monkeypatch.setattr(
-        shutil,
-        "rmtree",
-        lambda _path: (_ for _ in ()).throw(PermissionError("locked")),
-    )
-
-    with pytest.raises(RuntimeError, match="清理目标被其他进程占用") as error:
-        clean_artifacts.main([])
-
-    assert str(target) in str(error.value)
-    assert "Remove-Item -LiteralPath" in str(error.value)
 
 
 def test_cleanup_rejects_locked_runs_before_deleting(
