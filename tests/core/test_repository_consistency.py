@@ -153,6 +153,7 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "python scripts/clean_artifacts.py",
     ]
     assert all(command in workflow for command in commands)
+    assert "permissions:\n  contents: read" in workflow
     assert "sigstore/cosign-installer" in release_workflow
     assert "id-token: write" in release_workflow
     assert "--certificate-identity" in release_workflow
@@ -178,6 +179,14 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "config validate --llm",
     ):
         assert forbidden not in workflow
+
+
+def test_ci_actions_are_pinned_to_commit_shas() -> None:
+    for relative in (".github/workflows/pr.yml", ".github/workflows/release.yml"):
+        text = read(relative)
+        references = re.findall(r"^\s*uses:\s+[^@\s]+@([^\s#]+)", text, flags=re.MULTILINE)
+        assert references, relative
+        assert all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references), relative
 
 
 def test_validation_guide_is_the_quality_command_reference() -> None:
