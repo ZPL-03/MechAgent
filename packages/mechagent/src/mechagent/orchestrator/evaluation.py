@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mechagent.core.compare import ComparisonTolerance, evaluate_reaction_balance
 from mechagent.core.models import GeometryType, LoadType, ModelParams
 from mechagent.core.validation import (
     axial_bar_end_displacement,
@@ -60,14 +61,20 @@ def evaluate_structural_static_result(context: ResultEvaluationContext) -> dict[
 
     model_params = context.model_params
     if model_params.geometry.type is GeometryType.BEAM:
-        return _evaluate_static_beam_case(context)
-    if model_params.geometry.type is GeometryType.PLATE:
-        return _evaluate_static_plate_case(context)
-    if model_params.geometry.type is GeometryType.SOLID:
-        return _evaluate_static_solid_case(context)
-
-    msg = f"结构静力结果评价不支持几何类型: {model_params.geometry.type.value}。"
-    raise ValueError(msg)
+        evaluated = _evaluate_static_beam_case(context)
+    elif model_params.geometry.type is GeometryType.PLATE:
+        evaluated = _evaluate_static_plate_case(context)
+    elif model_params.geometry.type is GeometryType.SOLID:
+        evaluated = _evaluate_static_solid_case(context)
+    else:
+        msg = f"结构静力结果评价不支持几何类型: {model_params.geometry.type.value}。"
+        raise ValueError(msg)
+    evaluated["equilibrium"] = evaluate_reaction_balance(
+        context.solver_result,
+        model_params,
+        tolerance=ComparisonTolerance(relative=0.01, absolute=0.005),
+    ).model_dump(mode="json")
+    return evaluated
 
 
 def _evaluate_static_beam_case(context: ResultEvaluationContext) -> dict[str, Any]:

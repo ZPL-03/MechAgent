@@ -99,6 +99,23 @@ export interface AgentTrace {
   response_chars: number;
 }
 
+export interface EquilibriumReport {
+  status: "passed" | "failed" | "unverified";
+  load_types?: string[];
+  applied_resultant?: [number, number, number] | null;
+  reaction_resultant?: [number, number, number] | null;
+  residual?: [number, number, number] | null;
+  max_absolute_error?: number;
+  max_relative_error?: number;
+  tolerance?: {
+    relative: number;
+    absolute: number;
+    coordinate?: number;
+  };
+  source?: string;
+  reason?: string | null;
+}
+
 export interface SolverResult {
   success?: boolean;
   model_case_id?: string;
@@ -110,6 +127,7 @@ export interface SolverResult {
   tolerance?: number | null;
   passed?: boolean;
   verification_status?: string;
+  equilibrium?: EquilibriumReport | null;
   solver?: string;
   solver_llm_trace?: AgentTrace | null;
   output_files?: string[];

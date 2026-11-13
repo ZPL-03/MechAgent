@@ -101,6 +101,28 @@ def test_solver_evaluation_marks_unreferenced_result_as_unverified() -> None:
     assert result["passed"] is False
     assert result["verification_status"] == "unverified"
     assert "reference" not in result
+    assert result["equilibrium"]["status"] == "unverified"
+
+
+def test_solver_evaluation_records_reaction_balance() -> None:
+    params = tc01_model_params()
+    result = evaluate_structural_static_result(
+        ResultEvaluationContext(
+            model_params=params,
+            solver_result={
+                "success": True,
+                "tip_deflection_mm": _tc01_tip_reference(params),
+                "nodes": {"1": [0.0, 0.0, 0.0], "2": [1000.0, 0.0, 0.0]},
+                "fields": {"reaction_force": {"values": {"1": [0.0, 1000.0, 0.0]}}},
+            },
+            solver_name="calculix",
+            task_case_id="TC-01",
+            task_title="悬臂梁端部集中力",
+        )
+    )
+
+    assert result["equilibrium"]["status"] == "passed"
+    assert result["equilibrium"]["applied_resultant"] == [0.0, -1000.0, 0.0]
 
 
 def test_solver_evaluation_marks_failed_reference_result_as_failed() -> None:

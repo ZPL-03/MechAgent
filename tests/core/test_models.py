@@ -345,6 +345,27 @@ def test_solver_run_summary_keeps_structured_and_extended_fields() -> None:
     assert summary.to_mapping()["solver_llm_trace"]["agent"] == "SolverAgent"
 
 
+def test_solver_run_summary_normalizes_equilibrium_after_solver_failure() -> None:
+    summary = SolverRunSummary.from_mapping(
+        {
+            "success": False,
+            "equilibrium": {
+                "status": "passed",
+                "applied_resultant": [0.0, -100.0, 0.0],
+                "reaction_resultant": [0.0, 100.0, 0.0],
+                "residual": [0.0, 0.0, 0.0],
+                "tolerance": {"relative": 0.01, "absolute": 0.005},
+            },
+        }
+    )
+
+    assert summary.verification_status == "failed"
+    assert summary.equilibrium is not None
+    assert summary.equilibrium.status == "failed"
+    assert summary.equilibrium.reason == "求解结果失败，不能进行反力平衡校核。"
+    assert summary.to_mapping()["equilibrium"]["status"] == "failed"
+
+
 def test_solver_run_summary_infers_predicted_from_quantity_field() -> None:
     summary = SolverRunSummary.from_mapping(
         {

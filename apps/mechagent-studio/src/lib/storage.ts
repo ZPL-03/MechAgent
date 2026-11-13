@@ -150,6 +150,19 @@ function compactHistoryTask(task: TaskSummary): TaskSummary {
           tolerance: task.solver_result.tolerance,
           passed: task.solver_result.passed,
           verification_status: task.solver_result.verification_status,
+          equilibrium: task.solver_result.equilibrium
+            ? {
+                status: task.solver_result.equilibrium.status,
+                load_types: task.solver_result.equilibrium.load_types?.slice(0, 8),
+                applied_resultant: task.solver_result.equilibrium.applied_resultant,
+                reaction_resultant: task.solver_result.equilibrium.reaction_resultant,
+                residual: task.solver_result.equilibrium.residual,
+                max_absolute_error: task.solver_result.equilibrium.max_absolute_error,
+                max_relative_error: task.solver_result.equilibrium.max_relative_error,
+                tolerance: task.solver_result.equilibrium.tolerance,
+                reason: task.solver_result.equilibrium.reason ?? null
+              }
+            : null,
           solver: task.solver_result.solver,
           output_files: task.solver_result.output_files?.slice(0, 16),
           mesh_file: task.solver_result.mesh_file ?? null,

@@ -328,6 +328,10 @@ def _engineering_interpretation_items(record: TaskRunRecord) -> list[str]:
     if scalar_text:
         items.append(scalar_text)
 
+    equilibrium_text = _equilibrium_interpretation(result)
+    if equilibrium_text:
+        items.append(equilibrium_text)
+
     items.append(
         "复核建议：围绕主结果、孔边或约束附近梯度区域进行网格收敛检查，并结合工程允许值或独立参考解确认安全裕度。"
     )
@@ -406,6 +410,23 @@ def _scalar_interpretation(record: TaskRunRecord) -> str:
     selected = list(scalars.items())[:5]
     scalar_text = "，".join(f"{name}={_format_optional_number(value)}" for name, value in selected)
     return f"后处理摘要：主要标量包括 {scalar_text}，用于辅助判断位移、应力或网格质量分布。"
+
+
+def _equilibrium_interpretation(result: SolverRunSummary) -> str:
+    report = result.equilibrium
+    if report is None:
+        return ""
+    if report.status == "passed":
+        return (
+            "反力平衡：外加载荷合力与支撑反力残差最大值为 "
+            f"{_format_optional_number(report.max_absolute_error)}，相对误差为 "
+            f"{_format_optional_percent(report.max_relative_error, precision=4)}，满足阈值。"
+        )
+    if report.status == "failed":
+        reason = report.reason or "残差超过阈值。"
+        return f"反力平衡：未通过，{redact_sensitive_text(reason)}"
+    reason = report.reason or "缺少可计算的外载或支撑反力证据。"
+    return f"反力平衡：未验证，{redact_sensitive_text(reason)}"
 
 
 def _enum_value(value: Any) -> str:

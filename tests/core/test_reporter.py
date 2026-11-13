@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from mechagent.config import LLMSettings, MechAgentConfig, OrchestratorSettings
+from mechagent.core import ComparisonTolerance, EquilibriumReport
 from mechagent.core.mesher import MeshResult
 from mechagent.core.models import ModelParams
 from mechagent.orchestrator.agents import ReporterAgent
@@ -111,6 +112,30 @@ def test_reporter_local_engineering_interpretation_is_structured() -> None:
     assert "网格与求解：网格生成状态为 成功" in report
     assert "后处理摘要：主要标量包括 max_mises_mpa=3.415" in report
     assert "复核建议：围绕主结果" in report
+
+
+def test_reporter_includes_reaction_balance_status() -> None:
+    record = TaskRunRecord(
+        task=TaskItem(task_id="TASK_1", case_id="TC-01", title="悬臂梁"),
+        solver_result=SolverRunSummary(
+            success=True,
+            model_case_id="TC-01",
+            quantity="tip_deflection",
+            unit="mm",
+            predicted=1.0,
+            equilibrium=EquilibriumReport(
+                status="passed",
+                applied_resultant=(0.0, -1000.0, 0.0),
+                reaction_resultant=(0.0, 1000.0, 0.0),
+                residual=(0.0, 0.0, 0.0),
+                tolerance=ComparisonTolerance(relative=0.01, absolute=0.005),
+            ),
+        ),
+    )
+
+    report = ReporterAgent().render([record])
+
+    assert "反力平衡：外加载荷合力与支撑反力残差最大值为 0" in report
 
 
 def test_reporter_uses_quantity_field_when_predicted_is_not_explicit() -> None:

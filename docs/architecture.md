@@ -123,6 +123,7 @@ Designer 生成 `ModelParams` 后调用 `mechagent.core.rules.ensure_parameter_r
 - `success`：求解器进程和结果提取是否成功。
 - `passed`：存在参考值和阈值时，工程校核是否通过。
 - `verification_status`：`passed`、`failed` 或 `unverified`。缺少参考值或阈值的工况标记为 `unverified`，报告展示为「未验证」，工程验收状态单独判断。
+- `equilibrium`：结构静力结果的外加载荷合力与支撑反力合力校核，状态独立使用 `passed`、`failed` 或 `unverified`。该字段只在当前载荷契约、区域面积和反力场能够确定时计算；缺少这些证据时保持 `unverified`。
 - 显式 `success=false`、`success=failed` 或等价失败值的求解器结果不能通过工程验收；即使主结果与参考值完全一致，也标记为 `failed`。
 - `SolverRunSummary.from_mapping()` 对第三方能力插件返回的矛盾状态执行失败优先归一化；`success` 为失败时，`passed` 固定为 `false`，`verification_status` 固定为 `failed`。
 - `predicted`：主结果计算值。能力评价器未显式提供 `predicted`，但提供了与 `quantity` 同名的数值字段时，工作流将该字段作为主结果值。

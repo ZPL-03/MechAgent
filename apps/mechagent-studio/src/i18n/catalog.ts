@@ -224,6 +224,8 @@ export const english: Record<string, string> = {
   通过质量门禁: "Quality checks passed",
   求解结果待生成: "Awaiting solver result",
   求解器: "Solver",
+  反力平衡: "Reaction balance",
+  反力残差: "Reaction residual",
   结果: "Results",
   文件: "Files",
   "{0} 个": "{0} files",

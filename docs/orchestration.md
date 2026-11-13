@@ -34,7 +34,7 @@ TaskItem(intent=SimulationIntent)
   -> analysis_text
 ```
 
-LangGraph 工作流使用 `MechAgentState` 作为共享 `TypedDict`。每个节点返回状态增量，LangGraph 合并后传给下一节点。任务、模型、网格、求解和后处理结果在图状态中保持 Pydantic 对象；SDK 摘要、报告和命令行 JSON 输出在边界处通过 `model_dump(mode="json")` 导出。SDK 摘要的每个任务包含 `case_id`、`capability_id`、`analysis_type`、`intent`、`model_params`、`mesh_result`、`solver_result`、`post_summary`、任务级 Agent trace 和错误记录；顶层摘要包含 `reporter_llm_trace`。
+LangGraph 工作流使用 `MechAgentState` 作为共享 `TypedDict`。每个节点返回状态增量，LangGraph 合并后传给下一节点。任务、模型、网格、求解和后处理结果在图状态中保持 Pydantic 对象；SDK 摘要、报告和命令行 JSON 输出在边界处通过 `model_dump(mode="json")` 导出。SDK 摘要的每个任务包含 `case_id`、`capability_id`、`analysis_type`、`intent`、`model_params`、`mesh_result`、`solver_result`、`post_summary`、任务级 Agent trace 和错误记录。结构静力求解摘要中的 `equilibrium` 保留外加载荷合力、支撑反力合力、残差、阈值和状态，并由 `PostProcessingSummary` 继续传递；顶层摘要包含 `reporter_llm_trace`。
 
 | Agent | 输入 | 输出 |
 | --- | --- | --- |

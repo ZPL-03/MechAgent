@@ -125,7 +125,7 @@ export function verificationItems(task: TaskSummary | null): DisplayItem[] {
   if (!solver) {
     return [];
   }
-  return [
+  const items: DisplayItem[] = [
     { label: "算例", value: solver.model_case_id || task?.case_id || "N/A" },
     {
       label: "参考值",
@@ -143,6 +143,31 @@ export function verificationItems(task: TaskSummary | null): DisplayItem[] {
     },
     { label: "求解器", value: solver.solver || "N/A" }
   ];
+  const equilibrium = solver.equilibrium;
+  if (equilibrium) {
+    items.push({ label: "反力平衡", value: equilibriumStatusLabel(equilibrium.status) });
+    if (
+      equilibrium.residual &&
+      typeof equilibrium.max_absolute_error === "number" &&
+      Number.isFinite(equilibrium.max_absolute_error)
+    ) {
+      items.push({
+        label: "反力残差",
+        value: `${formatNumber(equilibrium.max_absolute_error ?? Number.NaN)} N`
+      });
+    }
+  }
+  return items;
+}
+
+function equilibriumStatusLabel(status: "passed" | "failed" | "unverified") {
+  if (status === "passed") {
+    return "通过";
+  }
+  if (status === "failed") {
+    return "未通过";
+  }
+  return "未验证";
 }
 
 export function taskModelLabel(task: TaskSummary) {

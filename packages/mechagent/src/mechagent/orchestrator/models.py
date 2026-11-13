@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mechagent.core.compare import EquilibriumReport
 from mechagent.core.mesher import MeshResult
 from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.orchestrator.intent import SimulationIntent
@@ -142,6 +143,7 @@ class SolverRunSummary(BaseModel):
         tolerance: 验收阈值。
         passed: 工程校核是否通过。
         verification_status: 结果校核状态。
+        equilibrium: 外加载荷与支撑反力的合力平衡校核。
         solver: 求解器编号。
         task_title: 任务标题。
         output_files: 求解器输出文件。
@@ -173,6 +175,7 @@ class SolverRunSummary(BaseModel):
     tolerance: Optional[float] = None
     passed: bool = False
     verification_status: VerificationStatus = "unverified"
+    equilibrium: EquilibriumReport | None = None
     solver: str = ""
     task_title: str = ""
     output_files: list[Path] = Field(default_factory=list)
@@ -215,9 +218,24 @@ class SolverRunSummary(BaseModel):
         success = _bool_value(data.get("success"), default=False)
         passed = _bool_value(data.get("passed"), default=False)
         verification_status = _verification_status(data)
+        raw_equilibrium = data.get("equilibrium")
+        equilibrium = (
+            raw_equilibrium
+            if isinstance(raw_equilibrium, EquilibriumReport)
+            else EquilibriumReport.model_validate(raw_equilibrium)
+            if isinstance(raw_equilibrium, dict)
+            else None
+        )
         if not success:
             passed = False
             verification_status = "failed"
+            if equilibrium is not None and equilibrium.status == "passed":
+                equilibrium = equilibrium.model_copy(
+                    update={
+                        "status": "failed",
+                        "reason": "求解结果失败，不能进行反力平衡校核。",
+                    }
+                )
         return cls(
             success=success,
             model_case_id=str(data.get("model_case_id", "")),
@@ -229,6 +247,7 @@ class SolverRunSummary(BaseModel):
             tolerance=_optional_float(data.get("tolerance")),
             passed=passed,
             verification_status=verification_status,
+            equilibrium=equilibrium,
             solver=str(data.get("solver", "")),
             task_title=str(data.get("task_title", "")),
             output_files=[Path(item) for item in output_files],
@@ -306,6 +325,7 @@ class PostProcessingSummary(BaseModel):
         tolerance: 验收阈值。
         passed: 工程校核是否通过。
         verification_status: 结果校核状态。
+        equilibrium: 外加载荷与支撑反力的合力平衡校核。
         solver: 求解器编号。
         postproc_llm_trace: PostProcAgent LLM 审计记录。
         analyst_llm_trace: AnalystAgent LLM 审计记录。
@@ -334,6 +354,7 @@ class PostProcessingSummary(BaseModel):
     tolerance: Optional[float] = None
     passed: bool = False
     verification_status: VerificationStatus = "unverified"
+    equilibrium: EquilibriumReport | None = None
     solver: str = ""
     postproc_llm_trace: Optional[AgentLLMTrace] = None
     analyst_llm_trace: Optional[AgentLLMTrace] = None
@@ -377,6 +398,7 @@ class PostProcessingSummary(BaseModel):
             tolerance=solver_result.tolerance,
             passed=solver_result.passed,
             verification_status=solver_result.verification_status,
+            equilibrium=solver_result.equilibrium,
             solver=solver_result.solver,
             postproc_llm_trace=postproc_llm_trace,
             scalars=_merged_scalars(solver_result, scalars),
