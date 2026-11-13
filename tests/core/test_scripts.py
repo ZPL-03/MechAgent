@@ -124,6 +124,46 @@ def test_sign_release_requires_complete_keyless_identity(tmp_path: Path) -> None
         )
 
 
+def test_sign_release_validates_artifact_integrity_before_signing(tmp_path: Path) -> None:
+    artifact = tmp_path / "packages" / "mechagent" / "dist" / "package.whl"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"package")
+    manifest = tmp_path / "dist" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "mechagent.release-manifest.v1",
+                "version": "1.2.3",
+                "provenance": {"source": {"gitDirty": False}},
+                "artifacts": [
+                    {
+                        "path": "packages/mechagent/dist/package.whl",
+                        "size": artifact.stat().st_size,
+                        "sha256": verify_release._sha256(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact.write_bytes(b"tampered")
+
+    with pytest.raises(ValueError, match="摘要不匹配"):
+        sign_release.main(
+            [
+                "--manifest",
+                str(manifest),
+                "--root",
+                str(tmp_path),
+                "--bundle",
+                str(tmp_path / "bundle.json"),
+                "--certificate-identity",
+                "https://github.com/example/repo/.github/workflows/release.yml@refs/tags/v1.2.3",
+            ]
+        )
+
+
 def test_verify_release_checks_artifact_digest_and_rejects_tampering(tmp_path: Path) -> None:
     artifact = tmp_path / "package.whl"
     artifact.write_bytes(b"package")

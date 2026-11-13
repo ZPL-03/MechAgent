@@ -157,6 +157,7 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
     assert "sigstore/cosign-installer" in release_workflow
     assert "id-token: write" in release_workflow
     assert "--certificate-identity" in release_workflow
+    assert "--root ." in release_workflow
     assert "scripts/verify_release.py" in release_workflow
     assert "gh attestation verify" in release_workflow
     assert "--signer-workflow" in release_workflow

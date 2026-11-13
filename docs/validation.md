@@ -124,9 +124,9 @@ python -m build packages/mechagent
 python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
 python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
 # 只有发布环境已配置 cosign 和签名密钥时执行；命令会立即验证签名
-python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key
+python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key
 # GitHub OIDC keyless 模式
-python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
+python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 下载或归档后独立校验清单中的所有文件摘要和签名身份
 python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 两侧结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields

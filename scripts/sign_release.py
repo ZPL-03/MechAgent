@@ -7,7 +7,14 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.verify_release import load_manifest  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--certificate-identity")
     parser.add_argument("--certificate-oidc-issuer")
     parser.add_argument("--cosign", default="cosign")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        help="清单 artifact 路径的构建根目录；默认使用清单所在目录。",
+    )
     args = parser.parse_args(argv)
     if not args.manifest.is_file():
         raise FileNotFoundError(args.manifest)
@@ -30,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("密钥模式必须提供 --signature。")
     if args.key is None and (not args.bundle or not args.certificate_identity):
         raise ValueError("keyless 模式必须同时提供 --certificate-identity 和 --bundle。")
-    document = json.loads(args.manifest.read_text(encoding="utf-8"))
+    document = load_manifest(args.manifest, root=args.root)
     provenance = document.get("provenance", {}).get("source", {})
     if provenance.get("gitDirty") is not False:
         raise ValueError("发布清单要求干净且可识别的 Git 源状态。")
