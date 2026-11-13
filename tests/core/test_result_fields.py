@@ -160,6 +160,22 @@ def test_required_result_field_missing_is_a_solver_failure() -> None:
         )
 
 
+def test_required_result_field_with_empty_values_is_a_solver_failure() -> None:
+    with pytest.raises(SolverError, match="stress 场没有任何值"):
+        attach_case_result_fields(
+            {
+                "fields": {
+                    "displacement": {
+                        "location": "node",
+                        "values": {"1": [1, 0, 0]},
+                    },
+                    "stress": {"location": "node", "values": {}},
+                }
+            },
+            _case(),
+        )
+
+
 def test_result_field_rejects_backend_location_mismatch() -> None:
     with pytest.raises(SolverError, match="请求位置 node"):
         attach_case_result_fields(

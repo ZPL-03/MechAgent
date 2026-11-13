@@ -539,6 +539,10 @@ def _select_fields(
                 )
             continue
         values = raw["values"]
+        if not values:
+            if required and spec.required:
+                raise SolverError(f"结果字段 {spec.name} 的 {key} 场没有任何值。")
+            continue
         selected[spec.name] = {
             "quantity": spec.quantity,
             "location": raw.get("location", spec.location),

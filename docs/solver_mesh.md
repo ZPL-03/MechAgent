@@ -35,7 +35,7 @@ MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元�
 
 ## Abaqus/Standard 适配器
 
-`AbaqusAdapter` 已通过 `core.factory` 注册名 `abaqus`。适配器覆盖当前梁、矩形板和矩形实体结构静力输入模板，使用 Abaqus 原生 `*OUTPUT`、`*NODE OUTPUT`、`*ELEMENT OUTPUT` 和历史能量输出请求结果场；`run_case()` 支持线性静力多步，调用 `abaqus python` 读取 ODB 的所有输出帧，并将 `U`、`S`、`E`、`EVOL`、`SENER`、`RF` 和 `ENER` 归一到统一结果字段名称。积分点字段使用元素标签、积分点和截面点组成稳定键，避免不同积分点互相覆盖；节点坐标、单元连接、单元质心、逐帧场量和 `ALLIE/ALLSE/ALLWK/ALLPD` 历史能量同时保留。结果字段选择器随后按 `ResultFieldSpec` 计算分量、位移幅值和应力不变量；统一结果层根据单元连接和坐标生成 `mapped_fields`，缺失必需场量会使执行失败。
+`AbaqusAdapter` 已通过 `core.factory` 注册名 `abaqus`。适配器覆盖当前梁、矩形板和矩形实体结构静力输入模板，使用 Abaqus 原生 `*OUTPUT`、`*NODE OUTPUT`、`*ELEMENT OUTPUT` 和历史能量输出请求结果场；`run_case()` 支持线性静力多步，调用 `abaqus python` 读取 ODB 的所有输出帧，并将 `U`、`S`、`E`、`EVOL`、`SENER`、`RF` 和 `ENER` 归一到统一结果字段名称。积分点字段使用元素标签、积分点和截面点组成稳定键，避免不同积分点互相覆盖；节点坐标、单元连接、单元质心、逐帧场量和 `ALLIE/ALLSE/ALLWK/ALLPD` 历史能量同时保留。结果字段选择器随后按 `ResultFieldSpec` 计算分量、位移幅值和应力不变量；必需字段缺失、单位或位置不一致以及字段值为空时执行失败，统一结果层根据单元连接和坐标生成 `mapped_fields`。
 
 适配器检查 launcher、进程返回状态、ODB 文件、锁文件和 ODB 提取脚本结果。`SolverConfig` 或
 `solver.abaqus` 配置可提供本地并发槽位和只读许可证探针；探针失败或槽位等待超时会明确返回
