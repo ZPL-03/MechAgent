@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -121,9 +123,9 @@ def test_verify_release_invokes_keyless_cosign_with_identity(
     bundle = tmp_path / "bundle.json"
     bundle.write_text("{}", encoding="utf-8")
     commands: list[list[str]] = []
-    monkeypatch.setattr(verify_release.shutil, "which", lambda _: "cosign.exe")
+    monkeypatch.setattr(shutil, "which", lambda _: "cosign.exe")
     monkeypatch.setattr(
-        verify_release.subprocess,
+        subprocess,
         "run",
         lambda command, **_kwargs: commands.append(command),
     )

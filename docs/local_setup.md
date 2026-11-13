@@ -141,7 +141,7 @@ Studio 命令输出服务监听地址和浏览器入口。`demo` 使用示例库
 
 环境检查使用 `python scripts/check_env.py`；便携环境使用 `--profile portable`。质量门禁、`scripts/run_llm_smoke.py`、标准验证与包检查统一见[验证与质量门禁](validation.md)。
 
-`scripts/clean_artifacts.py --dry-run` 先列出待删除路径，不修改文件系统；确认后不带参数执行以删除缓存、构建产物和一次性工具文件。`--include-studio-runtime` 仅删除本地 `mechagent_output/.studio` 运行时目录；`--include-runs` 才会删除正式运行证据和 FEM 临时文件。执行前将需保留的运行证据和发布包存放到仓库外；`.env`、配置、公开知识源和正式源代码不属于再生成产物。可能属于正式证据的日志、ODB、输入和 FEM 输出不会按扩展名自动删除。
+`scripts/clean_artifacts.py --dry-run` 先列出待删除路径，不修改文件系统；确认后不带参数执行以删除可再生成缓存和构建产物。`--include-studio-runtime` 仅删除本地 `mechagent_output/.studio` 运行时目录；`--include-runs` 才会删除正式运行证据和 FEM 临时文件。`.env`、配置、公开知识源和正式源代码不属于再生成产物。可能属于正式证据的日志、ODB、输入和 FEM 输出不会按扩展名自动删除。
 
 ## Abaqus 本机检查
 

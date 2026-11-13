@@ -73,7 +73,7 @@ def studio(
     """启动 MechAgent Studio 工程工作台。"""
 
     if auto_run and not (request and request.strip()):
-        raise typer.BadParameter("--auto-run 需要同时提供 --request。")
+        raise typer.BadParameter("--auto-run requires --request.", param_hint="--auto-run")
 
     run_studio(
         host=host,

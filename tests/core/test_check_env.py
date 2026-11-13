@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,10 @@ def test_python_path_comparison_normalizes_separators() -> None:
     )
 
 
+@pytest.mark.skipif(
+    not check_env._same_path(Path(sys.executable), check_env.EXPECTED_PYTHON),
+    reason="仅在配置的本机 AGENT 解释器中检查 local profile",
+)
 def test_check_python_requires_expected_executor() -> None:
     result = check_env._check_python()
 
@@ -168,7 +173,7 @@ def test_main_uses_config_argument_without_requiring_llm(
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("MODEL_NAME", raising=False)
 
-    result = check_env.main(["--config", str(config_path)])
+    result = check_env.main(["--config", str(config_path), "--profile", "portable"])
 
     assert result == 0
     assert '"llm_required": false' in capsys.readouterr().out

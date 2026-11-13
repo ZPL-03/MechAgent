@@ -44,8 +44,8 @@ jobs:
           python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
           python -m pip check
           python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
-          python -m build packages/mechagent-core --no-isolation
-          python -m build packages/mechagent --no-isolation
+          python -m build packages/mechagent-core
+          python -m build packages/mechagent
           python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
           python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
       - name: Upload release evidence

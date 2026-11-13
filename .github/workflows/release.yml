@@ -37,8 +37,8 @@ jobs:
       - name: Build release assets
         shell: pwsh
         run: |
-          python -m build packages/mechagent-core --no-isolation
-          python -m build packages/mechagent --no-isolation
+          python -m build packages/mechagent-core
+          python -m build packages/mechagent
           python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
           python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
           python scripts/check_wheel_install.py
