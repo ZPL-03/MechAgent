@@ -228,10 +228,10 @@ python scripts/restore_studio.py `
   --endpoint-url <target-endpoint> --region <target-region>
 ```
 
-备份与恢复命令使用 boto3 标准凭据链，不在清单或日志写入凭据；目标桶权限和跨主机 RTO/RPO 仍须
-通过独立演练记录。
+备份与恢复命令使用 boto3 标准凭据链，不在清单或日志写入凭据；目标桶权限和跨主机 RTO/RPO
+仍须在实际部署环境运行演练。
 
-灾难恢复演练使用独立的空 workspace，不覆盖既有备份或恢复目录。脚本记录源数据库和恢复数据库的完整性、作业数量、备份/恢复耗时、RPO 丢失作业数和总 RTO，并按显式目标判定退出码。RPO 基准是演练开始时可见的作业 ID；RTO 从演练开始计时到恢复数据库完成完整性检查。当前机器的实际 Studio 数据库演练证据为 `mechagent_output/studio-recovery-evidence/manifest.json`，源库含 1 个终态作业，恢复后作业 ID 丢失数为 0，RTO 约 0.089 秒，目标为 60 秒，清单状态为 `passed`。该证据范围是指定机器、数据库、对象目录和目标阈值；跨主机或 S3 部署需单独演练。
+灾难恢复演练使用独立的空 workspace，不覆盖既有备份或恢复目录。脚本记录源数据库和恢复数据库的完整性、作业数量、备份/恢复耗时、RPO 丢失作业数和总 RTO，并按显式目标判定退出码。RPO 基准是演练开始时可见的作业 ID；RTO 从演练开始计时到恢复数据库完成完整性检查。为验证结果对象，可通过 `--source-artifact-backend`、`--source-artifact-root` 或 `--source-bucket` 等参数指定源端对象存储，通过对应的 `--target-*` 参数指定目标端对象存储；清单同时记录源端引用校验、目标端对象校验和恢复结果载荷读取状态。当前机器的实际 Studio 数据库演练证据为 `mechagent_output/studio-recovery-evidence/manifest.json`，源库含 1 个终态作业，恢复后作业 ID 丢失数为 0，RTO 约 0.089 秒，目标为 60 秒，清单状态为 `passed`。该证据范围是指定机器、数据库、对象目录和目标阈值；实际跨主机或 S3 部署仍需运行带源端和目标端存储参数的演练。
 
 ```powershell
 python scripts/drill_studio_recovery.py `
@@ -241,12 +241,20 @@ python scripts/drill_studio_recovery.py `
   --rpo-max-lost-jobs 0
 ```
 
+使用不同的 S3 兼容对象存储验证结果对象迁移时，为命令增加
+`--source-artifact-backend s3 --source-bucket <source-bucket> --source-prefix <prefix>`
+以及 `--target-artifact-backend s3 --target-bucket <target-bucket> --target-prefix <prefix>`；
+端点和区域分别使用 `--source-endpoint-url`、`--source-region`、
+`--target-endpoint-url` 和 `--target-region`。源端和目标端使用 boto3 标准凭据链，脚本不记录凭据。
+
 退出码为 0 且 `recovery-drill.json` 的 `status` 为 `passed` 才算该环境的演练通过。目标目录已存在、数据库含活动作业、备份清单不完整、作业 ID 丢失或 RTO 超限均保留失败状态；不要删除失败证据后重跑。
 
 S3 兼容对象存储通过 `pip install "mechagent[s3]"` 和 `studio.artifact_backend=s3` 启用；
 访问密钥由 boto3 标准凭据链提供。`studio.artifact_s3_endpoint_url` 和
 `studio.artifact_s3_region` 可选择 S3 兼容私有端点和区域。当前仓库包含客户端、摘要校验和恢复
-接口；上传、下载和恢复均校验对象内容与 SHA-256 摘要。远端桶权限、跨主机备份保留和灾难恢复时间指标需要部署环境单独验收。
+接口；上传、下载和恢复均校验对象内容与 SHA-256 摘要。恢复演练可以把源端和目标端配置为不同的
+对象存储，并把结果对象摘要和载荷读取状态写入演练报告。远端桶权限、跨主机备份保留和灾难恢复时间指标
+仍需要部署环境单独验收。
 
 ```powershell
 python scripts/check_s3_storage.py `

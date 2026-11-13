@@ -651,6 +651,38 @@ def test_recovery_drill_records_rto_rpo_and_restores_jobs(tmp_path: Path) -> Non
     assert not list((tmp_path / "drill").rglob("*.sqlite3-shm"))
 
 
+def test_recovery_drill_verifies_cross_store_result_objects(tmp_path: Path) -> None:
+    database = tmp_path / "studio" / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    source_artifacts = ArtifactStore(tmp_path / "source-objects")
+    target_artifacts = ArtifactStore(tmp_path / "target-objects")
+    store = JobStore(database, artifact_store=source_artifacts)
+    job = store.submit("recovery-result", False, config, max_queued=2)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"value": 42})
+
+    report = drill_studio_recovery.run_recovery_drill(
+        database,
+        tmp_path / "cross-store-drill",
+        rto_target_seconds=30,
+        rpo_max_lost_jobs=0,
+        source_artifact_store=source_artifacts,
+        target_artifact_store=target_artifacts,
+    )
+
+    assert report["status"] == "passed"
+    assert report["artifacts"]["source_backend"] == "filesystem"
+    assert report["artifacts"]["target_backend"] == "filesystem"
+    assert report["artifacts"]["referenced_objects"] == 1
+    assert report["artifacts"]["source_verified"] == {"missing": [], "invalid": []}
+    assert report["artifacts"]["target_verified"] == {"missing": [], "invalid": []}
+    assert report["artifacts"]["payload_errors"] == []
+    assert report["checks"]["artifact_objects_preserved"] is True
+
+
 def test_recovery_drill_reports_failed_rto_without_hiding_evidence(tmp_path: Path) -> None:
     database = tmp_path / "jobs.sqlite3"
     config = tmp_path / "config.yaml"

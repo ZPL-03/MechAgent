@@ -25,7 +25,7 @@
 | Studio | `studio_http_smoke.py` | 验证 Studio HTTP API、队列和公开摘要 |
 | 运维 | `backup_studio.py` | 备份 Studio SQLite 与对象清单 |
 | 运维 | `restore_studio.py` | 校验备份并恢复到明确目标目录 |
-| 运维 | `drill_studio_recovery.py` | 在临时目标执行备份/恢复演练，检查完整性和产物一致性 |
+| 运维 | `drill_studio_recovery.py` | 在临时目标执行备份/恢复演练，检查数据库、作业 ID、结果对象摘要和结果载荷；源端与目标端对象存储可分别配置 |
 | 运维 | `prune_artifacts.py` | 按对象存储引用和年龄清理孤立对象；需要显式应用参数 |
 | 清理 | `clean_artifacts.py` | 清理可再生成缓存和构建产物；`--include-runs` 才涉及运行证据 |
 | 对象存储 | `check_s3_storage.py` | 对配置的 S3 兼容存储执行写入、读取、列举、删除和可选生命周期探针；可输出脱敏证据清单；没有外部服务时不属于便携 CI |

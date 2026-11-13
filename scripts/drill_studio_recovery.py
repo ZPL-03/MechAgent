@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from mechagent.evidence import atomic_json
+from mechagent.runtime.artifacts import ArtifactStore, S3ArtifactStore, create_artifact_store
 from mechagent.runtime.backup import backup_studio, restore_studio, verify_backup
+from mechagent.runtime.store import JobStore
 
 SCHEMA_VERSION = 1
 ACTIVE_STATUSES = {"queued", "starting", "running", "cancelling"}
@@ -31,15 +33,21 @@ def _database_snapshot(database: Path) -> dict[str, Any]:
         integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
         if integrity != "ok":
             raise RuntimeError(f"数据库完整性检查失败: {integrity}")
-        rows = connection.execute("SELECT job_id,status FROM jobs ORDER BY job_id").fetchall()
+        rows = connection.execute(
+            "SELECT job_id,status,result_hash FROM jobs ORDER BY job_id"
+        ).fetchall()
     job_ids = {str(row[0]) for row in rows}
+    result_hashes = {
+        str(row[2]).strip().lower() for row in rows if row[2] is not None and str(row[2]).strip()
+    }
     status_counts: dict[str, int] = {}
-    for _, status in rows:
+    for _, status, _ in rows:
         status_counts[str(status)] = status_counts.get(str(status), 0) + 1
     return {
         "integrity": integrity,
         "job_count": len(job_ids),
         "job_ids": job_ids,
+        "result_hashes": result_hashes,
         "status_counts": status_counts,
         "active_job_count": sum(status_counts.get(status, 0) for status in ACTIVE_STATUSES),
     }
@@ -68,12 +76,16 @@ def run_recovery_drill(
     rto_target_seconds: float,
     rpo_max_lost_jobs: int,
     output: Path | None = None,
+    source_artifact_store: ArtifactStore | S3ArtifactStore | None = None,
+    target_artifact_store: ArtifactStore | S3ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """执行一次完整恢复演练并返回证据文档。
 
     演练只读取源数据库并将备份、恢复目录写入独立 workspace；任何已有目标目录都会
     直接失败，避免覆盖历史证据。RPO 以演练开始时可见的作业 ID 为基准，RTO 从演练
-    开始到恢复数据库完整性检查结束计算。
+    开始到恢复数据库完整性检查结束计算。提供对象存储时，演练会验证源端引用、
+    备份中的对象、目标端对象和恢复后的结果载荷；源端与目标端可以使用不同的
+    文件系统或 S3 存储。
     """
 
     if rto_target_seconds < 0:
@@ -114,8 +126,19 @@ def run_recovery_drill(
             "status_counts": source["status_counts"],
         }
 
+        source_store = source_artifact_store or ArtifactStore(database.parent)
+        source_verification = _verify_artifacts(source_store, source["result_hashes"])
+        report["artifacts"] = {
+            "source_backend": _artifact_backend(source_artifact_store),
+            "target_backend": _artifact_backend(target_artifact_store),
+            "referenced_objects": len(source["result_hashes"]),
+            "source_verified": source_verification,
+        }
+        if source_verification["missing"] or source_verification["invalid"]:
+            raise RuntimeError("源对象存储包含缺失或摘要不一致的结果对象。")
+
         backup_started = time.perf_counter()
-        backup_studio(database, backup_dir)
+        backup_studio(database, backup_dir, artifact_store=source_artifact_store)
         backup_seconds = time.perf_counter() - backup_started
         report["backup"] = {
             "path": str(backup_dir),
@@ -128,7 +151,11 @@ def run_recovery_drill(
             raise RuntimeError("备份清单校验失败：" + "；".join(verification_errors))
 
         restore_started = time.perf_counter()
-        restored_database = restore_studio(backup_dir, restore_dir)
+        restored_database = restore_studio(
+            backup_dir,
+            restore_dir,
+            artifact_store=target_artifact_store,
+        )
         restore_seconds = time.perf_counter() - restore_started
         restored = _database_snapshot(restored_database)
         report["restore"] = {
@@ -139,6 +166,25 @@ def run_recovery_drill(
             "job_count": restored["job_count"],
             "status_counts": restored["status_counts"],
         }
+
+        target_store = target_artifact_store or ArtifactStore(restore_dir)
+        target_verification = _verify_artifacts(target_store, source["result_hashes"])
+        restored_store = JobStore(restored_database, artifact_store=target_store)
+        payload_errors: list[str] = []
+        for job_id in sorted(restored["job_ids"]):
+            job = restored_store.get(job_id)
+            if job is None or not job.get("result_hash"):
+                continue
+            try:
+                restored_store.payload(job)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                payload_errors.append(f"{job_id}:{type(exc).__name__}")
+        report["artifacts"].update(
+            {
+                "target_verified": target_verification,
+                "payload_errors": payload_errors,
+            }
+        )
 
         lost_job_ids = sorted(source["job_ids"] - restored["job_ids"])
         rpo_lost_jobs = len(lost_job_ids)
@@ -155,6 +201,10 @@ def run_recovery_drill(
             "job_ids_preserved": rpo_lost_jobs <= rpo_max_lost_jobs,
             "rto_within_target": total_rto_seconds <= rto_target_seconds,
         }
+        if source["result_hashes"]:
+            report["checks"]["artifact_objects_preserved"] = not (
+                target_verification["missing"] or target_verification["invalid"] or payload_errors
+            )
         report["status"] = "passed" if all(report["checks"].values()) else "failed"
     except Exception as exc:
         report["error"] = str(exc)
@@ -163,6 +213,64 @@ def run_recovery_drill(
     atomic_json(report_path, report)
     report["report"] = str(report_path)
     return report
+
+
+def _artifact_backend(
+    store: ArtifactStore | S3ArtifactStore | None,
+) -> str:
+    if isinstance(store, S3ArtifactStore):
+        return "s3"
+    if isinstance(store, ArtifactStore):
+        return "filesystem"
+    return "database-local-default"
+
+
+def _verify_artifacts(
+    store: ArtifactStore | S3ArtifactStore,
+    references: set[str],
+) -> dict[str, list[str]]:
+    missing: list[str] = []
+    invalid: list[str] = []
+    for digest in sorted(references):
+        try:
+            if isinstance(store, ArtifactStore):
+                path = store.path_for(digest)
+                if not path.is_file():
+                    missing.append(digest)
+                elif not store.verify(digest):
+                    invalid.append(digest)
+                continue
+            try:
+                store.client.head_object(Bucket=store.bucket, Key=store._key(digest))
+            except Exception as exc:
+                response = getattr(exc, "response", {}) or {}
+                code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
+                if str(code) in {"404", "NoSuchKey", "NoSuchBucket"}:
+                    missing.append(digest)
+                else:
+                    invalid.append(digest)
+            else:
+                if not store.verify(digest):
+                    invalid.append(digest)
+        except (OSError, RuntimeError, ValueError):
+            invalid.append(digest)
+    return {"missing": missing, "invalid": invalid}
+
+
+def _artifact_store_from_args(
+    args: argparse.Namespace, role: str
+) -> ArtifactStore | S3ArtifactStore | None:
+    backend = str(getattr(args, f"{role}_artifact_backend", ""))
+    if not backend:
+        return None
+    return create_artifact_store(
+        backend,
+        root=getattr(args, f"{role}_artifact_root", None),
+        bucket=str(getattr(args, f"{role}_bucket", "")),
+        prefix=str(getattr(args, f"{role}_prefix", "mechagent")),
+        endpoint_url=str(getattr(args, f"{role}_endpoint_url", "")),
+        region_name=str(getattr(args, f"{role}_region", "")),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,6 +285,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rto-target-seconds", type=float, required=True)
     parser.add_argument("--rpo-max-lost-jobs", type=int, required=True)
     parser.add_argument("--output", type=Path)
+    for role in ("source", "target"):
+        parser.add_argument(
+            f"--{role}-artifact-backend",
+            choices=("filesystem", "s3"),
+            help=f"{role} 结果对象存储；省略时使用数据库目录内的对象。",
+        )
+        parser.add_argument(f"--{role}-artifact-root", type=Path)
+        parser.add_argument(f"--{role}-bucket", default="")
+        parser.add_argument(f"--{role}-prefix", default="mechagent")
+        parser.add_argument(f"--{role}-endpoint-url", default="")
+        parser.add_argument(f"--{role}-region", default="")
     args = parser.parse_args(argv)
     try:
         report = run_recovery_drill(
@@ -185,8 +304,10 @@ def main(argv: list[str] | None = None) -> int:
             rto_target_seconds=args.rto_target_seconds,
             rpo_max_lost_jobs=args.rpo_max_lost_jobs,
             output=args.output,
+            source_artifact_store=_artifact_store_from_args(args, "source"),
+            target_artifact_store=_artifact_store_from_args(args, "target"),
         )
-    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+    except (FileExistsError, FileNotFoundError, RuntimeError, ValueError) as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))
