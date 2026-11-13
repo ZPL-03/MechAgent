@@ -1,6 +1,6 @@
 # 求解器、网格与后处理
 
-本文描述网格生成与质量门禁、CalculiX 适配器、`.frd` 后处理与解析参考公式。能力解析见 [能力与自然语言解析](capabilities.md)，几何、AI 建模和 CAD 网格边界见 [几何、AI 建模与网格边界](geometry_ai.md)，求解摘要状态见 [架构与数据契约](architecture.md)。
+本文描述网格生成与质量门禁、CalculiX 适配器、`.frd` 后处理与解析参考公式。能力解析见 [能力与自然语言解析](capabilities.md)，几何建模和 CAD 网格边界见 [几何建模与网格边界](geometry_ai.md)，求解摘要状态见 [架构与数据契约](architecture.md)。
 
 ## 网格生成与质量门禁
 

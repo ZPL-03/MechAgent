@@ -1,6 +1,6 @@
 # 能力与自然语言解析
 
-本文描述能力注册、自然语言任务解析、LLM 抽取契约与知识库。编排与通信见 [编排与 Agent 通信](orchestration.md)，几何和 AI 建模边界见 [几何、AI 建模与网格边界](geometry_ai.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
+本文描述能力注册、自然语言任务解析、LLM 抽取契约与知识库。编排与通信见 [编排与 Agent 通信](orchestration.md)，几何建模边界见 [几何建模与网格边界](geometry_ai.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
 
 ## 自然语言任务解析
 

@@ -1,6 +1,6 @@
 # 架构与数据契约
 
-本文描述 MechAgent 的项目定位、分层架构、包结构、核心 Schema 与求解器契约。Agent 编排与通信见 [编排与 Agent 通信](orchestration.md)，能力与解析见 [能力与自然语言解析](capabilities.md)，几何和 AI 建模边界见 [几何、AI 建模与网格边界](geometry_ai.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
+本文描述 MechAgent 的项目定位、分层架构、包结构、核心 Schema 与求解器契约。Agent 编排与通信见 [编排与 Agent 通信](orchestration.md)，能力与解析见 [能力与自然语言解析](capabilities.md)，几何建模边界见 [几何建模与网格边界](geometry_ai.md)，求解与网格见 [求解器、网格与后处理](solver_mesh.md)。
 
 ## 依赖与扩展边界
 
