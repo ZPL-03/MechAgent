@@ -26,7 +26,8 @@ class JobManager:
         self.error: str | None = None
         self._stop = Event()
         self._thread: Thread | None = None
-        self._children: list[subprocess.Popen[bytes]] = []
+        # 保留已退出但仍对应活动作业的句柄，以便取得真实退出码并写入终态。
+        self._children: dict[str, subprocess.Popen[bytes]] = {}
 
     def start(self) -> None:
         self._thread = Thread(target=self._loop, name="studio-dispatch", daemon=True)
@@ -49,9 +50,12 @@ class JobManager:
             logger.error("Studio 调度停止：%s", self.error)
 
     def tick(self) -> None:
-        self._children = [child for child in self._children if child.poll() is None]
         for active_job in self.store.active():
             self._reconcile(active_job)
+        active_ids = {str(job["job_id"]) for job in self.store.active()}
+        self._children = {
+            job_id: child for job_id, child in self._children.items() if job_id in active_ids
+        }
         while not self._stop.is_set():
             job = self.store.claim(self.settings.max_workers)
             if job is None:
@@ -79,7 +83,7 @@ class JobManager:
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                         start_new_session=os.name != "nt",
                     )
-                self._children.append(child)
+                self._children[str(job["job_id"])] = child
             except OSError as exc:
                 self._end(job, "failed", "worker_start_failed", redact_sensitive_text(str(exc)))
 
@@ -93,7 +97,15 @@ class JobManager:
         process = identified_process(job["pid"], job["process_created"])
         if process is None:
             status = "cancelled" if job["status"] == "cancelling" else "interrupted"
-            self._end(job, status, "worker_exited", "执行进程已退出。")
+            exit_code = self._worker_exit_code(str(job["job_id"]))
+            if exit_code is None:
+                code, message = "worker_exited", "执行进程已退出，未取得退出码。"
+            else:
+                code, message = (
+                    "worker_exited",
+                    f"执行进程已退出，退出码 {exit_code}。",
+                )
+            self._end(job, status, code, message, worker_exit_code=exit_code)
             return
         code = message = ""
         status = "interrupted"
@@ -107,7 +119,21 @@ class JobManager:
             stop_process(job["pid"], job["process_created"])
             self._end(job, status, code, message)
 
-    def _end(self, job: dict[str, Any], status: str, code: str, message: str) -> None:
+    def _worker_exit_code(self, job_id: str) -> int | None:
+        child = self._children.get(job_id)
+        if child is None:
+            return None
+        return child.poll()
+
+    def _end(
+        self,
+        job: dict[str, Any],
+        status: str,
+        code: str,
+        message: str,
+        *,
+        worker_exit_code: int | None = None,
+    ) -> None:
         # 先保存部分产物证据，再提交终态；保存失败会中止调度并公开错误。
         latest = self.store.get(job["job_id"])
         if latest["status"] not in ("starting", "running", "cancelling"):
@@ -121,6 +147,7 @@ class JobManager:
                 "job_id": job["job_id"],
                 "error_code": code,
                 "error": message,
+                **({"worker_exit_code": worker_exit_code} if worker_exit_code is not None else {}),
             },
         )
         self.store.finish(
@@ -129,5 +156,6 @@ class JobManager:
             status,
             error=message,
             error_code=code,
+            worker_exit_code=worker_exit_code,
             require_unregistered=job["pid"] is None,
         )

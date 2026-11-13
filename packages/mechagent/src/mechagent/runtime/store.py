@@ -25,7 +25,7 @@ from mechagent.runtime.auth import Principal, normalize_identity_fields
 
 ACTIVE = ("starting", "running", "cancelling")
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
-DATABASE_SCHEMA_VERSION = 7
+DATABASE_SCHEMA_VERSION = 8
 DEFAULT_MAX_RESULT_BYTES = 100 * 1024 * 1024
 
 
@@ -149,7 +149,7 @@ class JobStore:
 
         v1 是早期队列表结构；v2 增加迁移记录并确保提交时保存配置哈希；v3
         为作业增加主体和项目归属，v4 保存结果字节数，v5 保存 worker 资源用量，v6
-        增加主体目录，v7 为作业和审计记录增加组织归属。
+        增加主体目录，v7 为作业和审计记录增加组织归属，v8 保存 worker 退出码。
         旧作业归入 local/default。
         迁移只做可回滚的加法操作。缺少配置文件的历史作业保留空哈希，worker
         会拒绝执行并要求显式重新提交，避免把未经确认的旧输入静默求解。
@@ -180,6 +180,7 @@ class JobStore:
                     parent_job_id TEXT REFERENCES jobs(job_id), result_hash TEXT,
                     result_bytes INTEGER,
                     cpu_user_seconds REAL, cpu_system_seconds REAL, peak_rss_bytes INTEGER,
+                    worker_exit_code INTEGER,
                     config_hash TEXT NOT NULL, owner TEXT NOT NULL DEFAULT 'local',
                     project_id TEXT NOT NULL DEFAULT 'default',
                     organization TEXT NOT NULL DEFAULT 'local'
@@ -233,6 +234,8 @@ class JobStore:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN organization TEXT NOT NULL DEFAULT 'local'"
                 )
+            if "worker_exit_code" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN worker_exit_code INTEGER")
         connection.execute("CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS events_job ON events(job_id, sequence)")
         connection.execute(
@@ -303,6 +306,10 @@ class JobStore:
         if 7 not in known:
             connection.execute(
                 "INSERT INTO schema_migrations(version,applied_at) VALUES(7,?)", (now,)
+            )
+        if 8 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(8,?)", (now,)
             )
         connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
 
@@ -949,6 +956,7 @@ class JobStore:
         error_code: str | None = None,
         result: dict[str, Any] | None = None,
         resources: dict[str, float | int] | None = None,
+        worker_exit_code: int | None = None,
         require_unregistered: bool = False,
     ) -> bool:
         if status not in TERMINAL:
@@ -971,6 +979,13 @@ class JobStore:
                 cpu_user_seconds = _nonnegative_float(resources.get("cpu_user_seconds"))
                 cpu_system_seconds = _nonnegative_float(resources.get("cpu_system_seconds"))
                 peak_rss_bytes = _nonnegative_int(resources.get("peak_rss_bytes"))
+            if worker_exit_code is not None and (
+                isinstance(worker_exit_code, bool)
+                or not isinstance(worker_exit_code, int)
+                or worker_exit_code < -(2**31)
+                or worker_exit_code > (2**32 - 1)
+            ):
+                raise ValueError("worker_exit_code 必须是带符号 32 位或 Windows 32 位退出码。")
             if result is not None:
                 path = self.directory(job_id) / "result.json"
                 encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode(
@@ -1011,7 +1026,7 @@ class JobStore:
             connection.execute(
                 """UPDATE jobs SET status=?,finished_at=?,error=?,error_code=?,
                 result_hash=?,result_bytes=?,cpu_user_seconds=?,cpu_system_seconds=?,
-                peak_rss_bytes=? WHERE job_id=?""",
+                peak_rss_bytes=?,worker_exit_code=? WHERE job_id=?""",
                 (
                     status,
                     time.time(),
@@ -1022,6 +1037,7 @@ class JobStore:
                     cpu_user_seconds,
                     cpu_system_seconds,
                     peak_rss_bytes,
+                    worker_exit_code,
                     job_id,
                 ),
             )
@@ -1049,7 +1065,15 @@ class JobStore:
         return {
             **{
                 key: job[key]
-                for key in ("job_id", "request", "status", "error", "error_code", "parent_job_id")
+                for key in (
+                    "job_id",
+                    "request",
+                    "status",
+                    "error",
+                    "error_code",
+                    "parent_job_id",
+                    "worker_exit_code",
+                )
             },
             "use_llm_agents": bool(job["use_llm_agents"]),
             "owner": job["owner"],

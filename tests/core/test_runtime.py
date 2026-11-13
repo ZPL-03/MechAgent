@@ -288,6 +288,34 @@ def test_event_retention_and_result_integrity(store: JobStore) -> None:
         store.heartbeat(job["job_id"], job["token"])
 
 
+def test_finish_persists_worker_exit_code(store: JobStore) -> None:
+    job = submit(store)
+    claimed = store.claim(1)
+    assert claimed and store.register(
+        claimed["job_id"], claimed["token"], os.getpid(), psutil.Process().create_time()
+    )
+    assert store.finish(
+        claimed["job_id"],
+        claimed["token"],
+        "interrupted",
+        error="执行进程已退出，退出码 17。",
+        error_code="worker_exited",
+        worker_exit_code=17,
+    )
+    payload = store.payload(store.get(job["job_id"]), include_result=False)
+    assert payload["worker_exit_code"] == 17
+    invalid = submit(store)
+    invalid_claimed = store.claim(1)
+    assert invalid_claimed
+    with pytest.raises(ValueError, match="worker_exit_code"):
+        store.finish(
+            invalid["job_id"],
+            invalid_claimed["token"],
+            "failed",
+            worker_exit_code=2**32,
+        )
+
+
 def test_future_database_version_is_rejected(tmp_path: Path) -> None:
     database = tmp_path / "future.sqlite3"
     with sqlite3.connect(database) as connection:
@@ -327,8 +355,11 @@ def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) ->
 
     store = JobStore(database)
     with store.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
         assert "organization" in {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")
+        }
+        assert "worker_exit_code" in {
             str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")
         }
         assert connection.execute(
@@ -365,6 +396,42 @@ def test_pid_reuse_is_not_treated_as_our_worker(store: JobStore) -> None:
     JobManager(store, StudioSettings()).tick()
     assert store.get(job["job_id"])["status"] == "interrupted"
     assert psutil.Process().is_running()
+
+
+def test_manager_records_exit_code_for_crashed_worker(store: JobStore, tmp_path: Path) -> None:
+    submit(store)
+    claimed = store.claim(1)
+    assert claimed
+    ready = tmp_path / "ready.json"
+    script = (
+        "import json,os,sys,time,psutil; from pathlib import Path; "
+        "Path(sys.argv[1]).write_text(json.dumps([os.getpid(),psutil.Process().create_time()]))"
+        "; time.sleep(0.1); os._exit(17)"
+    )
+    process = subprocess.Popen([sys.executable, "-c", script, str(ready)])
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        pid, created = json.loads(ready.read_text(encoding="utf-8"))
+        assert store.register(claimed["job_id"], claimed["token"], pid, created)
+        process.wait(timeout=10)
+        manager = JobManager(store, StudioSettings())
+        manager._children[claimed["job_id"]] = process
+        manager.tick()
+        finished = store.get(claimed["job_id"])
+        assert finished["status"] == "interrupted"
+        assert finished["error_code"] == "worker_exited"
+        assert finished["worker_exit_code"] == 17
+        manifest = json.loads(
+            (store.directory(claimed["job_id"]) / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["details"]["worker_exit_code"] == 17
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
 
 
 @pytest.mark.parametrize("reason", ["cancel", "heartbeat", "timeout"])

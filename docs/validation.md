@@ -69,7 +69,7 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查
 `SimulationCase.execution_readiness()` 对六类字段来源和区域置信度的执行阻断，检查
 `ModelParams` 与案例契约之间的兼容转换，以及未知未来 schema 的拒绝行为。运行层门禁
-检查 v1 至 v7 数据库迁移、迁移记录、旧作业读取、组织字段和未来数据库版本拒绝；API 门禁检查 `/api/v1`
+检查 v1 至 v8 数据库迁移、迁移记录、旧作业读取、组织字段、worker 退出码和未来数据库版本拒绝；API 门禁检查 `/api/v1`
 路由与旧 `/api` 兼容入口的弃用响应头；指标门禁检查 `/api/v1/metrics` 的项目范围、admin
 全局范围、脱敏输出、数据库重启后的统计一致性以及结果大小和证据清单完整性计数。
 
@@ -304,7 +304,7 @@ Python 运行时依赖审计的 JSON 报告作为发布证据上传；报告缺�
 
 ## 作业故障与证据校验
 
-`tests/core/test_runtime.py` 使用真实独立进程验证取消、心跳丢失、执行超时、进程身份与子进程终止，使用数据库并发验证幂等键、排队容量和领取上限。API 测试通过真实 worker 产生失败报告，并在应用生命周期重启后查询相同作业；不依靠同进程 monkeypatch 代替 worker 求解。SDK、结果文件和清单测试覆盖配置脱敏、源配置变化、文件缺失与内容篡改。
+`tests/core/test_runtime.py` 使用真实独立进程验证取消、心跳丢失、执行超时、进程身份与子进程终止，验证 worker 异常退出时退出码进入终态记录和证据清单，使用数据库并发验证幂等键、排队容量和领取上限。API 测试通过真实 worker 产生失败报告，并在应用生命周期重启后查询相同作业；不依靠同进程 monkeypatch 代替 worker 求解。SDK、结果文件和清单测试覆盖配置脱敏、源配置变化、文件缺失与内容篡改。
 
 ```powershell
 python -m pytest tests/core/test_runtime.py tests/core/test_studio.py

@@ -308,6 +308,8 @@ export interface StudioJobResponse {
   duration_ms: number | null;
   result: StudioRunResponse | null;
   error: string | null;
+  error_code?: string | null;
+  worker_exit_code?: number | null;
   events: StudioProgressEvent[];
 }
 
