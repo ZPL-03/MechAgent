@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="清单 artifact 路径的构建根目录；默认使用清单所在目录。",
     )
+    parser.add_argument("--expected-commit", help="要求清单绑定到指定 Git 提交。")
+    parser.add_argument("--expected-version", help="要求清单版本等于指定值。")
     args = parser.parse_args(argv)
     if not args.manifest.is_file():
         raise FileNotFoundError(args.manifest)
@@ -52,7 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("keyless 模式必须只提供 --bundle 和 --certificate-identity。")
     if args.key is not None and not args.key.is_file():
         raise FileNotFoundError(args.key)
-    document = load_manifest(args.manifest, root=args.root)
+    document = load_manifest(
+        args.manifest,
+        root=args.root,
+        expected_commit=args.expected_commit,
+        expected_version=args.expected_version,
+    )
     provenance = document.get("provenance", {}).get("source", {})
     if provenance.get("gitDirty") is not False:
         raise ValueError("发布清单要求干净且可识别的 Git 源状态。")

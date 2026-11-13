@@ -250,6 +250,41 @@ def test_verify_release_resolves_repository_relative_artifacts(tmp_path: Path) -
     assert verify_release.load_manifest(manifest, root=tmp_path)["version"] == "1.2.3"
 
 
+def test_release_manifest_can_bind_commit_and_version(tmp_path: Path) -> None:
+    artifact = tmp_path / "package.whl"
+    artifact.write_bytes(b"package")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "mechagent.release-manifest.v1",
+                "version": "1.2.3",
+                "gitCommit": "abc123",
+                "provenance": {"source": {"gitDirty": False, "gitCommit": "abc123"}},
+                "artifacts": [
+                    {
+                        "path": artifact.name,
+                        "size": artifact.stat().st_size,
+                        "sha256": verify_release._sha256(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        verify_release.load_manifest(manifest, expected_commit="abc123", expected_version="1.2.3")[
+            "version"
+        ]
+        == "1.2.3"
+    )
+    with pytest.raises(ValueError, match="Git 提交"):
+        verify_release.load_manifest(manifest, expected_commit="def456")
+    with pytest.raises(ValueError, match="版本"):
+        verify_release.load_manifest(manifest, expected_version="1.2.4")
+
+
 def test_verify_release_invokes_keyless_cosign_with_identity(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

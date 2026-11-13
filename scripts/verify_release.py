@@ -14,7 +14,13 @@ from typing import Any
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def load_manifest(path: Path, *, root: Path | None = None) -> dict[str, Any]:
+def load_manifest(
+    path: Path,
+    *,
+    root: Path | None = None,
+    expected_commit: str | None = None,
+    expected_version: str | None = None,
+) -> dict[str, Any]:
     """读取并校验发布清单记录的所有本地 artifact。
 
     清单中的 artifact 路径相对于构建根目录；未显式提供根目录时，兼容性地
@@ -37,6 +43,12 @@ def load_manifest(path: Path, *, root: Path | None = None) -> dict[str, Any]:
     source = provenance.get("source")
     if not isinstance(source, dict) or source.get("gitDirty") is not False:
         raise ValueError("发布清单要求干净且可识别的 Git 源状态。")
+    if expected_commit is not None:
+        actual_commit = source.get("gitCommit") or document.get("gitCommit")
+        if actual_commit != expected_commit:
+            raise ValueError("发布清单 Git 提交与期望提交不一致。")
+    if expected_version is not None and document.get("version") != expected_version:
+        raise ValueError("发布清单版本与期望版本不一致。")
     artifacts = document.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("发布清单必须包含 artifact。")
@@ -155,8 +167,15 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="清单 artifact 路径的构建根目录；默认使用清单所在目录。",
     )
+    parser.add_argument("--expected-commit", help="要求清单绑定到指定 Git 提交。")
+    parser.add_argument("--expected-version", help="要求清单版本等于指定值。")
     args = parser.parse_args(argv)
-    document = load_manifest(args.manifest, root=args.root)
+    document = load_manifest(
+        args.manifest,
+        root=args.root,
+        expected_commit=args.expected_commit,
+        expected_version=args.expected_version,
+    )
     verify_signature(
         args.manifest,
         signature=args.signature,

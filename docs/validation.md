@@ -150,11 +150,11 @@ python -m build packages/mechagent
 python scripts/generate_sbom.py --output dist/mechagent-sbom.spdx.json
 python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
 # 只有发布环境已配置 cosign 和签名密钥时执行；命令会立即验证签名
-python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key
+python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --signature dist/mechagent-release-manifest.sig --key path/to/cosign.key --expected-commit <tag-commit>
 # GitHub OIDC keyless 模式
-python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
+python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --expected-commit <tag-commit> --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 下载或归档后独立校验清单中的所有文件摘要和签名身份
-python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
+python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --expected-commit <tag-commit> --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 两侧结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --output dist/backend-comparison.json
 # 比较统一语义字段
@@ -178,8 +178,8 @@ python scripts/clean_artifacts.py
 
 `scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单用于发布前许可证审计，许可证人工确认另行进行。
 
-`scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；签名、作者身份和可信构建服务证明由后续发布步骤提供。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；`scripts/verify_release.py` 可在独立环境重新校验所有 artifact 摘要和签名身份。发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
-`.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并用 `gh attestation verify` 校验每个发布 subject 的仓库、工作流、tag 和 OIDC issuer 身份，再由 cosign 对发布清单执行 keyless 签名和验证。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。该门禁只有 tag 工作流在目标仓库中成功运行后才形成外部验证证据。
+`scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；签名、作者身份和可信构建服务证明由后续发布步骤提供。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；`scripts/verify_release.py` 可在独立环境重新校验所有 artifact 摘要、签名身份、期望提交和期望版本。发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
+`.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并用 `gh attestation verify` 校验每个发布 subject 的仓库、工作流、tag 和 OIDC issuer 身份，再由 cosign 对发布清单执行 keyless 签名和验证。签名和独立验证同时要求清单绑定 `github.sha`，防止使用其他提交生成的清单通过 tag 发布门禁。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。该门禁只有 tag 工作流在目标仓库中成功运行后才形成外部验证证据。
 PR 和发布工作流中的第三方 action 固定到完整 commit SHA；PR 工作流仅授予 `contents: read`，发布工作流才申请发布、OIDC 和 attestation 所需权限。
 
 结果选择器在 `ResultFieldSpec.unit` 非空时要求后端场声明相同单位；单位缺失或不一致的必需字段直接失败，不能用请求单位覆盖实际单位。选定字段、单元质心映射和统一语义字段分别保留来源与推导信息。字段位置或单位与另一后端不一致时，`requested_fields` 和 `comparison_fields` 返回 `failed`；原始 `fields` 和 `mapped_fields` 保持 `unverified`，避免把不同离散语义的值按标签配对。

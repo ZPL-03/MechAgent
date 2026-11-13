@@ -101,6 +101,7 @@ jobs:
             --manifest dist/mechagent-release-manifest.json `
             --root . `
             --bundle dist/mechagent-release-manifest.sigstore.json `
+            --expected-commit "${{ github.sha }}" `
             --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" `
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - name: Verify signed release manifest
@@ -110,6 +111,7 @@ jobs:
             --manifest dist/mechagent-release-manifest.json `
             --root . `
             --bundle dist/mechagent-release-manifest.sigstore.json `
+            --expected-commit "${{ github.sha }}" `
             --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" `
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - name: Upload signed release
