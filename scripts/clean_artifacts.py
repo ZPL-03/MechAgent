@@ -2,7 +2,8 @@
 
 默认只处理能够由项目工具重新生成的缓存和构建产物。正式运行证据、FEM
 文件和 Studio 正式证据目录需要显式选择对应选项；``--dry-run`` 可在删除
-前列出精确目标。
+前列出精确目标。删除失败时返回非零状态，并报告失败路径、已删除目标数量
+和可直接执行的 PowerShell 命令。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import shutil
 import sqlite3
 import subprocess
+import sys
 from argparse import ArgumentParser
 from collections.abc import Iterator
 from contextlib import closing
@@ -140,17 +142,50 @@ def main(argv: list[str] | None = None) -> int:
         for path in ordered:
             print(path)
     else:
+        deleted_count = 0
         for path in ordered:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink(missing_ok=True)
+            try:
+                _remove_path(path)
+            except OSError as exc:
+                print(
+                    f"清理失败：{path}\n"
+                    f"已删除目标数量：{deleted_count}\n"
+                    f"错误：{exc}\n"
+                    f"可执行命令：{_powershell_remove_command(path)}",
+                    file=sys.stderr,
+                )
+                return 1
+            deleted_count += 1
         for name in ("knowledge/raw", "knowledge/external", "knowledge", "output"):
             path = REPO_ROOT / name
             if path.is_dir() and not any(path.iterdir()) and path not in tracked:
                 _ensure_inside_repo(path)
-                path.rmdir()
+                try:
+                    path.rmdir()
+                except OSError as exc:
+                    print(
+                        f"清理失败：{path}\n"
+                        f"已删除目标数量：{deleted_count}\n"
+                        f"错误：{exc}\n"
+                        f"可执行命令：{_powershell_remove_command(path)}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                deleted_count += 1
     return 0
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _powershell_remove_command(path: Path) -> str:
+    literal = str(path).replace("'", "''")
+    suffix = " -Recurse" if path.is_dir() else ""
+    return f"Remove-Item -LiteralPath '{literal}'{suffix} -Force"
 
 
 def _tracked_paths() -> set[Path]:
