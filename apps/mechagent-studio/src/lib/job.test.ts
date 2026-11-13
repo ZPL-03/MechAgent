@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { isActiveJob, jobStatusLabel } from "./job";
-import { createJob, fetchJob } from "./api";
+import { ApiError, createJob, fetchJob } from "./api";
 import type { StudioJobResponse, StudioJobStatus } from "../types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -23,5 +23,16 @@ describe("durable job lifecycle", () => {
   it("exposes a missing persisted job instead of inventing a result", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({ detail: "missing" }) }));
     await expect(fetchJob("unknown")).rejects.toThrow("missing");
+  });
+  it("preserves the server error code for client decisions", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ code: "forbidden", detail: "denied" })
+    }));
+    const error = await fetchJob("restricted").catch(value => value);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("forbidden");
+    expect((error as ApiError).status).toBe(403);
   });
 });

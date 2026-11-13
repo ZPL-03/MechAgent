@@ -6,7 +6,7 @@ import json
 import sys
 import time
 import webbrowser
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +15,9 @@ from urllib.parse import urlencode
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent import MechAgent, __version__
@@ -44,6 +46,41 @@ from mechagent.runtime.store import (
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STUDIO_VIEW_MODES = {"geometry", "mesh", "result"}
+_HTTP_ERROR_CODES = {
+    400: "bad_request",
+    401: "authentication_required",
+    403: "forbidden",
+    404: "not_found",
+    409: "conflict",
+    422: "validation_error",
+    429: "rate_limited",
+    500: "internal_error",
+    503: "service_unavailable",
+    507: "storage_quota_exceeded",
+}
+
+
+def _api_error_payload(status_code: int, detail: Any, *, code: str | None = None) -> dict[str, Any]:
+    """生成稳定的 API 错误字段，同时保留面向用户的诊断内容。"""
+
+    return {
+        "code": code or _HTTP_ERROR_CODES.get(status_code, "http_error"),
+        "detail": detail,
+    }
+
+
+def _api_error_response(
+    status_code: int,
+    detail: Any,
+    *,
+    code: str | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=_api_error_payload(status_code, detail, code=code),
+        headers=headers,
+    )
 
 
 class StudioRunRequest(BaseModel):
@@ -155,6 +192,25 @@ def create_studio_app(
         lifespan=lifespan,
     )
 
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(_request: Request, exc: HTTPException) -> JSONResponse:
+        detail = exc.detail
+        return _api_error_response(
+            exc.status_code,
+            detail,
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return _api_error_response(
+            422,
+            jsonable_encoder(exc.errors()),
+            code="validation_error",
+        )
+
     @app.middleware("http")
     async def api_compatibility_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -179,18 +235,23 @@ def create_studio_app(
                 except ValueError:
                     decision = rate_limiter.check(_rate_limit_key(request, None))
                     if not decision.allowed:
-                        return _rate_limit_response(decision)
-                    return Response(
-                        content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
-                        status_code=401,
-                        media_type="application/json",
+                        response = _rate_limit_response(decision)
+                        _set_api_version_header(response, request.url.path)
+                        return response
+                    response = _api_error_response(
+                        401,
+                        str(exc),
                         headers={"WWW-Authenticate": "Bearer"},
                     )
+                    _set_api_version_header(response, request.url.path)
+                    return response
         else:
             request.state.principal = configured_principal
         decision = rate_limiter.check(_rate_limit_key(request, request.state.principal))
         if not decision.allowed:
-            return _rate_limit_response(decision)
+            response = _rate_limit_response(decision)
+            _set_api_version_header(response, request.url.path)
+            return response
         response = await call_next(request)
         _set_rate_limit_headers(response, decision)
         path = request.url.path
@@ -209,13 +270,19 @@ def create_studio_app(
 
     def _rate_limit_response(decision: RateLimitDecision) -> Response:
         response = Response(
-            content=json.dumps({"detail": "请求频率超过当前 Studio 限额。"}, ensure_ascii=False),
+            content=json.dumps(
+                _api_error_payload(429, "请求频率超过当前 Studio 限额。"), ensure_ascii=False
+            ),
             status_code=429,
             media_type="application/json",
         )
         _set_rate_limit_headers(response, decision)
         response.headers["Retry-After"] = str(decision.retry_after)
         return response
+
+    def _set_api_version_header(response: Response, path: str) -> None:
+        if path.startswith("/api/v1/"):
+            response.headers["X-MechAgent-API-Version"] = "v1"
 
     def _set_rate_limit_headers(response: Response, decision: RateLimitDecision) -> None:
         if decision.limit is not None and decision.remaining is not None:

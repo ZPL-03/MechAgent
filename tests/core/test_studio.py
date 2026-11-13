@@ -62,7 +62,10 @@ def test_studio_rate_limit_returns_429_with_retry_metadata(tmp_path: Path) -> No
     assert first.headers["X-RateLimit-Remaining"] == "0"
     assert second.status_code == 429
     assert second.headers["Retry-After"] == "60"
-    assert second.json() == {"detail": "请求频率超过当前 Studio 限额。"}
+    assert second.json() == {
+        "code": "rate_limited",
+        "detail": "请求频率超过当前 Studio 限额。",
+    }
 
 
 def test_studio_authentication_and_project_isolation(tmp_path: Path) -> None:
@@ -78,7 +81,10 @@ def test_studio_authentication_and_project_isolation(tmp_path: Path) -> None:
         auth_projects=["project-a"],
     )
     with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
-        assert client.get("/api/capabilities").status_code == 401
+        missing = client.get("/api/v1/capabilities")
+        assert missing.status_code == 401
+        assert missing.json()["code"] == "authentication_required"
+        assert missing.headers["X-MechAgent-API-Version"] == "v1"
         headers = {"Authorization": f"Bearer {token}"}
         assert client.get("/api/capabilities", headers=headers).status_code == 200
         denied = client.post(
@@ -341,7 +347,19 @@ def test_studio_v1_routes_are_stable_and_legacy_routes_are_deprecated(tmp_path: 
     assert legacy.status_code == 200
     assert legacy.headers["Deprecation"] == "true"
     assert legacy.headers["Sunset"] == "2027-06-30"
-    assert client.post("/api/v1/jobs", json={"request": "   "}).status_code == 400
+    invalid = client.post("/api/v1/jobs", json={"request": "   "})
+    assert invalid.status_code == 400
+    assert invalid.json()["code"] == "bad_request"
+
+
+def test_studio_validation_errors_include_stable_code(tmp_path: Path) -> None:
+    client = TestClient(create_studio_app(tmp_path / "mechagent.yaml"))
+
+    response = client.get("/api/v1/jobs?limit=101")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert isinstance(response.json()["detail"], list)
 
 
 def test_studio_health_does_not_expose_local_paths(tmp_path: Path) -> None:
@@ -407,7 +425,7 @@ def test_studio_run_rejects_empty_request(tmp_path: Path) -> None:
     response = client.post("/api/run", json={"request": "   "})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "请求不能为空。"
+    assert response.json() == {"code": "bad_request", "detail": "请求不能为空。"}
 
 
 def test_studio_jobs_reject_empty_request(tmp_path: Path) -> None:
@@ -416,7 +434,7 @@ def test_studio_jobs_reject_empty_request(tmp_path: Path) -> None:
     response = client.post("/api/jobs", json={"request": "   "})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "请求不能为空。"
+    assert response.json() == {"code": "bad_request", "detail": "请求不能为空。"}
 
 
 def test_studio_capabilities_endpoint_exposes_registered_examples(tmp_path: Path) -> None:
@@ -488,7 +506,7 @@ def test_studio_inspect_rejects_empty_request(tmp_path: Path) -> None:
     response = client.post("/api/inspect", json={"request": "   "})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "请求不能为空。"
+    assert response.json() == {"code": "bad_request", "detail": "请求不能为空。"}
 
 
 def test_studio_run_endpoint_uses_thread_pool(tmp_path: Path) -> None:

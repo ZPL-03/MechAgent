@@ -55,13 +55,20 @@ export async function createJob(
   });
   const payload = await response.json();
   if (!response.ok) {
-    throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
+    throw apiError(payload, response.status, "请求失败。");
   }
   return payload as StudioJobResponse;
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message); }
+  constructor(message: string, public status: number, public code?: string) { super(message); }
+}
+
+function apiError(payload: unknown, status: number, fallback: string): ApiError {
+  const body = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const detail = typeof body.detail === "string" ? body.detail : fallback;
+  const code = typeof body.code === "string" ? body.code : undefined;
+  return new ApiError(detail, status, code);
 }
 
 export async function cancelJob(jobId: string): Promise<StudioJobResponse> {
@@ -77,21 +84,21 @@ async function jobAction(jobId: string, action: string): Promise<StudioJobRespon
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }
   });
   const payload = await response.json();
-  if (!response.ok) throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
+  if (!response.ok) throw apiError(payload, response.status, "请求失败。");
   return payload as StudioJobResponse;
 }
 
 export async function fetchJobs(): Promise<StudioJobResponse[]> {
   const response = await fetch("/api/v1/jobs?limit=10");
   const payload = await response.json();
-  if (!response.ok) throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
+  if (!response.ok) throw apiError(payload, response.status, "请求失败。");
   return payload.jobs;
 }
 
 export async function fetchEvidence(jobId: string): Promise<{ valid: boolean; errors: string[] }> {
   const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/evidence`);
   const payload = await response.json();
-  if (!response.ok) throw new ApiError(String(payload.detail ?? "请求失败。"), response.status);
+  if (!response.ok) throw apiError(payload, response.status, "请求失败。");
   return payload;
 }
 
@@ -99,7 +106,7 @@ export async function fetchJob(jobId: string): Promise<StudioJobResponse> {
   const response = await fetch(`/api/v1/jobs/${jobId}`);
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(String(payload.detail ?? "作业状态读取失败。"));
+    throw apiError(payload, response.status, "作业状态读取失败。");
   }
   return payload as StudioJobResponse;
 }
