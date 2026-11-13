@@ -103,12 +103,7 @@ def run_probe(
             destination = Path(temporary) / "roundtrip.bin"
             store.get_file(digest, destination)
             checks["get_sha256"] = destination.read_bytes() == content
-        page = client.list_objects_v2(
-            Bucket=store.bucket,
-            Prefix=f"{store.prefix}/objects/" if store.prefix else "objects/",
-        )
-        keys = {str(item.get("Key", "")) for item in page.get("Contents", []) or []}
-        checks["list"] = key in keys
+        checks["list"] = _list_contains_key(client, store, key)
         if not checks["head_sha256"]:
             errors.append("对象 metadata 中的 sha256 与内容摘要不一致。")
         if not checks["get_sha256"]:
@@ -142,6 +137,26 @@ def run_probe(
         "errors": errors,
         "keep_object": keep_object,
     }
+
+
+def _list_contains_key(client: Any, store: S3ArtifactStore, expected_key: str) -> bool:
+    """分页读取对象前缀，确认目标键存在。"""
+
+    prefix = f"{store.prefix}/objects/" if store.prefix else "objects/"
+    continuation: str | None = None
+    while True:
+        request: dict[str, Any] = {"Bucket": store.bucket, "Prefix": prefix}
+        if continuation:
+            request["ContinuationToken"] = continuation
+        page = client.list_objects_v2(**request)
+        keys = {str(item.get("Key", "")) for item in page.get("Contents", []) or []}
+        if expected_key in keys:
+            return True
+        if not page.get("IsTruncated"):
+            return False
+        continuation = str(page.get("NextContinuationToken", ""))
+        if not continuation:
+            raise RuntimeError("S3 对象列表缺少 NextContinuationToken。")
 
 
 def write_probe_evidence(result: dict[str, Any], output_dir: Path) -> Path:

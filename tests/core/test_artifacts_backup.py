@@ -181,6 +181,57 @@ def test_s3_probe_reports_put_failure_without_raw_provider_diagnostics() -> None
     assert result["errors"] == ["对象写入失败：Denied(AccessDenied)"]
 
 
+def test_s3_probe_lists_paginated_prefix() -> None:
+    class FakeS3:
+        def __init__(self) -> None:
+            self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+            self.list_calls = 0
+
+        def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+            content, metadata = self.objects[(Bucket, Key)]
+            return {"ContentLength": len(content), "Metadata": metadata}
+
+        def upload_fileobj(
+            self, stream: Any, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (stream.read(), dict(ExtraArgs["Metadata"]))
+
+        def download_file(self, bucket: str, key: str, destination: str) -> None:
+            Path(destination).write_bytes(self.objects[(bucket, key)][0])
+
+        def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
+            self.list_calls += 1
+            prefix = str(kwargs["Prefix"])
+            keys = [
+                key
+                for (bucket, key) in self.objects
+                if bucket == str(kwargs["Bucket"]) and key.startswith(prefix)
+            ]
+            if self.list_calls == 1:
+                return {
+                    "IsTruncated": True,
+                    "NextContinuationToken": "page-2",
+                    "Contents": [{"Key": f"{prefix}unrelated"}],
+                }
+            assert kwargs["ContinuationToken"] == "page-2"
+            return {"IsTruncated": False, "Contents": [{"Key": key} for key in keys]}
+
+        def delete_object(self, *, Bucket: str, Key: str) -> None:
+            self.objects.pop((Bucket, Key), None)
+
+    fake = FakeS3()
+    store = S3ArtifactStore("results", "probe", client=fake)
+    result = check_s3_storage.run_probe(
+        fake,
+        store,
+        require_lifecycle_id=None,
+        keep_object=False,
+    )
+
+    assert result["status"] == "passed"
+    assert fake.list_calls == 2
+
+
 def test_local_artifact_pruning_keeps_referenced_objects(tmp_path: Path) -> None:
     database = tmp_path / "jobs.sqlite3"
     config = tmp_path / "config.yaml"
