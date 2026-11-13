@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { isActiveJob, jobStatusLabel } from "./job";
-import { ApiError, createJob, fetchJob, fetchJobs } from "./api";
+import { ApiError, createJob, fetchHealth, fetchJob, fetchJobs, inspectRequest } from "./api";
 import type { StudioJobResponse, StudioJobStatus } from "../types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,6 +34,60 @@ describe("durable job lifecycle", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("forbidden");
     expect((error as ApiError).status).toBe(403);
+  });
+  it("preserves structured error details from validation responses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ code: "validation_error", detail: [{ loc: ["body"], msg: "invalid" }] })
+    }));
+    const error = await fetchHealth().catch(value => value);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).message).toContain('"msg":"invalid"');
+    expect((error as ApiError).detail).toEqual([{ loc: ["body"], msg: "invalid" }]);
+  });
+  it("uses the text body when an error response is not JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => { throw new Error("not json"); },
+      text: async () => "upstream unavailable"
+    }));
+    await expect(fetchHealth()).rejects.toMatchObject({
+      status: 502,
+      code: undefined,
+      detail: "upstream unavailable"
+    });
+  });
+  it("reports transport failures with a stable client error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    await expect(fetchHealth()).rejects.toMatchObject({
+      status: 0,
+      code: "transport_error",
+      message: "offline"
+    });
+  });
+  it("keeps an explicitly cancelled request as an abort", async () => {
+    const aborted = new Error("cancelled");
+    aborted.name = "AbortError";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(aborted));
+    await expect(fetchHealth()).rejects.toBe(aborted);
+  });
+  it("passes the inspection abort signal to the request", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, ready: false, request: "beam", tasks: [], errors: [] })
+    });
+    vi.stubGlobal("fetch", fetch);
+    const controller = new AbortController();
+    await inspectRequest("beam", controller.signal);
+    expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+  it("encodes persisted job identifiers before requesting status", async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ job_id: "job" }) });
+    vi.stubGlobal("fetch", fetch);
+    await fetchJob("job/id with space");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/jobs/job%2Fid%20with%20space");
   });
   it("requests the next job page with the server cursor", async () => {
     const fetch = vi.fn().mockResolvedValue({
