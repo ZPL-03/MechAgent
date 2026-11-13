@@ -126,7 +126,7 @@ def run_recovery_drill(
             "status_counts": source["status_counts"],
         }
 
-        source_store = source_artifact_store or ArtifactStore(database.parent)
+        source_store = source_artifact_store or ArtifactStore(database.parent / "objects")
         source_verification = _verify_artifacts(source_store, source["result_hashes"])
         report["artifacts"] = {
             "source_backend": _artifact_backend(source_artifact_store),
@@ -167,7 +167,7 @@ def run_recovery_drill(
             "status_counts": restored["status_counts"],
         }
 
-        target_store = target_artifact_store or ArtifactStore(restore_dir)
+        target_store = target_artifact_store or ArtifactStore(restore_dir / "objects")
         target_verification = _verify_artifacts(target_store, source["result_hashes"])
         restored_store = JobStore(restored_database, artifact_store=target_store)
         payload_errors: list[str] = []

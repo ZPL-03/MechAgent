@@ -69,7 +69,11 @@ def backup_studio(
                 _reject_symlinks(source_dir)
                 shutil.copytree(source_dir, temporary / name)
         if artifact_store is None:
-            source_dir = root / "objects"
+            # JobStore passes ``<database-parent>/objects`` as the ArtifactStore
+            # root; ArtifactStore stores content under its ``objects`` child.
+            # Copy the content directory itself so the backup layout remains
+            # ``objects/<prefix>/<digest>`` and matches explicit-store backups.
+            source_dir = root / "objects" / "objects"
             if source_dir.is_dir():
                 _reject_symlinks(source_dir)
                 shutil.copytree(source_dir, temporary / "objects")
@@ -175,15 +179,25 @@ def restore_studio(
     if destination_root.exists() and any(destination_root.iterdir()):
         raise FileExistsError("恢复目标必须为空目录。")
     destination_root.mkdir(parents=True, exist_ok=True)
-    for name in ("jobs.sqlite3", "jobs", "objects"):
+    for name in ("jobs.sqlite3", "jobs"):
         source = backup / name
         if source.is_dir():
             shutil.copytree(source, destination_root / name)
         elif source.is_file():
             shutil.copy2(source, destination_root / name)
-    restore_errors = _verify_database(
-        destination_root / "jobs.sqlite3", destination_root / "objects"
-    )
+    source_objects = backup / "objects"
+    if source_objects.is_dir():
+        if artifact_store is None:
+            # Match JobStore's default ArtifactStore(root=<database>/objects),
+            # whose content directory is <database>/objects/objects.
+            local_objects = destination_root / "objects" / "objects"
+            local_objects.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            local_objects = destination_root / "objects"
+        shutil.copytree(source_objects, local_objects)
+    else:
+        local_objects = destination_root / "objects"
+    restore_errors = _verify_database(destination_root / "jobs.sqlite3", local_objects)
     if restore_errors:
         raise ValueError("恢复数据库校验失败：" + "；".join(restore_errors))
     if artifact_store is not None:

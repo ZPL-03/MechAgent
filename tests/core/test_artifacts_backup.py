@@ -683,6 +683,30 @@ def test_recovery_drill_verifies_cross_store_result_objects(tmp_path: Path) -> N
     assert report["checks"]["artifact_objects_preserved"] is True
 
 
+def test_recovery_drill_uses_default_job_store_object_root(tmp_path: Path) -> None:
+    database = tmp_path / "studio" / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    store = JobStore(database)
+    job = store.submit("default-artifacts", False, config, max_queued=2)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+
+    report = drill_studio_recovery.run_recovery_drill(
+        database,
+        tmp_path / "default-artifact-drill",
+        rto_target_seconds=30,
+        rpo_max_lost_jobs=0,
+    )
+
+    assert report["status"] == "passed"
+    assert report["checks"]["artifact_objects_preserved"] is True
+    assert report["artifacts"]["source_verified"] == {"missing": [], "invalid": []}
+    assert report["artifacts"]["target_verified"] == {"missing": [], "invalid": []}
+
+
 def test_recovery_drill_reports_failed_rto_without_hiding_evidence(tmp_path: Path) -> None:
     database = tmp_path / "jobs.sqlite3"
     config = tmp_path / "config.yaml"
