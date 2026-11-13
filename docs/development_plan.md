@@ -157,10 +157,10 @@ STEP 网格、面到节点集合映射、C3D4 质量检查和 CalculiX 真实求
 TC-03、TC-04 在本机 Abaqus/Standard 与 CalculiX 上完成真实运行。请求位移字段使用节点坐标或
 梁中心线对应；统一单元质心字段包含应力 `stress_sxx`、应变 `strain_exx`、体积 `volume`，实体
 案例还包含 `strain_energy_density`；统一语义字段比较应力全场绝对最大分量、由各向同性线弹性
-本构重建的应变能密度摘要以及最大跨度方向支撑区域反力合力。统一单元质心字段相对误差阈值为
+本构重建的应变能密度摘要以及最大跨度方向支撑区域反力合力；反力平衡校核可计算的外载合力与支撑边界反力。统一单元质心字段相对误差阈值为
 10%，统一语义摘要相对误差阈值为 3%，绝对阈值均为 0.005。证据位于
 `mechagent_output/backend-comparison-current/manifest.json`，三个案例的请求字段、
-统一单元质心字段和统一语义字段均为 `passed`。结果根据节点坐标和单元连接生成 `mesh_digest`，
+统一单元质心字段、统一语义字段和反力平衡均为 `passed`。结果根据节点坐标和单元连接生成 `mesh_digest`，
 仅在两侧指纹一致时允许 `element` 或 `integration_point` 场按键比较；真实跨工具案例的网格不同，
 原始场仍存在节点/积分点、梁截面展开和离散标签差异，`raw_fields` 对这些字段保留 `unverified` 或 `failed`；逐积分点应力、逐节点反力和原始能量场的跨工具等价性仍未验收。Abaqus 双步 TC-01
 的完整场提取清单已通过，包含两个分析步和每步两个输出帧；`scripts/run_calculix_multistep.py`

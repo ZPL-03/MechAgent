@@ -22,7 +22,7 @@
     {"path":"run_abaqus_multistep.py","category":"solver","mutates_external_state":true,"real_solver":true,"description":"运行 Abaqus 多步适配器案例并提取 ODB 字段。"},
     {"path":"run_calculix_multistep.py","category":"solver","mutates_external_state":true,"real_solver":true,"description":"运行 CalculiX 多步适配器案例并提取 FRD 字段。"},
     {"path":"run_abaqus_smoke.py","category":"solver","mutates_external_state":true,"real_solver":true,"description":"运行独立 Abaqus 工具 smoke 案例。"},
-    {"path":"run_backend_comparison.py","category":"compare","mutates_external_state":true,"real_solver":true,"description":"运行选定适配器并生成跨工具结果比较清单。"},
+    {"path":"run_backend_comparison.py","category":"compare","mutates_external_state":true,"real_solver":true,"description":"运行选定适配器并生成字段、语义差异和反力平衡比较清单。"},
     {"path":"run_benchmarks.py","category":"validation","mutates_external_state":true,"real_solver":true,"description":"运行标准验证案例和参考公式检查。"},
     {"path":"run_cad_topology_case.py","category":"cad","mutates_external_state":true,"real_solver":true,"description":"验证 CAD 拓扑、区域、网格和求解链路。"},
     {"path":"run_cad_mesh_convergence.py","category":"validation","mutates_external_state":true,"real_solver":true,"description":"在固定 CAD 来源和区域契约下运行多尺寸实体网格并评估独立性。"},

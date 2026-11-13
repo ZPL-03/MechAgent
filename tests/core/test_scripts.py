@@ -456,7 +456,14 @@ def test_backend_comparison_script_writes_verifiable_manifest(
     )
     manifest = tmp_path / "manifest.json"
     assert verify_manifest(manifest) == []
-    assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "passed"
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_payload["status"] == "passed"
+    assert manifest_payload["tolerance"] == {
+        "relative": 0.03,
+        "absolute": 0.005,
+        "mapped_relative": 0.1,
+        "mapped_absolute": 0.005,
+    }
 
 
 def test_run_benchmarks_script_uses_configured_output_dir(

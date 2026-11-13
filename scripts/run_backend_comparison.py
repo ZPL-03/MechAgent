@@ -24,6 +24,7 @@ from mechagent.core.compare import (  # noqa: E402
     ComparisonTolerance,
     compare_backend_results,
     derive_comparison_fields,
+    evaluate_reaction_balance,
 )
 from mechagent.core.models import ModelParams, SimulationCase  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
@@ -60,8 +61,18 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir", type=Path, default=Path("mechagent_output/backend-comparison")
     )
     parser.add_argument("--timeout", type=int, default=3600)
-    parser.add_argument("--relative", type=float, default=1.0e-2)
-    parser.add_argument("--absolute", type=float, default=1.0e-9)
+    parser.add_argument(
+        "--relative",
+        type=float,
+        default=3.0e-2,
+        help="跨后端比较的相对误差阈值；默认 3%%，适用于当前标准案例的离散差异。",
+    )
+    parser.add_argument(
+        "--absolute",
+        type=float,
+        default=5.0e-3,
+        help="跨后端比较的绝对误差阈值；默认 0.005，适用于当前结果单位。",
+    )
     parser.add_argument(
         "--mapped-relative",
         type=float,
@@ -105,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
         "status": "passed" if all(row["status"] == "passed" for row in rows) else "failed",
         "case_ids": case_ids,
         "comparison": output.name,
+        "tolerance": {
+            "relative": args.relative,
+            "absolute": args.absolute,
+            "mapped_relative": args.mapped_relative,
+            "mapped_absolute": args.absolute,
+        },
     }
     manifest["artifacts"] = stable_artifact_records(args.output_dir)
     (args.output_dir / "manifest.json").write_text(
@@ -181,6 +198,8 @@ def _run_case(
             tolerance=tolerance,
             field_source="fields",
         )
+        left_equilibrium = evaluate_reaction_balance(left, case.model, tolerance=tolerance)
+        right_equilibrium = evaluate_reaction_balance(right, case.model, tolerance=tolerance)
         left["comparison_fields"] = derive_comparison_fields(
             left,
             elastic_modulus=case.model.material.E,
@@ -218,11 +237,18 @@ def _run_case(
                 requested_comparison.status,
                 semantic_comparison.status,
                 mapped_comparison.status,
+                left_equilibrium.status,
+                right_equilibrium.status,
             ),
             "requested_fields": requested_comparison.model_dump(mode="json"),
             "raw_fields": raw_comparison.model_dump(mode="json"),
             "mapped_fields": mapped_comparison.model_dump(mode="json"),
             "comparison_fields": semantic_comparison.model_dump(mode="json"),
+            "equilibrium": {
+                "status": _combined_status(left_equilibrium.status, right_equilibrium.status),
+                "calculix": left_equilibrium.model_dump(mode="json"),
+                "abaqus": right_equilibrium.model_dump(mode="json"),
+            },
         }
     return {
         "case_id": case_id,

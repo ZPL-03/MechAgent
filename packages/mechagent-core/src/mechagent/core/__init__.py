@@ -24,7 +24,13 @@ from mechagent.core.cad_convergence import (
     evaluate_cad_mesh_convergence,
     region_contract_digest,
 )
-from mechagent.core.compare import BackendComparison, ComparisonTolerance, compare_backend_results
+from mechagent.core.compare import (
+    BackendComparison,
+    ComparisonTolerance,
+    EquilibriumReport,
+    compare_backend_results,
+    evaluate_reaction_balance,
+)
 from mechagent.core.convergence import (
     ConvergencePoint,
     MeshConvergenceReport,
@@ -133,7 +139,9 @@ __all__ = [
     "PostProcessor",
     "BackendComparison",
     "ComparisonTolerance",
+    "EquilibriumReport",
     "compare_backend_results",
+    "evaluate_reaction_balance",
     "attach_case_result_fields",
     "attach_mapped_result_fields",
     "compute_mesh_digest",

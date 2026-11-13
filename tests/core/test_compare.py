@@ -6,8 +6,11 @@ from mechagent.core.compare import (
     ComparisonTolerance,
     compare_backend_results,
     derive_comparison_fields,
+    evaluate_reaction_balance,
 )
+from mechagent.core.models import GeometrySpec, GeometryType
 from mechagent.core.results import compute_mesh_digest
+from mechagent.core.validation import tc01_model_params, tc03_model_params
 
 
 def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
@@ -422,6 +425,66 @@ def test_derived_comparison_fields_use_common_physical_semantics() -> None:
         "strain_energy_density",
         "stress_max_abs",
     }
+
+
+def test_reaction_balance_passes_for_concentrated_force() -> None:
+    result = evaluate_reaction_balance(
+        {
+            "success": True,
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [100.0, 0.0, 0.0]},
+            "fields": {"reaction_force": {"values": {"1": [0.0, 1000.0, 0.0]}}},
+        },
+        tc01_model_params(),
+        tolerance=ComparisonTolerance(relative=1.0e-6, absolute=1.0e-6),
+    )
+    assert result.status == "passed"
+    assert result.applied_resultant == (0.0, -1000.0, 0.0)
+    assert result.max_absolute_error == 0.0
+
+
+def test_reaction_balance_supports_known_pressure_area() -> None:
+    result = evaluate_reaction_balance(
+        {
+            "success": True,
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [200.0, 0.0, 0.0]},
+            "fields": {"reaction_force": {"values": {"1": [-4000.0, 0.0, 0.0]}}},
+        },
+        tc03_model_params(),
+    )
+    assert result.status == "passed"
+    assert result.applied_resultant == (4000.0, 0.0, 0.0)
+
+
+def test_reaction_balance_keeps_unknown_load_area_unverified() -> None:
+    result = evaluate_reaction_balance(
+        {"success": True, "fields": {}},
+        tc03_model_params().model_copy(
+            update={"geometry": GeometrySpec(type=GeometryType.SOLID, dimensions={"length": 200.0})}
+        ),
+    )
+    assert result.status == "unverified"
+    assert result.reason is not None
+
+
+def test_reaction_balance_rejects_partial_solver_result() -> None:
+    result = evaluate_reaction_balance(
+        {"fields": {"reaction_force": {"values": {"1": [0.0, 1000.0, 0.0]}}}},
+        tc01_model_params(),
+    )
+    assert result.status == "unverified"
+    assert result.reason is not None
+
+
+def test_reaction_balance_rejects_incomplete_reaction_vectors() -> None:
+    result = evaluate_reaction_balance(
+        {
+            "success": True,
+            "nodes": {"1": [0.0, 0.0, 0.0]},
+            "fields": {"reaction_force": {"values": {"1": [1000.0]}}},
+        },
+        tc01_model_params(),
+    )
+    assert result.status == "unverified"
 
 
 def test_mapped_fields_align_by_element_centroid_coordinates() -> None:

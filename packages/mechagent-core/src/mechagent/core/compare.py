@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mechagent.core.models import LoadType, ModelParams
 from mechagent.core.results import compute_mesh_digest
 
 
@@ -39,6 +40,32 @@ class BackendComparison(BaseModel):
     max_relative_error: float = Field(default=0.0, ge=0.0)
     tolerance: ComparisonTolerance
     differences: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EquilibriumReport(BaseModel):
+    """外加载荷与支撑反力的合力平衡校核。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["passed", "failed", "unverified"]
+    load_types: list[str] = Field(default_factory=list)
+    applied_resultant: tuple[float, float, float] | None = None
+    reaction_resultant: tuple[float, float, float] | None = None
+    residual: tuple[float, float, float] | None = None
+    max_absolute_error: float = Field(default=0.0, ge=0.0)
+    max_relative_error: float = Field(default=0.0, ge=0.0)
+    tolerance: ComparisonTolerance
+    source: str = "fields.reaction_force + mesh coordinates + model loads"
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_finite_vectors(self) -> "EquilibriumReport":
+        for value in (self.applied_resultant, self.reaction_resultant, self.residual):
+            if value is not None and any(not math.isfinite(item) for item in value):
+                raise ValueError("平衡校核向量必须包含有限数值。")
+        if not math.isfinite(self.max_absolute_error) or not math.isfinite(self.max_relative_error):
+            raise ValueError("平衡校核误差必须是有限数值。")
+        return self
 
 
 def compare_backend_results(
@@ -397,6 +424,154 @@ def _result_contract_mismatches(
     return mismatches
 
 
+def evaluate_reaction_balance(
+    result: dict[str, Any],
+    model: ModelParams,
+    *,
+    tolerance: ComparisonTolerance | None = None,
+) -> EquilibriumReport:
+    """校核支撑反力合力是否平衡可计算的外加载荷合力。
+
+    集中力、梁全跨线载荷以及参数化板/实体的已知面压力可以计算载荷合力。
+    位移控制、力矩、温度载荷、未知 CAD 受载面积和不支持的区域保持
+    ``unverified``，不以反力场存在替代载荷平衡证据。
+    """
+
+    selected_tolerance = tolerance or ComparisonTolerance()
+    load_types = [load.type.value for load in model.loads]
+    if result.get("success") is False or result.get("success") == "failed":
+        return EquilibriumReport(
+            status="failed",
+            load_types=load_types,
+            tolerance=selected_tolerance,
+            reason="求解结果失败，不能进行反力平衡校核。",
+        )
+    if result.get("success") is not True:
+        return EquilibriumReport(
+            status="unverified",
+            load_types=load_types,
+            tolerance=selected_tolerance,
+            reason="结果缺少 success=true，不能作为已完成求解结果校核。",
+        )
+    applied, load_reason = _applied_load_resultant(model)
+    if applied is None:
+        return EquilibriumReport(
+            status="unverified",
+            load_types=load_types,
+            tolerance=selected_tolerance,
+            reason=load_reason,
+        )
+    reaction = _result_reaction_resultant(result)
+    if reaction is None:
+        return EquilibriumReport(
+            status="unverified",
+            load_types=load_types,
+            applied_resultant=applied,
+            tolerance=selected_tolerance,
+            reason="结果缺少可定位到支撑边界的 reaction_force 或节点坐标。",
+        )
+    residual = (
+        reaction[0] + applied[0],
+        reaction[1] + applied[1],
+        reaction[2] + applied[2],
+    )
+    absolute_error = max(abs(value) for value in residual)
+    scale = max(
+        *(abs(value) for value in applied),
+        *(abs(value) for value in reaction),
+        selected_tolerance.absolute,
+    )
+    relative_error = absolute_error / scale
+    passed = (
+        absolute_error <= selected_tolerance.absolute
+        or relative_error <= selected_tolerance.relative
+    )
+    return EquilibriumReport(
+        status="passed" if passed else "failed",
+        load_types=load_types,
+        applied_resultant=applied,
+        reaction_resultant=reaction,
+        residual=residual,
+        max_absolute_error=absolute_error,
+        max_relative_error=relative_error,
+        tolerance=selected_tolerance,
+        reason=None if passed else "支撑反力合力未达到载荷平衡阈值。",
+    )
+
+
+def _applied_load_resultant(
+    model: ModelParams,
+) -> tuple[tuple[float, float, float] | None, str | None]:
+    total = [0.0, 0.0, 0.0]
+    for load in model.loads:
+        direction = _unit_vector(load.direction)
+        if direction is None:
+            return None, f"载荷 {load.region} 的方向无法归一化。"
+        factor: float | None
+        if load.type is LoadType.FORCE:
+            factor = load.magnitude
+        elif load.type is LoadType.LINE_LOAD:
+            length = model.geometry.dimensions.get("length")
+            if model.geometry.type.value != "beam" or length is None:
+                return None, "线载荷缺少可计算的梁长度。"
+            factor = load.magnitude * length
+        elif load.type is LoadType.PRESSURE:
+            area = _known_pressure_area(model, load.region)
+            if area is None:
+                return None, f"压力区域 {load.region} 的面积未在当前契约中定义。"
+            factor = load.magnitude * area
+        else:
+            return None, f"载荷类型 {load.type.value} 没有可计算的合力契约。"
+        for index, component in enumerate(direction):
+            total[index] += factor * component
+    if not all(math.isfinite(value) for value in total):
+        return None, "外加载荷合力不是有限数值。"
+    return (total[0], total[1], total[2]), None
+
+
+def _known_pressure_area(model: ModelParams, region: str) -> float | None:
+    dimensions = model.geometry.dimensions
+    key = region.strip().lower().replace("-", "_").replace(" ", "_")
+    if model.geometry.type.value == "plate" and key in {
+        "top_surface",
+        "surface",
+        "plate",
+        "all",
+    }:
+        length, width = dimensions.get("length"), dimensions.get("width")
+        return None if length is None or width is None else length * width
+    if model.geometry.type.value == "solid" and key in {
+        "end_face",
+        "right_end",
+        "free_end",
+    }:
+        width, height = dimensions.get("width"), dimensions.get("height")
+        return None if width is None or height is None else width * height
+    return None
+
+
+def _result_reaction_resultant(
+    result: dict[str, Any],
+) -> tuple[float, float, float] | None:
+    fields = result.get("fields")
+    reaction = fields.get("reaction_force") if isinstance(fields, dict) else None
+    values = reaction.get("values") if isinstance(reaction, dict) else None
+    vectors = {
+        label: vector for label, vector in _finite_vectors(values).items() if len(vector) >= 3
+    }
+    nodes = _node_coordinates(result.get("nodes"))
+    if not nodes:
+        nodes = _node_coordinates(result.get("mesh_nodes"))
+    return _root_resultant(vectors, nodes)
+
+
+def _unit_vector(value: tuple[float, float, float]) -> tuple[float, float, float] | None:
+    norm = math.sqrt(sum(component * component for component in value))
+    if not math.isfinite(norm) or norm <= 1.0e-12:
+        return None
+    return (value[0] / norm, value[1] / norm, value[2] / norm)
+
+
 def _pairs_cover_fields(
     pairs: dict[str, str], left_values: dict[str, Any], right_values: dict[str, Any]
 ) -> bool:
@@ -524,11 +699,12 @@ def _root_resultant(
     labels = [label for label in common if abs(nodes[label][axis] - minimum) <= tolerance]
     if not labels:
         return None
-    sums = [
-        sum(vectors[label][index] for label in labels if len(vectors[label]) > index)
-        for index in range(3)
-    ]
-    return (sums[0], sums[1], sums[2])
+    resultant = [0.0, 0.0, 0.0]
+    for label in labels:
+        vector = vectors[label]
+        for index in range(min(len(vector), 3)):
+            resultant[index] += vector[index]
+    return (resultant[0], resultant[1], resultant[2])
 
 
 def _coordinate_pairs(
