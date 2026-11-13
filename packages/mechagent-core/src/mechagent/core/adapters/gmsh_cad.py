@@ -319,7 +319,7 @@ def _face_region_candidates(
                 "mapped" if len(tied) == 1 and distance <= extent * 1.0e-6 else "ambiguous"
             )
             confidence = max(0.0, 1.0 - distance / extent) if status == "mapped" else 0.0
-            center = list(entity.center)
+            center = [sum(item.center[index] for item in tied) / len(tied) for index in range(3)]
             center["xyz".index(axis)] = target
             center_tuple = (float(center[0]), float(center[1]), float(center[2]))
             candidates.append(
@@ -328,7 +328,7 @@ def _face_region_candidates(
                     axis=axis,
                     side=side,
                     center=center_tuple,
-                    area=entity.measure,
+                    area=sum(item.measure for item in tied),
                     topology_ids=[item.stable_id for item in tied],
                     part_ids=sorted(
                         {

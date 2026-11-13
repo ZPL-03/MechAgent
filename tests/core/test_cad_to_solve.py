@@ -352,6 +352,7 @@ def test_multi_solid_cad_exposes_part_topology_without_execution_claim(tmp_path:
     mapped = {item.name: item for item in analysis.candidate.region_candidates}
     assert len(mapped["x_min"].part_ids) == 1
     assert len(mapped["y_min"].part_ids) == 2
+    assert mapped["y_min"].area == pytest.approx(2.0 * 40.0 * 40.0, rel=1.0e-6)
 
     params = GeometryAgent(config, tmp_path).to_model_params(
         step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
