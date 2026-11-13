@@ -163,6 +163,51 @@ def test_concurrent_idempotency_and_capacity(store: JobStore) -> None:
         store.submit("输入", False, store.database.parent / "config.yaml", max_queued=1)
 
 
+def test_job_and_audit_cursor_pages_are_complete_and_deterministic(store: JobStore) -> None:
+    for index in range(5):
+        submit(store, project_id="page-project", idempotency_key=f"page-{index}")
+        store.audit(
+            subject="tester",
+            action="read",
+            project_id="page-project",
+            outcome="allowed",
+            details={"index": index},
+        )
+
+    first = store.list_jobs_page(limit=2, project_id="page-project")
+    assert len(first["items"]) == 2
+    assert first["has_more"] is True
+    assert first["next_cursor"]
+    second = store.list_jobs_page(limit=2, cursor=first["next_cursor"], project_id="page-project")
+    third = store.list_jobs_page(limit=2, cursor=second["next_cursor"], project_id="page-project")
+    job_ids = [item["job_id"] for page in (first, second, third) for item in page["items"]]
+    assert len(job_ids) == len(set(job_ids)) == 5
+    assert third["has_more"] is False
+    assert third["next_cursor"] is None
+
+    audit_first = store.list_audit_events_page(limit=2, project_id="page-project")
+    audit_second = store.list_audit_events_page(
+        limit=2, cursor=audit_first["next_cursor"], project_id="page-project"
+    )
+    audit_third = store.list_audit_events_page(
+        limit=2, cursor=audit_second["next_cursor"], project_id="page-project"
+    )
+    sequences = [
+        item["sequence"]
+        for page in (audit_first, audit_second, audit_third)
+        for item in page["items"]
+    ]
+    assert len(sequences) == len(set(sequences)) == 5
+    assert audit_third["has_more"] is False
+
+    with pytest.raises(ValueError, match="分页游标无效"):
+        store.list_jobs_page(limit=2, cursor="not-a-cursor", project_id="page-project")
+    with pytest.raises(ValueError, match="查询范围"):
+        store.list_jobs_page(limit=2, cursor=first["next_cursor"], project_id="other-project")
+    with pytest.raises(ValueError, match="不能同时"):
+        store.list_jobs_page(limit=2, offset=0, cursor=first["next_cursor"])
+
+
 def test_multiple_dispatchers_claim_atomically(store: JobStore) -> None:
     for _ in range(5):
         submit(store)

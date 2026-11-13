@@ -310,3 +310,14 @@ export interface StudioJobResponse {
   error: string | null;
   events: StudioProgressEvent[];
 }
+
+export interface StudioPagination {
+  limit: number;
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export interface StudioJobPage {
+  jobs: StudioJobResponse[];
+  pagination: StudioPagination;
+}

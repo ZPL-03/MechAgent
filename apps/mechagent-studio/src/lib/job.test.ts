@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { isActiveJob, jobStatusLabel } from "./job";
-import { ApiError, createJob, fetchJob } from "./api";
+import { ApiError, createJob, fetchJob, fetchJobs } from "./api";
 import type { StudioJobResponse, StudioJobStatus } from "../types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,5 +34,14 @@ describe("durable job lifecycle", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("forbidden");
     expect((error as ApiError).status).toBe(403);
+  });
+  it("requests the next job page with the server cursor", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ jobs: [], pagination: { limit: 10, next_cursor: null, has_more: false } })
+    });
+    vi.stubGlobal("fetch", fetch);
+    await fetchJobs("cursor-value");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/jobs?limit=10&cursor=cursor-value");
   });
 });

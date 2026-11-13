@@ -61,8 +61,8 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `POST /api/v1/inspect` | 请求与 `use_llm_agents`；任务、缺项和可执行状态 |
 | `POST /api/v1/jobs` | 创建请求作业，返回作业标识；跨组织管理员必须在请求中指定 `organization` |
 | `GET /api/v1/jobs/{job_id}` | 作业状态、事件与终态结果 |
-| `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50，`offset` 为非负整数；不携带完整结果；跨组织管理员可用 `organization` 过滤 |
-| `GET /api/v1/audit` | admin 读取当前组织和项目的主体操作审计事件，`limit` 为 1–1000 |
+| `GET /api/v1/jobs` | 持久化列表，`limit` 为 1–100、默认 50；使用响应中的 `pagination.next_cursor` 请求下一页；`offset` 为兼容旧客户端保留，不能与 `cursor` 同时使用；不携带完整结果；跨组织管理员可用 `organization` 过滤 |
+| `GET /api/v1/audit` | admin 读取当前组织和项目的主体操作审计事件，`limit` 为 1–1000；使用响应中的 `pagination.next_cursor` 请求下一页 |
 | `GET /api/v1/metrics` | 受组织和项目权限约束的脱敏作业、结果、证据和 worker 资源指标；admin 不带 `project_id` 时读取相应组织范围 |
 | `GET /api/v1/identities` | admin 读取当前组织的主体摘要；跨组织管理员读取全部组织；不返回 API key |
 | `POST /api/v1/identities` | admin 创建主体并返回一次性明文 API key；数据库只保存 SHA-256 摘要 |
@@ -88,5 +88,7 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 `GET /api/jobs/{job_id}/evidence` 和 `POST /api/run`。
 
 `POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
+
+作业和审计列表使用稳定游标分页。作业游标绑定最后一条记录的 `created_at` 与 `job_id`，审计游标绑定递减的 `sequence`；游标只在相同项目、组织和主体可见范围内继续有效。后续写入记录不会改变已经读取页面的边界，服务端每页响应包含 `pagination.limit`、`pagination.has_more` 和 `pagination.next_cursor`。游标格式错误、与筛选条件冲突或同时提交 `offset` 与 `cursor` 返回 400。旧客户端可以继续使用作业列表的 `offset`，但新集成应使用游标。
 
 Studio 使用 SQLite WAL 本机持久队列，支持配置主体、受管理主体、角色、组织和项目范围；分布式高可用和远程调度需要部署扩展。默认仅监听回环地址；外网或多人部署需要独立的身份提供商、网络边界、集中审计和配额服务。能力限制见[能力说明](capabilities.md)，视觉与交互规则见[设计系统](design_system.md)。

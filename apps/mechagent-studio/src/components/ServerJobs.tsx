@@ -9,6 +9,8 @@ export function ServerJobs({ running, onOpen }: {
 }) {
   const { t } = useI18n();
   const [jobs, setJobs] = useState<StudioJobResponse[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   async function action(callback: () => Promise<void>) {
@@ -17,7 +19,19 @@ export function ServerJobs({ running, onOpen }: {
     catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
-  async function refresh() { setJobs(await fetchJobs()); }
+  async function refresh() {
+    const page = await fetchJobs();
+    setJobs(page.jobs);
+    setNextCursor(page.pagination.next_cursor);
+    setHasMore(page.pagination.has_more);
+  }
+  async function loadMore() {
+    if (!nextCursor) return;
+    const page = await fetchJobs(nextCursor);
+    setJobs(current => [...current, ...page.jobs]);
+    setNextCursor(page.pagination.next_cursor);
+    setHasMore(page.pagination.has_more);
+  }
   useEffect(() => { void action(refresh); }, [running]);
   return <section className="server-jobs" aria-label={t("服务器作业")}>
     <div className="server-jobs-head">
@@ -25,7 +39,7 @@ export function ServerJobs({ running, onOpen }: {
       <button type="button" className="secondary-action" disabled={busy}
         onClick={() => void action(refresh)}>{t("刷新")}</button>
     </div>
-    <p className="server-jobs-help">{t("最近 10 个作业；完整记录保存在本机数据库。")}</p>
+    <p className="server-jobs-help">{t("显示最近作业；完整记录保存在本机数据库。")}</p>
     {message && <p className="preflight-error" role="status">{t(message)}</p>}
     {jobs.map(job => <div className="server-job" key={job.job_id}>
       <button type="button" className="history-item" disabled={running || busy}
@@ -45,5 +59,7 @@ export function ServerJobs({ running, onOpen }: {
           })}>{t("校验证据")}</button>
       </div>}
     </div>)}
+    {hasMore && <button type="button" className="secondary-action" disabled={busy || running}
+      onClick={() => void action(loadMore)}>{t("加载更多")}</button>}
   </section>;
 }

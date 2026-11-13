@@ -110,6 +110,45 @@ def test_studio_authentication_and_project_isolation(tmp_path: Path) -> None:
         assert client.get("/api/audit?project_id=project-a", headers=headers).status_code == 200
 
 
+def test_studio_cursor_pagination_exposes_page_metadata(tmp_path: Path) -> None:
+    config_path = tmp_path / "mechagent.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    settings = StudioSettings(database=tmp_path / "jobs.sqlite3")
+    with TestClient(create_studio_app(config_path, studio_settings=settings)) as client:
+        for index in range(3):
+            response = client.post(
+                "/api/v1/jobs",
+                json={"request": f"page-{index}", "project_id": "page-project"},
+            )
+            assert response.status_code == 202
+        first = client.get("/api/v1/jobs?project_id=page-project&limit=2")
+        assert first.status_code == 200
+        first_payload = first.json()
+        assert len(first_payload["jobs"]) == 2
+        assert first_payload["pagination"]["has_more"] is True
+        cursor = first_payload["pagination"]["next_cursor"]
+        second = client.get(f"/api/v1/jobs?project_id=page-project&limit=2&cursor={cursor}")
+        assert second.status_code == 200
+        assert len(second.json()["jobs"]) == 1
+        assert second.json()["pagination"]["has_more"] is False
+        assert client.get("/api/v1/jobs?cursor=invalid").status_code == 400
+        assert client.get("/api/v1/jobs?offset=0&cursor=invalid").status_code == 400
+        audit_first = client.get("/api/v1/audit?project_id=page-project&limit=2")
+        assert audit_first.status_code == 200
+        audit_payload = audit_first.json()
+        assert audit_payload["pagination"]["has_more"] is True
+        audit_cursor = audit_payload["pagination"]["next_cursor"]
+        audit_second = client.get(
+            "/api/v1/audit",
+            params={"project_id": "page-project", "limit": 2, "cursor": audit_cursor},
+        )
+        assert audit_second.status_code == 200
+        assert audit_second.json()["events"]
+        assert (
+            audit_second.json()["events"][0]["sequence"] < audit_payload["events"][-1]["sequence"]
+        )
+
+
 def test_studio_metrics_are_scoped_and_persistent_without_request_data(tmp_path: Path) -> None:
     config_path = tmp_path / "mechagent.yaml"
     config_path.write_text("{}", encoding="utf-8")

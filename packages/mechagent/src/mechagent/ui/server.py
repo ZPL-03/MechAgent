@@ -40,6 +40,7 @@ from mechagent.runtime.store import (
     TERMINAL,
     IdempotencyError,
     JobStore,
+    PageCursorError,
     QueueFullError,
     StorageQuotaError,
 )
@@ -493,25 +494,35 @@ def create_studio_app(
         project_id: str = Query("default", min_length=1, max_length=128),
         organization: str | None = Query(None, min_length=1, max_length=128),
         limit: int = Query(50, ge=1, le=100),
-        offset: int = Query(0, ge=0),
+        cursor: str | None = Query(None, min_length=1, max_length=512),
+        offset: int | None = Query(None, ge=0),
     ) -> dict[str, Any]:
+        if cursor is not None and offset is not None:
+            raise HTTPException(400, "offset 和 cursor 不能同时使用。")
         current = principal(request)
         if current.organization != "*" and organization not in {None, current.organization}:
             raise HTTPException(403, "主体不能读取其他组织。")
         scope_organization = current.organization if current.organization != "*" else organization
         current = authorize(request, "read", project_id, scope_organization)
         owner = None if "admin" in current.roles else current.subject
+        try:
+            page = runtime().store.list_jobs_page(
+                limit=limit,
+                offset=offset,
+                cursor=cursor,
+                owner=owner,
+                project_id=project_id,
+                organization=scope_organization,
+            )
+        except PageCursorError as exc:
+            raise HTTPException(400, str(exc)) from exc
         return {
-            "jobs": [
-                payload(item, include_result=False)
-                for item in runtime().store.list_jobs(
-                    limit=limit,
-                    offset=offset,
-                    owner=owner,
-                    project_id=project_id,
-                    organization=scope_organization,
-                )
-            ]
+            "jobs": [payload(item, include_result=False) for item in page["items"]],
+            "pagination": {
+                "limit": limit,
+                "next_cursor": page["next_cursor"],
+                "has_more": page["has_more"],
+            },
         }
 
     @app.get("/api/audit")
@@ -520,6 +531,7 @@ def create_studio_app(
         project_id: str = Query("default", min_length=1, max_length=128),
         organization: str | None = Query(None, min_length=1, max_length=128),
         limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=512),
     ) -> dict[str, Any]:
         current = principal(request)
         if current.organization != "*" and organization not in {None, current.organization}:
@@ -528,10 +540,22 @@ def create_studio_app(
         current = authorize(request, "inspect", project_id, scope_organization)
         if "admin" not in current.roles:
             raise HTTPException(403, "只有 admin 可以读取审计事件。")
-        return {
-            "events": runtime().store.list_audit_events(
-                limit=limit, project_id=project_id, organization=scope_organization
+        try:
+            page = runtime().store.list_audit_events_page(
+                limit=limit,
+                cursor=cursor,
+                project_id=project_id,
+                organization=scope_organization,
             )
+        except PageCursorError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "events": page["items"],
+            "pagination": {
+                "limit": limit,
+                "next_cursor": page["next_cursor"],
+                "has_more": page["has_more"],
+            },
         }
 
     @app.get("/api/metrics")

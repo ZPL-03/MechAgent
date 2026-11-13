@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -37,6 +39,37 @@ class IdempotencyError(ValueError):
 
 class StorageQuotaError(ValueError):
     """Studio 工作目录超过配置的本机存储配额。"""
+
+
+class PageCursorError(ValueError):
+    """分页游标格式不受支持或内容无效。"""
+
+
+def _encode_page_cursor(kind: str, values: dict[str, Any]) -> str:
+    payload = json.dumps(
+        {"version": 1, "kind": kind, **values},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_page_cursor(token: str, expected_kind: str) -> dict[str, Any]:
+    if not token or len(token) > 512:
+        raise PageCursorError("分页游标无效。")
+    try:
+        padded = token.encode("ascii") + b"=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (UnicodeError, ValueError, TypeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise PageCursorError("分页游标无效。") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or payload.get("kind") != expected_kind
+    ):
+        raise PageCursorError("分页游标无效。")
+    return payload
 
 
 def iso_time(value: float | None) -> str | None:
@@ -417,6 +450,39 @@ class JobStore:
         project_id: str | None = None,
         organization: str | None = None,
     ) -> list[dict[str, Any]]:
+        """按稳定的创建时间和作业 ID 顺序读取作业。"""
+
+        page = self.list_jobs_page(
+            limit=limit,
+            offset=offset,
+            owner=owner,
+            project_id=project_id,
+            organization=organization,
+        )
+        return cast(list[dict[str, Any]], page["items"])
+
+    def list_jobs_page(
+        self,
+        *,
+        limit: int = 50,
+        offset: int | None = None,
+        cursor: str | None = None,
+        owner: str | None = None,
+        project_id: str | None = None,
+        organization: str | None = None,
+    ) -> dict[str, Any]:
+        """读取一页作业并返回下一页游标。
+
+        游标以最后一条记录的 ``created_at`` 和 ``job_id`` 定位，后续写入记录不会
+        改变已经读取页面的边界。``offset`` 仅用于兼容旧客户端，不能与游标同时使用。
+        """
+
+        if not 1 <= limit <= 100:
+            raise ValueError("作业查询 limit 必须位于 1 到 100。")
+        if offset is not None and offset < 0:
+            raise ValueError("作业查询 offset 不能为负数。")
+        if offset is not None and cursor is not None:
+            raise PageCursorError("offset 和 cursor 不能同时使用。")
         with self.connect() as connection:
             clauses: list[str] = []
             values: list[Any] = []
@@ -429,16 +495,58 @@ class JobStore:
             if organization is not None:
                 clauses.append("organization=?")
                 values.append(organization)
+            if cursor is not None:
+                decoded = _decode_page_cursor(cursor, "jobs")
+                created_at = decoded.get("created_at")
+                job_id = decoded.get("job_id")
+                if (
+                    not isinstance(created_at, (float, int))
+                    or isinstance(created_at, bool)
+                    or not math.isfinite(float(created_at))
+                    or not isinstance(job_id, str)
+                    or not job_id
+                ):
+                    raise PageCursorError("分页游标无效。")
+                if any(
+                    decoded.get(key) != value
+                    for key, value in {
+                        "owner": owner,
+                        "project_id": project_id,
+                        "organization": organization,
+                    }.items()
+                ):
+                    raise PageCursorError("分页游标与查询范围不一致。")
+                clauses.append("(created_at < ? OR (created_at = ? AND job_id > ?))")
+                values.extend([float(created_at), float(created_at), job_id])
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
-            return [
-                dict(row)
-                for row in connection.execute(
+            page_values = [*values, limit + 1]
+            if offset is not None:
+                page_values.append(offset)
+                query = (
                     "SELECT * FROM jobs"
                     + where
-                    + " ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?",
-                    (*values, limit, offset),
+                    + " ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?"
                 )
-            ]
+            else:
+                query = "SELECT * FROM jobs" + where + " ORDER BY created_at DESC,job_id LIMIT ?"
+            rows = connection.execute(query, page_values).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        items = [dict(row) for row in rows]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = _encode_page_cursor(
+                "jobs",
+                {
+                    "created_at": float(last["created_at"]),
+                    "job_id": str(last["job_id"]),
+                    "owner": owner,
+                    "project_id": project_id,
+                    "organization": organization,
+                },
+            )
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
     def authenticate_identity(self, token: str | None) -> Principal:
         """Authenticate a managed identity without storing or returning its token."""
@@ -725,29 +833,57 @@ class JobStore:
         project_id: str | None = None,
         organization: str | None = None,
     ) -> list[dict[str, Any]]:
+        """按递减序列号读取审计事件。"""
+
+        page = self.list_audit_events_page(
+            limit=limit, project_id=project_id, organization=organization
+        )
+        return cast(list[dict[str, Any]], page["items"])
+
+    def list_audit_events_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        project_id: str | None = None,
+        organization: str | None = None,
+    ) -> dict[str, Any]:
+        """按递减序列号读取审计事件并返回下一页游标。"""
+
         if not 1 <= limit <= 1000:
             raise ValueError("审计查询 limit 必须位于 1 到 1000。")
         with self.connect() as connection:
-            if project_id is None and organization is None:
-                rows = connection.execute(
-                    "SELECT * FROM audit_events ORDER BY sequence DESC LIMIT ?", (limit,)
-                ).fetchall()
-            else:
-                clauses: list[str] = []
-                values: list[Any] = []
-                if project_id is not None:
-                    clauses.append("project_id=?")
-                    values.append(project_id)
-                if organization is not None:
-                    clauses.append("organization=?")
-                    values.append(organization)
-                rows = connection.execute(
-                    "SELECT * FROM audit_events WHERE "
-                    + " AND ".join(clauses)
-                    + " ORDER BY sequence DESC LIMIT ?",
-                    (*values, limit),
-                ).fetchall()
-        return [
+            clauses: list[str] = []
+            values: list[Any] = []
+            if project_id is not None:
+                clauses.append("project_id=?")
+                values.append(project_id)
+            if organization is not None:
+                clauses.append("organization=?")
+                values.append(organization)
+            if cursor is not None:
+                decoded = _decode_page_cursor(cursor, "audit")
+                sequence = decoded.get("sequence")
+                if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+                    raise PageCursorError("分页游标无效。")
+                if any(
+                    decoded.get(key) != value
+                    for key, value in {
+                        "project_id": project_id,
+                        "organization": organization,
+                    }.items()
+                ):
+                    raise PageCursorError("分页游标与查询范围不一致。")
+                clauses.append("sequence < ?")
+                values.append(sequence)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            rows = connection.execute(
+                "SELECT * FROM audit_events" + where + " ORDER BY sequence DESC LIMIT ?",
+                (*values, limit + 1),
+            ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        items = [
             {
                 **dict(row),
                 "details": json.loads(str(row["details"])),
@@ -755,6 +891,17 @@ class JobStore:
             }
             for row in rows
         ]
+        next_cursor = None
+        if has_more and rows:
+            next_cursor = _encode_page_cursor(
+                "audit",
+                {
+                    "sequence": int(rows[-1]["sequence"]),
+                    "project_id": project_id,
+                    "organization": organization,
+                },
+            )
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
     def cancel(self, job_id: str) -> None:
         with self.transaction() as connection:

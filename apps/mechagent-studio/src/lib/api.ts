@@ -5,6 +5,7 @@ import type {
   StudioExamplesResponse,
   StudioHealth,
   StudioInspectionResponse,
+  StudioJobPage,
   StudioJobResponse
 } from "../types";
 
@@ -88,11 +89,13 @@ async function jobAction(jobId: string, action: string): Promise<StudioJobRespon
   return payload as StudioJobResponse;
 }
 
-export async function fetchJobs(): Promise<StudioJobResponse[]> {
-  const response = await fetch("/api/v1/jobs?limit=10");
+export async function fetchJobs(cursor?: string): Promise<StudioJobPage> {
+  const query = new URLSearchParams({ limit: "10" });
+  if (cursor) query.set("cursor", cursor);
+  const response = await fetch(`/api/v1/jobs?${query.toString()}`);
   const payload = await response.json();
   if (!response.ok) throw apiError(payload, response.status, "请求失败。");
-  return payload.jobs;
+  return payload as StudioJobPage;
 }
 
 export async function fetchEvidence(jobId: string): Promise<{ valid: boolean; errors: string[] }> {
