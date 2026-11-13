@@ -134,9 +134,8 @@ S3 客户端在上传、下载和恢复时校验对象内容与 SHA-256 摘要�
 拓扑 ID 存在于同一 `topology_entities`、维度匹配且置信度达到 0.80 时才生成
 `RegionSpec(kind="topology")`，同时保留 `part_ids`；其他状态保留 `unknown` 并阻断执行。案例投影把完整区域契约写入
 `metadata.case_regions`，`gmsh-cad-inp` 对已声明区域只按该契约建立节点集合，未声明区域才使用兼容候选补充，并拒绝未知、重复或维度不匹配的拓扑 ID。成功网格结果必须指向实际存在的网格文件，并在结果元数据中记录该文件的
-`mesh_sha256`；MeshAgent 和 SolverAgent 均校验文件摘要，文件缺失或摘要不一致会阻断求解。该映射已在确定性实体和带贯穿圆孔实体上通过 `gmsh-cad-inp` 的直接
-STEP 网格、面到节点集合映射、C3D4 质量检查和 CalculiX 真实求解证据；多实体装配仍由直接网格适配器拒绝，零件摘要不包含接触、连接或装配约束语义；复杂薄壁件、
-通用修复和质量统一模型仍未完成。`mechagent_output/mesh-convergence-tc01/manifest.json`
+`mesh_sha256`；MeshAgent 和 SolverAgent 均校验文件摘要，文件缺失或摘要不一致会阻断求解。内置网格器统一声明质量指标：梁结构化网格使用 `min_jacobian`，参数化板和 CAD 直接网格使用 `min_sicn`，结构化实体使用 `min_edge_ratio` 和 `max_aspect_ratio`。网格门禁把所有 `min_*` 指标与 `min_quality` 比较，并在 `metadata.quality_gate` 保存阈值、指标名称和状态；上界指标保留在 `quality` 中供报告使用。该映射已在确定性实体和带贯穿圆孔实体上通过 `gmsh-cad-inp` 的直接
+STEP 网格、面到节点集合映射、C3D4 质量检查和 CalculiX 真实求解证据；多实体装配仍由直接网格适配器拒绝，零件摘要不包含接触、连接或装配约束语义；复杂薄壁件和通用 CAD 修复仍未完成。`mechagent_output/mesh-convergence-tc01/manifest.json`
 记录 TC-01 在 seed size 40、20、10、5 mm 的四次 CalculiX 真实运行；终点节点/单元数为
 201/200，终点相邻网格相对变化为 2.014e-5，解析参考相对误差为 0.1031%，收敛清单状态为
 `passed`。该证据范围为参数化 B31 梁；CAD 实体、多区域和其他单元族需要独立的网格独立性验收。

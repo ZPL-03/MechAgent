@@ -112,6 +112,7 @@ class CalculiXInpMesher(AbstractMesher):
                 "element_type": "B31",
                 "seed_size_mm": self.config.seed_size,
                 "source": "structured_line",
+                "quality_metric": "min_jacobian",
             },
         )
 
@@ -124,10 +125,11 @@ class CalculiXInpMesher(AbstractMesher):
         height = dimensions["height"]
         nodes, hexes = _regular_solid_mesh(length, width, height, self.config.seed_size)
         _write_calculix_c3d8_mesh(mesh_file, nodes, hexes)
+        quality = _structured_hex_quality_metrics(nodes, hexes)
         return MeshResult(
             success=True,
             mesh_file=mesh_file,
-            quality={"min_jacobian": 1.0},
+            quality=quality,
             metadata={
                 "format": "calculix_mesh_inp",
                 "element_type": "C3D8R",
@@ -135,6 +137,7 @@ class CalculiXInpMesher(AbstractMesher):
                 "seed_size_mm": self.config.seed_size,
                 "node_count": len(nodes),
                 "element_count": len(hexes),
+                "quality_metric": "min_edge_ratio",
             },
         )
 
@@ -193,6 +196,7 @@ class CalculiXInpMesher(AbstractMesher):
                 "element_type": "S4",
                 "source": "gmsh",
                 "quality_source": "gmsh_minSICN",
+                "quality_metric": "min_sicn",
                 "seed_size_mm": self.config.seed_size,
                 "node_count": len(nodes),
                 "element_count": len(quads),
@@ -284,6 +288,7 @@ class CalculiXInpMesher(AbstractMesher):
                 "element_type": "S3/S4",
                 "source": "gmsh_perforated_plate",
                 "quality_source": "gmsh_minSICN",
+                "quality_metric": "min_sicn",
                 "seed_size_mm": self.config.seed_size,
                 "node_count": len(nodes),
                 "element_count": len(elements),
@@ -543,6 +548,53 @@ def _gmsh_quality_metrics(dimension: int) -> dict[str, float]:
     return {
         "min_sicn": min(values),
         "mean_sicn": sum(values) / len(values),
+    }
+
+
+def _structured_hex_quality_metrics(
+    nodes: dict[int, tuple[float, float, float]],
+    hexes: list[tuple[int, int, int, int, int, int, int, int]],
+) -> dict[str, float]:
+    """Return edge-isotropy metrics for the structured C3D8R mesh.
+
+    ``min_edge_ratio`` is the minimum ratio of the shortest to longest edge in
+    an element. It is dimensionless, bounded by ``(0, 1]`` for valid elements,
+    and provides a comparable lower-bound metric for the generic mesh gate.
+    ``max_aspect_ratio`` is its reciprocal maximum.
+    """
+
+    edge_pairs = (
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    )
+    ratios: list[float] = []
+    aspects: list[float] = []
+    for element in hexes:
+        lengths = [
+            math.dist(nodes[element[left]], nodes[element[right]]) for left, right in edge_pairs
+        ]
+        if not lengths or any(not math.isfinite(value) or value <= 0 for value in lengths):
+            ratios.append(0.0)
+            aspects.append(math.inf)
+            continue
+        shortest = min(lengths)
+        longest = max(lengths)
+        ratios.append(shortest / longest)
+        aspects.append(longest / shortest)
+    return {
+        "min_edge_ratio": min(ratios, default=0.0),
+        "mean_edge_ratio": sum(ratios) / len(ratios) if ratios else 0.0,
+        "max_aspect_ratio": max(aspects, default=math.inf),
     }
 
 

@@ -10,7 +10,7 @@ from mechagent.config import LLMSettings, MechAgentConfig, MesherSettings, Orche
 from mechagent.core.factory import register_mesher, unregister_mesher
 from mechagent.core.mesher import AbstractMesher, MeshResult
 from mechagent.core.models import ModelParams
-from mechagent.core.validation import tc01_model_params
+from mechagent.core.validation import tc01_model_params, tc03_model_params
 from mechagent.orchestrator.agents import MeshAgent
 from mechagent.orchestrator.capabilities import (
     SimulationCapability,
@@ -35,6 +35,33 @@ def test_mesh_agent_rejects_mesh_below_min_quality(tmp_path: Path) -> None:
     assert result.mesh_file == tmp_path / "mesh.inp"
     assert "网格质量低于阈值" in str(result.error_message)
     assert "min_jacobian=0.2" in str(result.error_message)
+    assert result.metadata["quality_gate"]["status"] == "failed"
+
+
+def test_mesh_agent_rejects_structured_solid_with_thin_elements(tmp_path: Path) -> None:
+    base = tc03_model_params()
+    params = base.model_copy(
+        update={
+            "geometry": base.geometry.model_copy(
+                update={"dimensions": {"length": 200.0, "width": 20.0, "height": 1.0}}
+            )
+        }
+    )
+    config = MechAgentConfig(
+        mesher=MesherSettings(default="calculix-inp", min_quality=0.3),
+    )
+
+    result = MeshAgent(config, tmp_path).generate(params)
+
+    assert result.success is False
+    assert result.quality["min_edge_ratio"] == pytest.approx(0.1)
+    assert result.quality["max_aspect_ratio"] == pytest.approx(10.0)
+    assert result.metadata["quality_gate"] == {
+        "threshold": 0.3,
+        "lower_bound_metrics": ["min_edge_ratio"],
+        "status": "failed",
+    }
+    assert "min_edge_ratio=0.1" in str(result.error_message)
 
 
 def test_mesh_agent_validates_mesh_output_contract_and_upper_bound_metrics(
@@ -75,6 +102,7 @@ def test_mesh_agent_validates_mesh_output_contract_and_upper_bound_metrics(
 
     assert aspect_result.success is True
     assert len(str(aspect_result.metadata["mesh_sha256"])) == 64
+    assert aspect_result.metadata["quality_gate"]["status"] == "passed"
     assert nonfinite_result.success is False
     assert nonfinite_result.error_message is not None
     assert "不是有限数值" in nonfinite_result.error_message

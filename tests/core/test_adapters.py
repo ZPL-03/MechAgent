@@ -984,6 +984,10 @@ def test_calculix_inp_mesher_generates_solid_calculix_mesh(tmp_path: Path) -> No
     assert result.mesh_file is not None
     assert result.mesh_file.suffix == ".inp"
     assert result.metadata["seed_size_mm"] == 10.0
+    assert result.quality["min_edge_ratio"] == pytest.approx(1.0)
+    assert result.quality["mean_edge_ratio"] == pytest.approx(1.0)
+    assert result.quality["max_aspect_ratio"] == pytest.approx(1.0)
+    assert result.metadata["quality_metric"] == "min_edge_ratio"
     text = result.mesh_file.read_text(encoding="utf-8")
     assert "*NODE" in text
     assert "*ELEMENT, TYPE=C3D8R, ELSET=EALL" in text

@@ -271,6 +271,9 @@ def test_cad_solid_direct_mesh_preserves_region_node_sets(tmp_path: Path) -> Non
     assert output.model_params.mesh.element_type.value == "C3D4"
     assert output.mesh_result.success is True
     assert output.mesh_result.metadata["direct_cad"] is True
+    assert output.mesh_result.metadata["quality_metric"] == "min_sicn"
+    assert output.mesh_result.metadata["quality_source"] == "gmsh_minSICN"
+    assert output.mesh_result.metadata["quality_gate"]["status"] == "passed"
     assert output.mesh_result.metadata["region_node_sets"]["root"]
     assert output.mesh_result.metadata["region_node_sets"]["end_face"]
     assert output.mesh_result.mesh_file is not None

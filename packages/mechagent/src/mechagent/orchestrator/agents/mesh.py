@@ -145,6 +145,15 @@ class MeshAgent:
 
 def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
     if not result.success:
+        if result.quality:
+            return result.model_copy(
+                update={
+                    "metadata": {
+                        **result.metadata,
+                        "quality_gate": _quality_gate(result.quality, min_quality, "failed"),
+                    }
+                }
+            )
         return result
     if result.mesh_file is None:
         return result.model_copy(
@@ -177,6 +186,10 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
             update={
                 "success": False,
                 "error_message": f"网格质量指标不是有限数值: {details}。",
+                "metadata": {
+                    **result.metadata,
+                    "quality_gate": _quality_gate(result.quality, min_quality, "failed"),
+                },
             }
         )
     failed = [
@@ -185,14 +198,37 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
         if name.startswith("min_") and value < min_quality
     ]
     if not failed:
-        return result
+        return result.model_copy(
+            update={
+                "metadata": {
+                    **result.metadata,
+                    "quality_gate": _quality_gate(result.quality, min_quality, "passed"),
+                }
+            }
+        )
     details = "、".join(f"{name}={result.quality[name]:.6g}" for name in failed)
     return result.model_copy(
         update={
             "success": False,
             "error_message": f"网格质量低于阈值 {min_quality:.6g}: {details}。",
+            "metadata": {
+                **result.metadata,
+                "quality_gate": _quality_gate(result.quality, min_quality, "failed"),
+            },
         }
     )
+
+
+def _quality_gate(
+    quality: dict[str, float],
+    threshold: float,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "threshold": threshold,
+        "lower_bound_metrics": sorted(name for name in quality if name.startswith("min_")),
+        "status": status,
+    }
 
 
 def _mesh_strategy_context(model_params: ModelParams, task: TaskItem | None) -> dict[str, Any]:

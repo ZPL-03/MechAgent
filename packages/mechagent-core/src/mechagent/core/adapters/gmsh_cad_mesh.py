@@ -136,6 +136,10 @@ class GmshCADInpMesher(AbstractMesher):
                 return MeshResult(
                     success=False,
                     quality=quality,
+                    metadata={
+                        "quality_metric": "min_sicn",
+                        "quality_source": "gmsh_minSICN",
+                    },
                     error_message=(
                         f"CAD 直接网格最小质量 {quality.get('min_sicn', 0.0):.6g} "
                         f"低于阈值 {self.config.min_quality:.6g}。"
@@ -150,6 +154,8 @@ class GmshCADInpMesher(AbstractMesher):
                     "format": "calculix_mesh_inp",
                     "source": "gmsh_occ_cad",
                     "element_type": "C3D4",
+                    "quality_metric": "min_sicn",
+                    "quality_source": "gmsh_minSICN",
                     "direct_cad": True,
                     "healing": self.config.healing,
                     "source_path": str(source),

@@ -87,7 +87,7 @@ python scripts/run_cad_topology_case.py --generate-box --calculix D:/Calculix/Ca
 python scripts/run_cad_topology_case.py --generate-hole-box --seed-size 8 --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --output-dir mechagent_output/cad-hole-topology-evidence
 ```
 
-网格独立性使用同一案例、递减 seed size 和同一求解器重复运行；收敛状态同时检查终点相邻网格变化和解析参考误差。当前 TC-01 的四级真实运行证据为 `mechagent_output/mesh-convergence-tc01/manifest.json`，seed size 为 40、20、10、5 mm，终点节点/单元数为 201/200，终点相邻网格相对变化为 2.014e-5，解析参考相对误差为 0.1031%，清单状态为 `passed`。该证据只覆盖参数化 B31 梁；CAD 实体、多区域映射、其他单元族和自动网格质量统一模型仍需独立验收。
+网格独立性使用同一案例、递减 seed size 和同一求解器重复运行；收敛状态同时检查终点相邻网格变化和解析参考误差。当前 TC-01 的四级真实运行证据为 `mechagent_output/mesh-convergence-tc01/manifest.json`，seed size 为 40、20、10、5 mm，终点节点/单元数为 201/200，终点相邻网格相对变化为 2.014e-5，解析参考相对误差为 0.1031%，清单状态为 `passed`。质量指标名称和 `min_quality` 门禁已在参数化梁、板、开孔板、结构化实体和 CAD 直接网格路径中统一记录；该证据只覆盖参数化 B31 梁，CAD 实体、多区域映射、其他单元族的网格独立性以及跨网格器质量指标的工程等价性仍需独立验收。
 
 ```powershell
 python scripts/run_mesh_convergence.py `
