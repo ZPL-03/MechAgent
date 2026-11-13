@@ -124,6 +124,25 @@ def test_sign_release_requires_complete_keyless_identity(tmp_path: Path) -> None
         )
 
 
+def test_sign_release_rejects_mixed_signing_modes(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="只提供 --key 和 --signature"):
+        sign_release.main(
+            [
+                "--manifest",
+                str(manifest),
+                "--key",
+                str(tmp_path / "key.pem"),
+                "--signature",
+                str(tmp_path / "signature.sig"),
+                "--bundle",
+                str(tmp_path / "bundle.json"),
+            ]
+        )
+
+
 def test_sign_release_validates_artifact_integrity_before_signing(tmp_path: Path) -> None:
     artifact = tmp_path / "packages" / "mechagent" / "dist" / "package.whl"
     artifact.parent.mkdir(parents=True)

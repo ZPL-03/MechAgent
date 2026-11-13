@@ -34,14 +34,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.manifest.is_file():
         raise FileNotFoundError(args.manifest)
+    certificate_identity = args.certificate_identity
+    if args.key is not None:
+        if (
+            args.signature is None
+            or args.bundle is not None
+            or args.certificate_identity is not None
+            or args.certificate_oidc_issuer is not None
+        ):
+            raise ValueError("密钥模式必须只提供 --key 和 --signature。")
+    elif (
+        not args.bundle
+        or not isinstance(certificate_identity, str)
+        or not certificate_identity
+        or args.signature is not None
+    ):
+        raise ValueError("keyless 模式必须只提供 --bundle 和 --certificate-identity。")
     if args.key is not None and not args.key.is_file():
         raise FileNotFoundError(args.key)
-    if args.key is not None and args.certificate_identity:
-        raise ValueError("--key 与 keyless 证书身份参数不能同时使用。")
-    if args.key is not None and not args.signature:
-        raise ValueError("密钥模式必须提供 --signature。")
-    if args.key is None and (not args.bundle or not args.certificate_identity):
-        raise ValueError("keyless 模式必须同时提供 --certificate-identity 和 --bundle。")
     document = load_manifest(args.manifest, root=args.root)
     provenance = document.get("provenance", {}).get("source", {})
     if provenance.get("gitDirty") is not False:
@@ -99,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--bundle",
                 str(args.bundle),
                 "--certificate-identity",
-                args.certificate_identity,
+                certificate_identity,
                 "--certificate-oidc-issuer",
                 issuer,
                 str(args.manifest),
