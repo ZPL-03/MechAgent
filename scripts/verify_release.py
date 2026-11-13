@@ -14,8 +14,12 @@ from typing import Any
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
-    """读取并校验发布清单记录的所有本地 artifact。"""
+def load_manifest(path: Path, *, root: Path | None = None) -> dict[str, Any]:
+    """读取并校验发布清单记录的所有本地 artifact。
+
+    清单中的 artifact 路径相对于构建根目录；未显式提供根目录时，兼容性地
+    使用清单所在目录。发布工作流必须传入仓库根目录。
+    """
 
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -36,7 +40,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     artifacts = document.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("发布清单必须包含 artifact。")
-    root = path.parent.resolve()
+    resolved_root = (root or path.parent).resolve()
     seen: set[str] = set()
     for item in artifacts:
         if not isinstance(item, dict):
@@ -50,8 +54,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
             or ".." in Path(relative).parts
         ):
             raise ValueError(f"发布清单包含无效或重复路径: {relative!r}")
-        candidate = (root / relative).resolve()
-        if not candidate.is_relative_to(root) or not candidate.is_file():
+        candidate = (resolved_root / relative).resolve()
+        if not candidate.is_relative_to(resolved_root) or not candidate.is_file():
             raise FileNotFoundError(f"发布清单 artifact 不存在或越界: {relative}")
         size = item.get("size")
         digest = item.get("sha256")
@@ -146,8 +150,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--certificate-identity")
     parser.add_argument("--certificate-oidc-issuer")
     parser.add_argument("--cosign", default="cosign")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        help="清单 artifact 路径的构建根目录；默认使用清单所在目录。",
+    )
     args = parser.parse_args(argv)
-    document = load_manifest(args.manifest)
+    document = load_manifest(args.manifest, root=args.root)
     verify_signature(
         args.manifest,
         signature=args.signature,

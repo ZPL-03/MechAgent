@@ -128,7 +128,7 @@ python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json -
 # GitHub OIDC keyless 模式
 python scripts/sign_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 下载或归档后独立校验清单中的所有文件摘要和签名身份
-python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
+python scripts/verify_release.py --manifest dist/mechagent-release-manifest.json --root . --bundle dist/mechagent-release-manifest.sigstore.json --certificate-identity "https://github.com/ORG/REPO/.github/workflows/release.yml@refs/tags/vX.Y.Z"
 # 两个后端结果均来自同一 SimulationCase；默认比较 requested_fields，可显式选择 mapped_fields、comparison_fields 或 fields
 python scripts/compare_backends.py --left calculix-result.json --right abaqus-result.json --left-backend calculix --right-backend abaqus --output dist/backend-comparison.json
 # 比较统一语义字段

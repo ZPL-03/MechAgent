@@ -106,6 +106,7 @@ jobs:
         run: |
           python scripts/verify_release.py `
             --manifest dist/mechagent-release-manifest.json `
+            --root . `
             --bundle dist/mechagent-release-manifest.sigstore.json `
             --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" `
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"

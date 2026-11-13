@@ -142,6 +142,33 @@ def test_verify_release_checks_artifact_digest_and_rejects_tampering(tmp_path: P
         verify_release.load_manifest(manifest)
 
 
+def test_verify_release_resolves_repository_relative_artifacts(tmp_path: Path) -> None:
+    artifact = tmp_path / "packages" / "mechagent" / "dist" / "package.whl"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"package")
+    manifest = tmp_path / "dist" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "mechagent.release-manifest.v1",
+                "version": "1.2.3",
+                "provenance": {"source": {"gitDirty": False}},
+                "artifacts": [
+                    {
+                        "path": "packages/mechagent/dist/package.whl",
+                        "size": artifact.stat().st_size,
+                        "sha256": verify_release._sha256(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert verify_release.load_manifest(manifest, root=tmp_path)["version"] == "1.2.3"
+
+
 def test_verify_release_invokes_keyless_cosign_with_identity(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
