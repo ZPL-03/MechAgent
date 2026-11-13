@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from mechagent.core.compare import EquilibriumReport
 from mechagent.core.mesher import MeshResult
 from mechagent.core.models import ModelParams, SimulationCase
+from mechagent.evidence import portable_public_path
 from mechagent.orchestrator.intent import SimulationIntent
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.redaction import redact_sensitive_text
@@ -307,6 +308,7 @@ class SolverRunSummary(BaseModel):
 
         data = _public_solver_values(self.values)
         data.update(self.model_dump(mode="json", exclude={"solver_llm_trace", "values"}))
+        _sanitize_public_solver_paths(data)
         data["solver_llm_trace"] = _public_llm_trace(self.solver_llm_trace)
         return data
 
@@ -715,6 +717,7 @@ def _public_solver_summary(summary: SolverRunSummary) -> dict[str, Any]:
     )
     data["solver_llm_trace"] = _public_llm_trace(summary.solver_llm_trace)
     data["values"] = _public_solver_values(summary.values)
+    _sanitize_public_solver_paths(data)
     return data
 
 
@@ -730,7 +733,17 @@ def _public_post_summary(summary: PostProcessingSummary) -> dict[str, Any]:
 
 
 def _public_solver_values(values: dict[str, Any]) -> dict[str, Any]:
-    return {str(key): _public_value(value) for key, value in values.items()}
+    data = {str(key): _public_value(value) for key, value in values.items()}
+    _sanitize_public_solver_paths(data)
+    return data
+
+
+def _sanitize_public_solver_paths(data: dict[str, Any]) -> None:
+    """将求解器公开字段限制为相对路径或文件名。"""
+
+    for key in ("output_files", "mesh_file", "field_json", "odb"):
+        if key in data:
+            data[key] = portable_public_path(data[key])
 
 
 def _public_value(value: Any) -> Any:

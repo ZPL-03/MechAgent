@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import ntpath
 import os
 import platform
+import posixpath
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -102,15 +104,106 @@ def _is_sqlite_journal(path: Path) -> bool:
     return path.name.endswith(("-wal", "-shm"))
 
 
-def public_value(value: Any, secrets: tuple[str, ...] = ()) -> Any:
-    """对公开结构中的文本递归脱敏。"""
+_PUBLIC_PATH_KEYS = frozenset(
+    {
+        "artifact_root",
+        "config",
+        "config_path",
+        "database",
+        "field_json",
+        "input_file",
+        "license_queue_path",
+        "manifest_path",
+        "mesh_file",
+        "odb",
+        "output_dir",
+        "python_executable",
+        "report_path",
+        "solver_path",
+        "source_path",
+        "work_dir",
+    }
+)
+
+
+def public_value(
+    value: Any,
+    secrets: tuple[str, ...] = (),
+    *,
+    sanitize_paths: bool = False,
+    _path_context: bool = False,
+) -> Any:
+    """递归脱敏公开结构，并按需移除本机文件路径。"""
     if isinstance(value, str):
+        if sanitize_paths and _path_context:
+            return redact_sensitive_text(portable_public_path(value), extra_secrets=secrets)
         return redact_sensitive_text(value, extra_secrets=secrets)
+    if isinstance(value, Path):
+        return portable_public_path(value) if sanitize_paths else str(value)
     if isinstance(value, dict):
-        return {key: public_value(item, secrets) for key, item in value.items()}
+        result: dict[Any, Any] = {}
+        for key, item in value.items():
+            key_name = str(key)
+            is_path = sanitize_paths and (
+                key_name in _PUBLIC_PATH_KEYS or (key_name == "path" and _path_context)
+            )
+            child_path_context = sanitize_paths and key_name in {
+                "artifacts",
+                "output_files",
+            }
+            result[key] = (
+                public_value(
+                    portable_public_path(item),
+                    secrets,
+                    sanitize_paths=sanitize_paths,
+                    _path_context=True,
+                )
+                if is_path
+                else public_value(
+                    item,
+                    secrets,
+                    sanitize_paths=sanitize_paths,
+                    _path_context=child_path_context,
+                )
+            )
+        return result
     if isinstance(value, (list, tuple)):
-        return [public_value(item, secrets) for item in value]
+        return [
+            public_value(
+                item,
+                secrets,
+                sanitize_paths=sanitize_paths,
+                _path_context=_path_context,
+            )
+            for item in value
+        ]
     return value
+
+
+def portable_public_path(value: Any) -> Any:
+    """将绝对路径或父目录跳转转换为文件名，保留安全的相对 POSIX 路径。"""
+
+    if isinstance(value, (list, tuple)):
+        return [portable_public_path(item) for item in value]
+    if isinstance(value, Path):
+        raw = value.as_posix()
+    elif isinstance(value, str):
+        raw = value
+    else:
+        return value
+    normalized = raw.replace("\\", "/")
+    if _is_absolute_path(raw, normalized) or ".." in Path(normalized).parts:
+        return ntpath.basename(raw) or posixpath.basename(normalized) or normalized
+    return normalized
+
+
+def _is_absolute_path(raw: str, normalized: str) -> bool:
+    return (
+        ntpath.isabs(raw)
+        or posixpath.isabs(normalized)
+        or bool(ntpath.splitdrive(raw)[0])
+        or normalized.startswith("//")
+    )
 
 
 def write_manifest(directory: Path, *, status: str, details: dict[str, Any]) -> Path:

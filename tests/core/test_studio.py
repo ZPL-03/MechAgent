@@ -39,8 +39,8 @@ def test_studio_health_endpoint_reports_config(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["ok"] is True
     assert payload["product"] == "MechAgent Studio"
-    assert payload["config"] == str(config_path)
-    assert payload["python_executable"] == sys.executable
+    assert payload["config"] == config_path.name
+    assert payload["python_executable"] == Path(sys.executable).name
     assert isinstance(payload["static_ready"], bool)
 
 
@@ -344,6 +344,21 @@ def test_studio_v1_routes_are_stable_and_legacy_routes_are_deprecated(tmp_path: 
     assert client.post("/api/v1/jobs", json={"request": "   "}).status_code == 400
 
 
+def test_studio_health_does_not_expose_local_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "private" / "mechagent.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text("{}", encoding="utf-8")
+    client = TestClient(create_studio_app(config_path))
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"] == config_path.name
+    assert payload["python_executable"] == Path(sys.executable).name
+    assert str(tmp_path) not in response.text
+
+
 def test_studio_diagnostics_endpoint_reuses_environment_doctor(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -381,6 +396,8 @@ def test_studio_diagnostics_endpoint_reuses_environment_doctor(
     assert default_response.status_code == 200
     assert llm_response.status_code == 200
     assert default_response.json()["summary"]["required_passed"] == 1
+    assert default_response.json()["config_path"] == config_path.name
+    assert str(tmp_path) not in default_response.text
     assert captured == [(config_path, False), (config_path, True)]
 
 

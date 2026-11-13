@@ -91,6 +91,7 @@ def execute(store: JobStore, job_id: str, token: str) -> None:
                 },
             },
             secrets,
+            sanitize_paths=True,
         )
         status = "succeeded" if response["success"] else "failed"
         error = None if response["success"] else "工作流未通过；请检查报告与错误摘要。"
@@ -110,6 +111,7 @@ def execute(store: JobStore, job_id: str, token: str) -> None:
             "metadata": {"duration_ms": int((time.perf_counter() - started) * 1000)},
         }
     try:
+        response = public_value(response, secrets, sanitize_paths=True)
         atomic_json(directory / "result.json", response)
         write_manifest(directory, status=status, details={"job_id": job_id, "error_code": code})
         store.finish(

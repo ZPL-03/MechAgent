@@ -644,6 +644,43 @@ def test_workflow_summary_redacts_llm_prompt_and_response_text() -> None:
     )
 
 
+def test_workflow_summary_limits_solver_paths_to_portable_names(tmp_path: Path) -> None:
+    private_root = tmp_path / "private-engineering-workdir"
+    solver_summary = SolverRunSummary.from_mapping(
+        {
+            "success": True,
+            "output_files": [
+                str(private_root / "case.inp"),
+                r"C:\Users\工程师\runs\case.frd",
+                r"\\server\share\case.odb",
+            ],
+            "mesh_file": str(private_root / "mesh.inp"),
+            "field_json": str(private_root / "case.fields.json"),
+            "odb": str(private_root / "case.odb"),
+            "artifacts": [{"path": "case.inp", "size": 1, "sha256": "a" * 64}],
+        }
+    )
+    result = WorkflowResult(
+        success=True,
+        request="run",
+        tasks=[
+            TaskRunRecord(
+                task=TaskItem(task_id="TASK_1", case_id="UNIT", title="结构静力分析"),
+                solver_result=solver_summary,
+            )
+        ],
+    )
+
+    summary = result.summary()
+    public_solver = summary["tasks"][0]["solver_result"]
+
+    assert str(private_root) not in str(summary)
+    assert public_solver["output_files"] == ["case.inp", "case.frd", "case.odb"]
+    assert public_solver["mesh_file"] == "mesh.inp"
+    assert public_solver["values"]["field_json"] == "case.fields.json"
+    assert public_solver["values"]["odb"] == "case.odb"
+
+
 def test_workflow_summary_redacts_sensitive_tokens_from_trace_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

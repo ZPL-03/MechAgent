@@ -26,6 +26,7 @@ from mechagent.config import (
 )
 from mechagent.evidence import (
     artifact_records,
+    public_value,
     stable_artifact_records,
     verify_manifest,
     write_manifest,
@@ -119,6 +120,31 @@ def test_public_config_redacts_configured_studio_key_digests() -> None:
     public = json.dumps(config_to_public_dict(config))
     assert "a" * 64 not in public
     assert "b" * 64 not in public
+
+
+def test_public_value_sanitizes_local_paths_without_changing_request_text() -> None:
+    payload = public_value(
+        {
+            "request": r"读取 C:\engineering\case.inp 并比较 /tmp/reference.frd",
+            "summary": {
+                "work_dir": r"C:\Users\工程师\runs\RUN_001",
+                "report_path": "/tmp/mechagent/RUN_001/report.md",
+                "output_files": [r"C:\Users\工程师\runs\RUN_001\case.inp", "results/case.frd"],
+                "artifacts": [{"path": r"\\server\share\results\case.odb"}],
+                "values": {"field_json": "../private/case.fields.json"},
+            },
+            "event": {"path": "/api/v1/jobs/RUN_001"},
+        },
+        sanitize_paths=True,
+    )
+
+    assert payload["request"] == r"读取 C:\engineering\case.inp 并比较 /tmp/reference.frd"
+    assert payload["summary"]["work_dir"] == "RUN_001"
+    assert payload["summary"]["report_path"] == "report.md"
+    assert payload["summary"]["output_files"] == ["case.inp", "results/case.frd"]
+    assert payload["summary"]["artifacts"][0]["path"] == "case.odb"
+    assert payload["summary"]["values"]["field_json"] == "case.fields.json"
+    assert payload["event"]["path"] == "/api/v1/jobs/RUN_001"
 
 
 def test_concurrent_idempotency_and_capacity(store: JobStore) -> None:

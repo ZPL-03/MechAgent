@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from urllib.parse import urlencode
 
 import uvicorn
@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mechagent import MechAgent, __version__
 from mechagent.config import MechAgentConfig, StudioSettings
 from mechagent.diagnostics import run_environment_diagnostics
-from mechagent.evidence import verify_manifest, write_manifest
+from mechagent.evidence import public_value, verify_manifest, write_manifest
 from mechagent.examples import example_payloads
 from mechagent.orchestrator.capabilities import all_capabilities
 from mechagent.runtime.artifacts import create_artifact_store
@@ -269,9 +269,13 @@ def create_studio_app(
 
     def payload(job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
         try:
-            return runtime().store.payload(job, include_result=include_result)
+            response = runtime().store.payload(job, include_result=include_result)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        if response.get("result") is not None:
+            response["result"] = public_value(response["result"], sanitize_paths=True)
+        response["events"] = public_value(response.get("events", []), sanitize_paths=True)
+        return response
 
     def submit(
         body: StudioRunRequest, request: Request, key: str | None, parent: str | None = None
@@ -310,18 +314,33 @@ def create_studio_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {
-            "ok": manager is None or manager.error is None,
-            "product": "MechAgent Studio",
-            "config": str(config_path),
-            "python_executable": sys.executable,
-            "static_ready": _STATIC_DIR.joinpath("index.html").exists(),
-            "runtime": {"ready": manager is not None, "error": manager.error if manager else None},
-        }
+        return cast(
+            dict[str, Any],
+            public_value(
+                {
+                    "ok": manager is None or manager.error is None,
+                    "product": "MechAgent Studio",
+                    "config": str(config_path),
+                    "python_executable": sys.executable,
+                    "static_ready": _STATIC_DIR.joinpath("index.html").exists(),
+                    "runtime": {
+                        "ready": manager is not None,
+                        "error": manager.error if manager else None,
+                    },
+                },
+                sanitize_paths=True,
+            ),
+        )
 
     @app.get("/api/diagnostics")
     def diagnostics(llm: bool = False) -> dict[str, Any]:
-        return run_environment_diagnostics(config_path, check_llm=llm)
+        return cast(
+            dict[str, Any],
+            public_value(
+                run_environment_diagnostics(config_path, check_llm=llm),
+                sanitize_paths=True,
+            ),
+        )
 
     @app.get("/api/capabilities")
     def capabilities() -> dict[str, Any]:
@@ -376,13 +395,17 @@ def create_studio_app(
         if target_organization == "*":
             raise HTTPException(400, "跨组织管理员检查请求时必须指定 organization。")
         authorize(request, "inspect", body.project_id, target_organization)
-        return (
-            MechAgent.from_config(config_path)
-            .inspect(
-                request_text,
-                use_llm_agents=body.use_llm_agents,
-            )
-            .model_dump(mode="json")
+        return cast(
+            dict[str, Any],
+            public_value(
+                MechAgent.from_config(config_path)
+                .inspect(
+                    request_text,
+                    use_llm_agents=body.use_llm_agents,
+                )
+                .model_dump(mode="json"),
+                sanitize_paths=True,
+            ),
         )
 
     @app.post("/api/jobs", status_code=202)
