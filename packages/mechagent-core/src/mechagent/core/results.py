@@ -251,7 +251,13 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
         ("strain_exx", "strain", "exx"),
     ):
         field = fields.get(quantity)
-        values = _map_field_to_elements(field, elements, extracted, component_index=0)
+        values = _map_field_to_elements(
+            field,
+            elements,
+            extracted,
+            component_index=0,
+            allow_axis_station=case.model.geometry.type.value == "beam",
+        )
         if values:
             mapped[name] = {
                 "quantity": quantity,
@@ -264,7 +270,10 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
 
     volume = fields.get("volume")
     volume_values: dict[str, float | list[float]] = _map_field_to_elements(
-        volume, elements, extracted
+        volume,
+        elements,
+        extracted,
+        allow_axis_station=case.model.geometry.type.value == "beam",
     )
     if not volume_values and case.model.geometry.type.value == "beam":
         volume_values = dict(_beam_element_volumes(elements, extracted, case))
@@ -282,7 +291,12 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
     # conventions and remain outside this normalized field.
     if case.model.geometry.type.value != "beam":
         energy = fields.get("strain_energy_density")
-        energy_values = _map_field_to_elements(energy, elements, extracted)
+        energy_values = _map_field_to_elements(
+            energy,
+            elements,
+            extracted,
+            allow_axis_station=case.model.geometry.type.value == "beam",
+        )
         if energy_values:
             mapped["strain_energy_density"] = {
                 "quantity": "strain_energy_density",
@@ -306,6 +320,7 @@ def _map_field_to_elements(
     extracted: Mapping[str, Any],
     *,
     component_index: int | None = None,
+    allow_axis_station: bool = False,
 ) -> dict[str, float | list[float]]:
     if not isinstance(field, Mapping) or not isinstance(field.get("values"), Mapping):
         return {}
@@ -332,6 +347,9 @@ def _map_field_to_elements(
                 [values[node] for node in nodes], component_index
             )
         return result
+
+    if not allow_axis_station:
+        return {}
 
     # Beam FRD files may replace the input centerline nodes with section nodes.
     # Average values at the nearest axial station and retain that limitation in

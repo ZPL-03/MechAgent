@@ -281,3 +281,24 @@ def test_mapped_beam_volume_accepts_abaqus_node_key() -> None:
     )
 
     assert extracted["mapped_fields"]["volume"]["values"] == {"1": 8000.0}
+
+
+def test_mapped_solid_field_does_not_use_beam_axis_fallback_for_missing_nodes() -> None:
+    case = SimulationCase.from_model_params(tc03_model_params(), provenance_confidence=1.0)
+    extracted = attach_mapped_result_fields(
+        {
+            "fields": {
+                "stress": {
+                    "location": "node",
+                    "unit": "MPa",
+                    "values": {"1": [10.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                }
+            },
+            "elements": {"10": ["1", "2"]},
+            "element_centroids": {"10": [0.5, 0.0, 0.0]},
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+        },
+        case,
+    )
+
+    assert "mapped_fields" not in extracted
