@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,18 @@ def test_artifact_store_deduplicates_and_restores_result(tmp_path: Path) -> None
 
     assert payload["result"] == {"success": True, "value": 3}
     assert object_path.is_file()
+
+
+def test_artifact_store_put_bytes_is_safe_for_same_process_concurrency(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path / "objects")
+    payloads = [f"payload-{index}".encode() for index in range(16)]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        digests = list(executor.map(store.put_bytes, payloads))
+
+    assert len(set(digests)) == len(payloads)
+    assert [store.path_for(digest).read_bytes() for digest in digests] == payloads
+    assert not list((tmp_path / "objects").rglob("*.tmp"))
 
 
 def test_artifact_store_keeps_object_when_destination_is_object_path(tmp_path: Path) -> None:
@@ -82,6 +95,7 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     class FakeS3:
         def __init__(self) -> None:
             self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+            self.upload_count = 0
 
         def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
             try:
@@ -95,6 +109,7 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
         def upload_file(
             self, source: str, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
         ) -> None:
+            self.upload_count += 1
             self.objects[(bucket, key)] = (
                 Path(source).read_bytes(),
                 dict(ExtraArgs["Metadata"]),
@@ -103,6 +118,7 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
         def upload_fileobj(
             self, stream: Any, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
         ) -> None:
+            self.upload_count += 1
             self.objects[(bucket, key)] = (stream.read(), dict(ExtraArgs["Metadata"]))
 
         def download_file(self, bucket: str, key: str, destination: str) -> None:
@@ -114,6 +130,8 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     source.write_text('{"ok":true}', encoding="utf-8")
     digest = store.put_file(source)
     bytes_digest = store.put_bytes(b"memory-result")
+    assert store.put_bytes(b"memory-result") == bytes_digest
+    assert fake.upload_count == 2
     destination = tmp_path / "restored.json"
 
     assert store.verify(digest)

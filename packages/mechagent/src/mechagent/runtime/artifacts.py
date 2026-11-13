@@ -46,10 +46,22 @@ class ArtifactStore:
         return digest
 
     def put_bytes(self, content: bytes) -> str:
-        temporary = self.root / f".upload.{os.getpid()}.tmp"
-        temporary.write_bytes(content)
+        digest = hashlib.sha256(content).hexdigest()
+        destination = self.path_for(digest)
+        if destination.is_file() and _sha256_file(destination) == digest:
+            return digest
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
         try:
-            return self.put_file(temporary)
+            temporary.write_bytes(content)
+            if _sha256_file(temporary) != digest:
+                raise ValueError("对象写入后完整性校验失败。")
+            os.replace(temporary, destination)
+            return digest
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -215,18 +227,8 @@ class S3ArtifactStore:
             raise FileNotFoundError(source)
         digest = _sha256_file(source)
         key = self._key(digest)
-        try:
-            head = self.client.head_object(Bucket=self.bucket, Key=key)
-            if str(head.get("Metadata", {}).get("sha256", "")) == digest and self.verify(digest):
-                return digest
-        except Exception as exc:  # boto3 uses provider-specific not-found exceptions
-            response = getattr(exc, "response", {}) or {}
-            code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
-            if code not in {
-                "404",
-                "NoSuchKey",
-            }:
-                raise
+        if self._existing_object_is_valid(digest, key):
+            return digest
         self.client.upload_file(
             str(source),
             self.bucket,
@@ -245,6 +247,8 @@ class S3ArtifactStore:
 
         digest = hashlib.sha256(content).hexdigest()
         key = self._key(digest)
+        if self._existing_object_is_valid(digest, key):
+            return digest
         self.client.upload_fileobj(
             io.BytesIO(content),
             self.bucket,
@@ -258,13 +262,23 @@ class S3ArtifactStore:
             raise ValueError("S3 对象写入后内容校验失败。")
         return digest
 
+    def _existing_object_is_valid(self, digest: str, key: str) -> bool:
+        head_object = getattr(self.client, "head_object", None)
+        if not callable(head_object):
+            return False
+        try:
+            head = head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:  # boto3 uses provider-specific not-found exceptions
+            if isinstance(exc, KeyError) or _is_missing_object_error(exc):
+                return False
+            raise
+        return str(head.get("Metadata", {}).get("sha256", "")) == digest and self.verify(digest)
+
     def verify(self, digest: str) -> bool:
         try:
             head = self.client.head_object(Bucket=self.bucket, Key=self._key(digest))
         except Exception as exc:
-            response = getattr(exc, "response", {}) or {}
-            code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
-            if code in {"404", "NoSuchKey"}:
+            if _is_missing_object_error(exc):
                 return False
             raise
         if str(head.get("Metadata", {}).get("sha256", "")) != digest:
@@ -335,6 +349,12 @@ class S3ArtifactStore:
             if not continuation:
                 raise RuntimeError("S3 对象列表缺少 NextContinuationToken。")
         return sorted(candidates)
+
+
+def _is_missing_object_error(error: Exception) -> bool:
+    response = getattr(error, "response", {}) or {}
+    code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
+    return str(code) in {"404", "NoSuchKey"}
 
 
 def create_artifact_store(
