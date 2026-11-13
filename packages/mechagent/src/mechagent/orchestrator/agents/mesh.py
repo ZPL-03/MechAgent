@@ -6,7 +6,7 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mechagent.config import MechAgentConfig
 from mechagent.core.factory import create_mesher
@@ -263,6 +263,9 @@ def _attach_provenance(
             region_names=sorted(region_names),
             cad_source_sha256=_optional_digest(result.metadata.get("source_sha256")),
             topology_digest=_optional_text(result.metadata.get("topology_digest")),
+            solid_count=_solid_count(result.metadata),
+            part_ids=_part_ids(result.metadata),
+            connection_semantics=_connection_semantics(result.metadata),
         )
     except (TypeError, ValueError) as exc:
         return result.model_copy(
@@ -284,6 +287,29 @@ def _optional_text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value
     return None
+
+
+def _solid_count(metadata: dict[str, Any]) -> int:
+    value = metadata.get("solid_count")
+    return value if isinstance(value, int) and value >= 1 else 1
+
+
+def _part_ids(metadata: dict[str, Any]) -> list[str]:
+    value = metadata.get("part_ids")
+    if not isinstance(value, list):
+        return []
+    return sorted({item for item in value if isinstance(item, str) and item.strip()})
+
+
+def _connection_semantics(
+    metadata: dict[str, Any],
+) -> Literal["single_part", "unconnected_parts"]:
+    value = metadata.get("connection_semantics")
+    if value == "unconnected_parts":
+        return "unconnected_parts"
+    if value == "single_part":
+        return "single_part"
+    return "single_part"
 
 
 def _quality_gate(

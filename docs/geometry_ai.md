@@ -29,7 +29,7 @@
 
 `GmshCADKernel` 通过 Gmsh OpenCASCADE 导入 STEP、IGES 和 BREP，计算源文件 SHA-256、包围盒、体积、表面积、实体/面/边计数、封闭性、按三维实体划分的零件摘要、当前摘要内可复现的拓扑实体和六个包围盒方向的区域候选。零件摘要包含三维实体 ID、包围盒、体积、边界面 ID 和边 ID；区域候选同时记录候选面所属的零件 ID。`GeometryAgent` 将摘要转换为 `GeometryCandidate`，再由自然语言补全材料、载荷和边界。案例提升会核对区域拓扑 ID 是否存在于同一摘要，面区域使用二维实体，`all_edges` 使用一维实体，并把零件归属写入 `RegionSpec.part_ids`；不满足条件的区域保持 `unknown`。
 
-`gmsh-cad-inp` 从受控 CAD 源重新导入单个三维实体，生成一阶 C3D4 四面体网格，并把案例投影中的 `metadata.case_regions` 与 CAD 候选区域映射为节点集合。它检查源文件哈希、拓扑摘要、区域拓扑 ID、面/边维度、必需区域和 Gmsh `minSICN` 质量；多实体装配、缺少受控源、拓扑漂移、区域未映射或质量低于阈值时失败，不回退为包围盒网格。多实体文件仍可生成零件级几何候选供人工确认，但不进入该求解路径。
+`gmsh-cad-inp` 从受控 CAD 源重新导入三维实体，生成一阶 C3D4 四面体网格，并把案例投影中的 `metadata.case_regions` 与 CAD 候选区域映射为节点集合。它检查源文件哈希、拓扑摘要、区域拓扑 ID、面/边维度、必需区域和 Gmsh `minSICN` 质量；缺少受控源、拓扑漂移、区域未映射或质量低于阈值时失败，不回退为包围盒网格。多个实体可生成带零件归属和 `unconnected_parts` 标记的检查网格；求解器在缺少连接或接触契约时拒绝该模型。
 
 当前真实证据覆盖确定性实体和带贯穿圆孔实体；以下能力尚未发布：
 
@@ -55,7 +55,7 @@
 
 ## CAD 清理的当前含义
 
-当前 `healing=True` 且导入结果为单个三维实体时，Gmsh OCC 导入摘要路径会调用 `healShapes()`；多实体文件跳过该操作，以保留零件拓扑，摘要通过 `healing_applied=false` 明确记录。直接 CAD 网格适配器仍只接受单个实体。该操作属于内核级形体修复尝试，完整 CAD 清理还需要特征处理、尺寸容差和区域回归证据。摘要中的 `watertight` 由面边使用次数检查得到，作为当前导入形体的门禁信号；制造性、几何精度和物理边界需要单独验证。
+当前 `healing=True` 且导入结果为单个三维实体时，Gmsh OCC 导入摘要路径会调用 `healShapes()`；多实体文件跳过该操作，以保留零件拓扑，摘要通过 `healing_applied=false` 明确记录。多实体直接网格只生成检查网格，不提供连接、接触或装配约束语义。该操作属于内核级形体修复尝试，完整 CAD 清理还需要特征处理、尺寸容差和区域回归证据。摘要中的 `watertight` 由面边使用次数检查得到，作为当前导入形体的门禁信号；制造性、几何精度和物理边界需要单独验证。
 
 `healing` 可能影响导入后的拓扑摘要，因此生成候选和直接网格必须使用相同的配置；网格适配器发现源文件哈希或拓扑摘要不一致时会拒绝执行。
 
@@ -88,7 +88,7 @@
 | `RegionBinding` | 语义名、拓扑 ID、映射方法、置信度、几何版本、歧义状态、人工确认 | 每个载荷/边界区域唯一映射且版本匹配 |
 | `MeshProvenance` | 网格器和版本、CAD 摘要、单元类型、尺寸场、质量指标、区域集合、收敛状态 | 网格文件存在、质量门禁和区域门禁通过 |
 
-`MeshProvenance` 已作为版本化 core 契约由 `MeshAgent` 在成功网格后生成，记录案例标识、几何类型、网格器、种子尺寸、单元类型、网格文件 SHA-256、质量指标、质量门禁、区域名称以及可用的 CAD 源摘要和拓扑摘要；`SolverAgent` 将其随求解摘要传递。该对象不证明网格收敛、CAD 修复报告或跨网格器等价性。`CADArtifact`、`GeometryValidation` 和 `RegionBinding` 仍需独立建立完整版本化契约；现有 `CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 继续作为兼容输入和诊断扩展。
+`MeshProvenance` 已作为版本化 core 契约由 `MeshAgent` 在成功网格后生成，记录案例标识、几何类型、网格器、种子尺寸、单元类型、网格文件 SHA-256、质量指标、质量门禁、区域名称、实体数量、零件 ID、连接语义以及可用的 CAD 源摘要和拓扑摘要；`SolverAgent` 将其随求解摘要传递。该对象不证明网格收敛、CAD 修复报告或跨网格器等价性。`CADArtifact`、`GeometryValidation` 和 `RegionBinding` 仍需独立建立完整版本化契约；现有 `CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 继续作为兼容输入和诊断扩展。
 
 ## 开源项目调研与采用边界
 

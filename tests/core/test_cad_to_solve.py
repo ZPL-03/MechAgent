@@ -9,12 +9,15 @@ import pytest
 
 from mechagent.app import MechAgent
 from mechagent.config import MechAgentConfig
+from mechagent.core.adapters import AbaqusAdapter, CalculiXAdapter
 from mechagent.core.cad import (
     CADGeometrySummary,
     GeometryCandidate,
     geometry_candidate_from_summary,
 )
+from mechagent.core.exceptions import SolverError
 from mechagent.core.models import GeometryType, Provenance, RegionSpec
+from mechagent.core.solver import SolverConfig
 from mechagent.orchestrator.agents import GeometryAgent
 from mechagent.orchestrator.agents.mesh import MeshAgent
 from mechagent.orchestrator.static_parser import (
@@ -324,7 +327,7 @@ def test_cad_mesh_rejects_low_confidence_region_mapping(tmp_path: Path) -> None:
     assert "区域没有映射" in (output.mesh_result.error_message or "")
 
 
-def test_cad_direct_mesh_rejects_multi_solid_assembly(tmp_path: Path) -> None:
+def test_cad_direct_mesh_preserves_multi_solid_assembly_regions(tmp_path: Path) -> None:
     step = tmp_path / "assembly.step"
     _write_assembly_step(step)
 
@@ -334,9 +337,26 @@ def test_cad_direct_mesh_rejects_multi_solid_assembly(tmp_path: Path) -> None:
     )
     output = MeshAgent(config, tmp_path / "mesh-assembly").generate_with_trace(params)
 
-    assert output.mesh_result.success is False
-    assert "单个封闭实体" in (output.mesh_result.error_message or "")
+    assert output.mesh_result.success is True
     assert output.mesh_result.metadata["solid_count"] == 2
+    assert output.mesh_result.metadata["assembly_mesh"] is True
+    assert output.mesh_result.metadata["connection_semantics"] == "unconnected_parts"
+    assert len(output.mesh_result.metadata["part_ids"]) == 2
+    assert output.mesh_result.provenance is not None
+    assert output.mesh_result.provenance.solid_count == 2
+    assert output.mesh_result.provenance.connection_semantics == "unconnected_parts"
+    assert output.mesh_result.metadata["region_node_sets"]["root"]
+    assert output.mesh_result.metadata["region_node_sets"]["end_face"]
+    assert output.mesh_result.mesh_file is not None
+
+    assert output.model_params is not None
+    model = output.model_params.model_copy(update={"mesh_file": output.mesh_result.mesh_file})
+    for adapter in (
+        CalculiXAdapter(SolverConfig(work_dir=tmp_path / "ccx")),
+        AbaqusAdapter(SolverConfig(work_dir=tmp_path / "abaqus")),
+    ):
+        with pytest.raises(SolverError, match="连接或接触契约"):
+            adapter.generate_input(model)
 
 
 def test_multi_solid_cad_exposes_part_topology_without_execution_claim(tmp_path: Path) -> None:

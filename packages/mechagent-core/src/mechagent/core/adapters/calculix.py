@@ -10,6 +10,7 @@ from math import isfinite, pi, sqrt
 from pathlib import Path
 from typing import Any, Optional
 
+from mechagent.core.cad import is_multi_solid_cad_metadata
 from mechagent.core.exceptions import SolverError
 from mechagent.core.executor import (
     AbstractJobExecutor,
@@ -113,6 +114,10 @@ class CalculiXAdapter(AbstractSolver):
         elif model_params.geometry.type is GeometryType.PLATE:
             content = _plate_static_inp(model_params, mesh_file)
         elif model_params.geometry.type is GeometryType.SOLID:
+            if is_multi_solid_cad_metadata(model_params.metadata):
+                raise SolverError(
+                    "CAD 多实体模型缺少连接或接触契约，当前求解器只接受单实体 CAD 求解。"
+                )
             content = _solid_static_inp(model_params, mesh_file)
         else:
             msg = f"CalculiXAdapter 不支持 {model_params.geometry.type.value} 几何输入生成。"

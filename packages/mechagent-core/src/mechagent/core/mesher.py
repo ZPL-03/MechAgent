@@ -86,6 +86,9 @@ class MeshProvenance(BaseModel):
     region_names: list[str] = Field(default_factory=list, max_length=4096)
     cad_source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     topology_digest: str | None = Field(default=None, max_length=128)
+    solid_count: int = Field(default=1, ge=1)
+    part_ids: list[str] = Field(default_factory=list, max_length=4096)
+    connection_semantics: Literal["single_part", "unconnected_parts"] = "single_part"
 
     @field_validator("seed_size_mm")
     @classmethod

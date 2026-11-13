@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -457,6 +458,21 @@ class GeometryCandidate(BaseModel):
     topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
     parts: list[CADPartSummary] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
+
+
+def is_multi_solid_cad_metadata(metadata: Mapping[str, Any]) -> bool:
+    """判断模型元数据是否描述包含多个三维实体的 CAD 来源。"""
+
+    if metadata.get("geometry_source") != "cad":
+        return False
+    cad_geometry = metadata.get("cad_geometry")
+    if not isinstance(cad_geometry, Mapping):
+        return False
+    solid_count = cad_geometry.get("solid_count")
+    if isinstance(solid_count, int) and solid_count > 1:
+        return True
+    parts = cad_geometry.get("parts")
+    return isinstance(parts, list) and len(parts) > 1
 
 
 def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCandidate:

@@ -2,7 +2,8 @@
 
 该适配器只处理带有可核验 CAD 来源的三维实体。网格由导入的 CAD 形体直接生成，
 并将当前导入摘要中的拓扑面/边转换为 CalculiX/Abaqus 可读取的节点集合。无法恢复来源、拓扑
-或有效区域集合时显式失败，不回退到包围盒网格。
+或有效区域集合时显式失败，不回退到包围盒网格。多个实体可以生成带零件归属的检查网格；
+求解器是否支持这些实体的连接或接触由求解器适配器单独判定。
 """
 
 from __future__ import annotations
@@ -72,29 +73,15 @@ class GmshCADInpMesher(AbstractMesher):
             gmsh.model.occ.importShapes(str(source))
             gmsh.model.occ.synchronize()
             imported_volumes = gmsh.model.getEntities(3)
-            if len(imported_volumes) > 1:
-                return MeshResult(
-                    success=False,
-                    error_message=(
-                        "CAD 直接网格当前只接受单个封闭实体；装配体或多个实体需要独立的区域契约。"
-                    ),
-                    metadata={"solid_count": len(imported_volumes)},
-                )
-            if self.config.healing:
+            if not imported_volumes:
+                return MeshResult(success=False, error_message="CAD 源文件没有可网格化的三维实体。")
+            if self.config.healing and len(imported_volumes) == 1:
                 gmsh.model.occ.healShapes()
             gmsh.model.occ.synchronize()
             volumes = gmsh.model.getEntities(3)
             faces = gmsh.model.getEntities(2)
             if not volumes:
                 return MeshResult(success=False, error_message="CAD 直接网格需要至少一个封闭实体。")
-            if len(volumes) != 1:
-                return MeshResult(
-                    success=False,
-                    error_message=(
-                        "CAD 直接网格当前只接受单个封闭实体；装配体或多个实体需要独立的区域契约。"
-                    ),
-                    metadata={"solid_count": len(volumes)},
-                )
             topology = _topology_entities(volumes, faces, gmsh.model.getEntities(1))
             expected_topology_digest = cad_geometry.get("topology_digest")
             actual_topology_digest = _topology_digest(topology)
@@ -161,6 +148,12 @@ class GmshCADInpMesher(AbstractMesher):
                     "source_path": str(source),
                     "source_sha256": expected_hash or _sha256_file(source),
                     "topology_digest": actual_topology_digest,
+                    "solid_count": len(volumes),
+                    "part_ids": sorted(item.stable_id for item in topology if item.dimension == 3),
+                    "assembly_mesh": len(volumes) > 1,
+                    "connection_semantics": "unconnected_parts"
+                    if len(volumes) > 1
+                    else "single_part",
                     "region_candidates": [
                         item
                         for item in cad_geometry.get("region_candidates", [])
