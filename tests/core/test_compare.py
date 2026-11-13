@@ -956,3 +956,33 @@ def test_multistep_comparison_rejects_unknown_frame_role_and_non_object_fields()
         "id:step-1[0]:未知帧语义 'checkpoint'",
         "id:step-1[0]:字段记录必须是对象",
     ]
+
+
+def test_multistep_comparison_does_not_fallback_from_explicit_empty_frames() -> None:
+    common = {
+        "physical_case_digest": "p" * 64,
+        "units": {"length": "mm"},
+        "coordinate_system": {"name": "global"},
+    }
+    left = {
+        **common,
+        "case_digest": "a" * 64,
+        "mapped_step_fields": [{"step_id": "step-1", "frames": []}],
+    }
+    right = {
+        **common,
+        "case_digest": "b" * 64,
+        "mapped_step_fields": [{"step_id": "step-1", "mapped_fields": {}}],
+    }
+
+    result = compare_backend_step_fields(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "结果帧契约无效。"
+    assert result.invalid_records == ["id:step-1:frames 不能为空"]

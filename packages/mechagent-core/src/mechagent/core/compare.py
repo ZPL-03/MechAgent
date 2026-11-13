@@ -735,7 +735,13 @@ def _step_records(
         seen_step_keys.add(step_key)
         raw_frames = raw_step.get("frames")
         frames: list[dict[str, Any]] = []
-        if isinstance(raw_frames, list) and raw_frames:
+        if "frames" in raw_step and not isinstance(raw_frames, list):
+            invalid.append(f"{step_key}:frames 必须是数组")
+            continue
+        if isinstance(raw_frames, list):
+            if not raw_frames:
+                invalid.append(f"{step_key}:frames 不能为空")
+                continue
             seen_frame_keys: set[str] = set()
             for frame_index, raw_frame in enumerate(raw_frames):
                 if not isinstance(raw_frame, dict):
