@@ -32,6 +32,8 @@ def test_result_fields_select_magnitude_and_mises() -> None:
     )
     assert extracted["requested_fields"]["u_mag"]["values"] == {"1": 5.0}
     assert extracted["requested_fields"]["s_mises"]["values"]["1"] == pytest.approx(3.0)
+    assert extracted["requested_fields"]["u_mag"]["source"] == "fields.displacement"
+    assert "ResultFieldSpec" in extracted["requested_fields"]["u_mag"]["derivation"]
     assert len(extracted["result_steps"]) == 1
     assert extracted["result_steps"][0]["step_id"] == "step-1"
 
@@ -173,6 +175,63 @@ def test_result_field_rejects_backend_location_mismatch() -> None:
         )
 
 
+def test_result_field_rejects_backend_unit_mismatch() -> None:
+    case = _case().model_copy(
+        update={
+            "result_fields": [
+                ResultFieldSpec(
+                    name="u_mag",
+                    quantity="U",
+                    location="node",
+                    invariant="magnitude",
+                    unit="mm",
+                )
+            ]
+        }
+    )
+    with pytest.raises(SolverError, match="请求单位 mm"):
+        attach_case_result_fields(
+            {
+                "fields": {
+                    "displacement": {
+                        "location": "node",
+                        "unit": "m",
+                        "values": {"1": [0.001, 0.0, 0.0]},
+                    }
+                }
+            },
+            case,
+        )
+
+
+def test_result_field_rejects_missing_backend_unit_when_requested() -> None:
+    case = _case().model_copy(
+        update={
+            "result_fields": [
+                ResultFieldSpec(
+                    name="u_mag",
+                    quantity="U",
+                    location="node",
+                    invariant="magnitude",
+                    unit="mm",
+                )
+            ]
+        }
+    )
+    with pytest.raises(SolverError, match="后端只提供 未声明"):
+        attach_case_result_fields(
+            {
+                "fields": {
+                    "displacement": {
+                        "location": "node",
+                        "values": {"1": [1.0, 0.0, 0.0]},
+                    }
+                }
+            },
+            case,
+        )
+
+
 def test_step_results_only_contain_fields_declared_by_that_step() -> None:
     case = _case()
     case = case.model_copy(
@@ -297,6 +356,8 @@ def test_mapped_fields_use_element_centroids_and_preserve_native_fields() -> Non
     assert extracted["mapped_fields"]["strain_exx"]["values"] == {"10": 0.2}
     assert extracted["mapped_fields"]["volume"]["values"] == {"10": 20.0}
     assert extracted["mapped_fields"]["strain_energy_density"]["values"] == {"10": 2.0}
+    assert extracted["mapped_fields"]["stress_sxx"]["source"] == "fields.stress"
+    assert "单元质心" in extracted["mapped_fields"]["stress_sxx"]["derivation"]
 
 
 def test_mapped_beam_volume_uses_mesh_nodes_when_native_volume_is_absent() -> None:
@@ -312,6 +373,7 @@ def test_mapped_beam_volume_uses_mesh_nodes_when_native_volume_is_absent() -> No
     )
 
     assert extracted["mapped_fields"]["volume"]["values"] == {"1": 8000.0}
+    assert extracted["mapped_fields"]["volume"]["source"] == "mesh_nodes+case.geometry"
 
 
 def test_mapped_beam_volume_accepts_abaqus_node_key() -> None:

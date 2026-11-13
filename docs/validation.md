@@ -154,7 +154,7 @@ python scripts/clean_artifacts.py
 `.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并用 `gh attestation verify` 校验每个发布 subject 的仓库、工作流、tag 和 OIDC issuer 身份，再由 cosign 对发布清单执行 keyless 签名和验证。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。该门禁只有 tag 工作流在目标仓库中成功运行后才形成外部验证证据。
 PR 和发布工作流中的第三方 action 固定到完整 commit SHA；PR 工作流仅授予 `contents: read`，发布工作流才申请发布、OIDC 和 attestation 所需权限。
 
-字段位置或单位与另一后端不一致时，`requested_fields` 和 `comparison_fields` 返回 `failed`；原始 `fields` 和 `mapped_fields` 保持 `unverified`，避免把不同离散语义的值按标签配对。
+结果选择器在 `ResultFieldSpec.unit` 非空时要求后端场声明相同单位；单位缺失或不一致的必需字段直接失败，不能用请求单位覆盖实际单位。选定字段、单元质心映射和统一语义字段分别保留来源与推导信息。字段位置或单位与另一后端不一致时，`requested_fields` 和 `comparison_fields` 返回 `failed`；原始 `fields` 和 `mapped_fields` 保持 `unverified`，避免把不同离散语义的值按标签配对。
 
 `scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，其他情况标记为 `unverified`。结果提取根据节点坐标和单元连接生成 `mesh_digest`；`element` 和 `integration_point` 场只有在两侧指纹一致且字段键对应时才按键比较，否则保持 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；节点场必须覆盖单元所需节点，只有梁允许对截面展开节点按主轴站位聚合，板和实体在覆盖不足时不生成统一字段。统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，校验失败返回 `failed`。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，按 `load_steps.sequence` 排列；缺失分析步保持失败或未验证状态。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行选定工具并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
 

@@ -271,6 +271,8 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
                 "location": "element_centroid",
                 "unit": "MPa" if quantity == "stress" else "",
                 "values": values,
+                "source": f"fields.{quantity}",
+                "derivation": "按单元连接或积分点的场值均值聚合到单元质心",
                 "mapping": "element-connectivity-mean-or-axis-station-mean",
             }
 
@@ -281,14 +283,18 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
         extracted,
         allow_axis_station=case.model.geometry.type.value == "beam",
     )
+    volume_source = "fields.volume"
     if not volume_values and case.model.geometry.type.value == "beam":
         volume_values = dict(_beam_element_volumes(elements, extracted, case))
+        volume_source = "mesh_nodes+case.geometry"
     if volume_values:
         mapped["volume"] = {
             "quantity": "volume",
             "location": "element_centroid",
             "unit": "mm^3",
             "values": volume_values,
+            "source": volume_source,
+            "derivation": "按单元标签或连接映射体积；梁缺少体积场时按轴向长度与截面面积计算",
             "mapping": "element-label-or-connectivity",
         }
 
@@ -309,6 +315,8 @@ def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase)
                 "location": "element_centroid",
                 "unit": "N/mm^2",
                 "values": energy_values,
+                "source": "fields.strain_energy_density",
+                "derivation": "按单元连接或积分点的应变能密度均值聚合到单元质心",
                 "mapping": "element-connectivity-mean-or-integration-point-mean",
             }
 
@@ -514,12 +522,32 @@ def _select_fields(
                     f"结果字段 {spec.name} 请求位置 {spec.location}，后端只提供 {raw_location}。"
                 )
             continue
+        raw_unit = raw.get("unit", "")
+        if raw_unit is None:
+            raw_unit = ""
+        if not isinstance(raw_unit, str):
+            if required and spec.required:
+                raise SolverError(f"结果字段 {spec.name} 的后端单位格式无效。")
+            continue
+        raw_unit = raw_unit.strip()
+        requested_unit = spec.unit.strip()
+        if requested_unit and raw_unit != requested_unit:
+            if required and spec.required:
+                provided = raw_unit or "未声明"
+                raise SolverError(
+                    f"结果字段 {spec.name} 请求单位 {requested_unit}，后端只提供 {provided}。"
+                )
+            continue
         values = raw["values"]
         selected[spec.name] = {
             "quantity": spec.quantity,
             "location": raw.get("location", spec.location),
-            "unit": spec.unit or raw.get("unit", ""),
+            "unit": requested_unit or raw_unit,
             "selector": spec.component or spec.invariant or "vector",
+            "source": str(raw.get("source") or f"fields.{key}"),
+            "derivation": str(
+                raw.get("derivation") or "按 ResultFieldSpec 选择求解器原始场的分量或不变量"
+            ),
             "values": {
                 str(label): _select_value(value, spec, key) for label, value in values.items()
             },

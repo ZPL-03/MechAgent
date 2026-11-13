@@ -31,7 +31,7 @@ MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元�
 
 `CalculiXAdapter.run_case()` 支持 `SimulationCase` 的多个线性静力 `LoadStepSpec`。每个步骤的载荷比例、增量和输出间隔进入同一个输入文件，结果解析保留 `field_history`，并由统一结果选择器生成 `requested_fields` 与 `step_results`。旧 `run(ModelParams)` 入口仍保持单步兼容语义。
 
-`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。字段位置、单位、来源和映射方式保留在结果 JSON 中，后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
+`.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。选定字段、单元映射字段和统一语义字段保留位置、单位、来源、推导和映射方式；`ResultFieldSpec.unit` 非空时必须与后端单位完全一致，不能用请求标签掩盖单位冲突。后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
 
 ## Abaqus/Standard 适配器
 
