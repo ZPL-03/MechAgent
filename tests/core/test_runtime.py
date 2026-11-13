@@ -24,7 +24,12 @@ from mechagent.config import (
     StudioSettings,
     config_to_public_dict,
 )
-from mechagent.evidence import artifact_records, verify_manifest, write_manifest
+from mechagent.evidence import (
+    artifact_records,
+    stable_artifact_records,
+    verify_manifest,
+    write_manifest,
+)
 from mechagent.runtime.manager import JobManager
 from mechagent.runtime.process import identified_process, stop_process
 from mechagent.runtime.rate_limit import SlidingWindowRateLimiter
@@ -411,6 +416,16 @@ def test_artifact_records_hashes_nested_files_and_excludes_manifest(tmp_path: Pa
             "sha256": "f6a214f7a5fcda0c2cee9660b7fc29f5649e3c68aad48e20e950137c98913a68",
         }
     ]
+
+
+def test_stable_artifact_records_waits_for_solver_lock_release(tmp_path: Path) -> None:
+    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
+    assert stable_artifact_records(tmp_path, attempts=2, interval_seconds=0.001)
+
+    lock = tmp_path / "case.lck"
+    lock.write_text("active", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="活动求解锁"):
+        stable_artifact_records(tmp_path, attempts=2, interval_seconds=0.001)
 
 
 def test_sdk_failure_manifest_and_config_do_not_expose_secrets(tmp_path: Path) -> None:

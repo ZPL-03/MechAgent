@@ -20,6 +20,7 @@ from scripts import (
     run_abaqus_multistep,
     run_backend_comparison,
     run_benchmarks,
+    run_calculix_multistep,
     run_llm_smoke,
     run_natural_language_cases,
     sign_release,
@@ -299,6 +300,15 @@ def test_verify_release_invokes_keyless_cosign_with_identity(
 
 
 def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
+    frame_fields = {
+        "U": {"values": {"1": 1.0}},
+        "S": {"values": {"1@ip1": 1.0}},
+        "E": {"values": {"1@ip1": 1.0}},
+        "EVOL": {"values": {"1": 1.0}},
+        "SENER": {"values": {"1@ip1": 1.0}},
+        "RF": {"values": {"1": [0.0, 1.0, 0.0]}},
+        "ENER": {"values": {"ALLIE": 1.0}},
+    }
     result = {
         "success": True,
         "nodes": {"1": [0.0, 0.0, 0.0]},
@@ -307,6 +317,8 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
             "stress": {"values": {"1@ip1": 1.0}},
             "strain": {"values": {"1@ip1": 1.0}},
             "volume": {"values": {"1": 1.0}},
+            "strain_energy_density": {"values": {"1@ip1": 1.0}},
+            "reaction_force": {"values": {"1": [0.0, 1.0, 0.0]}},
             "energy": {"values": {"ALLIE": 1.0}},
         },
         "requested_fields": {
@@ -314,6 +326,8 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
             "stress_sxx": {"values": {"1@ip1": 1.0}},
             "strain": {"values": {"1@ip1": 1.0}},
             "volume": {"values": {"1": 1.0}},
+            "strain_energy_density": {"values": {"1@ip1": 1.0}},
+            "reaction_force": {"values": {"1": [0.0, 1.0, 0.0]}},
             "energy": {"values": {"ALLIE": 1.0}},
         },
         "step_results": [
@@ -323,6 +337,8 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
                     "stress_sxx": {},
                     "strain": {},
                     "volume": {},
+                    "strain_energy_density": {},
+                    "reaction_force": {},
                     "energy": {},
                 }
             },
@@ -332,6 +348,8 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
                     "stress_sxx": {},
                     "strain": {},
                     "volume": {},
+                    "strain_energy_density": {},
+                    "reaction_force": {},
                     "energy": {},
                 }
             },
@@ -340,27 +358,41 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
         "steps": [
             {
                 "name": "step-1",
-                "frames": [{}, {}],
                 "fields": {
                     "U": {"values": {"1": 1.0}},
                     "S": {"values": {"1@ip1": 1.0}},
                     "E": {"values": {"1@ip1": 1.0}},
                     "EVOL": {"values": {"1": 1.0}},
+                    "SENER": {"values": {"1@ip1": 1.0}},
+                    "RF": {"values": {"1": [0.0, 1.0, 0.0]}},
                     "ENER": {"values": {"ALLIE": 1.0}},
                 },
-                "history": {"ALLIE": []},
+                "frames": [{"fields": frame_fields}, {"fields": frame_fields}],
+                "history": {
+                    "ALLIE": [[0.0, 0.0]],
+                    "ALLSE": [[0.0, 0.0]],
+                    "ALLWK": [[0.0, 0.0]],
+                    "ALLPD": [[0.0, 0.0]],
+                },
             },
             {
                 "name": "step-2",
-                "frames": [{}, {}],
                 "fields": {
                     "U": {"values": {"1": 1.0}},
                     "S": {"values": {"1@ip1": 1.0}},
                     "E": {"values": {"1@ip1": 1.0}},
                     "EVOL": {"values": {"1": 1.0}},
+                    "SENER": {"values": {"1@ip1": 1.0}},
+                    "RF": {"values": {"1": [0.0, 1.0, 0.0]}},
                     "ENER": {"values": {"ALLIE": 1.0}},
                 },
-                "history": {"ALLIE": []},
+                "frames": [{"fields": frame_fields}, {"fields": frame_fields}],
+                "history": {
+                    "ALLIE": [[0.0, 0.0]],
+                    "ALLSE": [[0.0, 0.0]],
+                    "ALLWK": [[0.0, 0.0]],
+                    "ALLPD": [[0.0, 0.0]],
+                },
             },
         ],
         "output_files": ["case.com", "case.inp"],
@@ -377,8 +409,26 @@ def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
         "stress_sxx": 1,
         "strain": 1,
         "volume": 1,
+        "strain_energy_density": 1,
+        "reaction_force": 1,
         "energy": 1,
     }
+
+
+def test_calculix_multistep_case_declares_native_field_locations() -> None:
+    case = run_calculix_multistep._case_for_calculix()
+    locations = {field.name: field.location for field in case.result_fields}
+
+    assert locations == {
+        "displacement": "node",
+        "stress_sxx": "node",
+        "strain": "node",
+        "volume": "element",
+        "strain_energy_density": "element",
+        "reaction_force": "node",
+        "energy": "element",
+    }
+    assert all(step.result_fields == list(locations) for step in case.load_steps)
 
 
 def test_backend_comparison_script_writes_verifiable_manifest(

@@ -18,6 +18,7 @@
 | CAD | `run_cad_topology_case.py` | 生成或导入 CAD，检查拓扑、区域、C3D4 网格和 CalculiX 链路 |
 | 求解器 | `run_abaqus_smoke.py` | 独立 Abaqus 工具基准；适配器验收单独记录 |
 | 求解器 | `run_abaqus_multistep.py` | 验证同一 `SimulationCase` 的 Abaqus 多步输入和 ODB 字段 |
+| 求解器 | `run_calculix_multistep.py` | 验证 CalculiX 多步输入和 FRD 位移、应力、应变、体积、反力、能量字段 |
 | 跨工具比较 | `compare_backends.py` | 读取已有 JSON 结果并比较指定字段，不执行求解 |
 | 跨工具比较 | `run_backend_comparison.py` | 运行选定适配器、保存结果并生成比较清单 |
 | Studio | `studio_http_smoke.py` | 验证 Studio HTTP API、队列和公开摘要 |
@@ -41,6 +42,7 @@
 - `compare_backends.py` 与 `run_backend_comparison.py` 分别负责结果比较和运行后比较；命令职责保持分离。
 - `build_knowledge.py` 与 `index_knowledge.py` 是标准化和索引两个可独立失败的阶段；CI 需要分别暴露失败。
 - `run_abaqus_smoke.py` 与 `run_abaqus_multistep.py` 分别覆盖独立工具基准和适配器多步字段，验收记录分别保存。
+- `run_abaqus_multistep.py` 与 `run_calculix_multistep.py` 分别覆盖 ODB 和 FRD 的多步字段提取；两种后端的原生场位置由各自案例契约明确记录。
 - `backup_studio.py`、`restore_studio.py` 和 `drill_studio_recovery.py` 分别执行备份、恢复和演练，运维流程按对应阶段执行。
 - `prune_artifacts.py` 面向对象存储引用，`clean_artifacts.py` 面向仓库缓存和运行目录；两者的保护规则不同。
 

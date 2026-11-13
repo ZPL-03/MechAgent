@@ -34,7 +34,7 @@ from mechagent.core.validation import (  # noqa: E402
     tc04_model_params,
     tc05_model_params,
 )
-from mechagent.evidence import artifact_records  # noqa: E402
+from mechagent.evidence import stable_artifact_records  # noqa: E402
 
 _CASE_BUILDERS: dict[str, Callable[[], ModelParams]] = {
     "TC-01": tc01_model_params,
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         "case_ids": case_ids,
         "comparison": output.name,
     }
-    manifest["artifacts"] = artifact_records(args.output_dir)
+    manifest["artifacts"] = stable_artifact_records(args.output_dir)
     (args.output_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

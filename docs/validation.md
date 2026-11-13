@@ -139,6 +139,8 @@ python scripts/compare_backends.py --left calculix-result.json --right abaqus-re
 python scripts/run_backend_comparison.py --case-id TC-01 --case-id TC-03 --case-id TC-04 --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --abaqus D:/Abaqus2023/Commands/abaqus.bat --relative 0.03 --absolute 0.005 --output-dir mechagent_output/backend-comparison
 # 在同一 SimulationCase 上验证 Abaqus 多步执行、完整场量和逐步结果字段
 python scripts/run_abaqus_multistep.py --abaqus D:/Abaqus2023/Commands/abaqus.bat --output-dir mechagent_output/abaqus-multistep
+# 验证 CalculiX 多步执行、FRD 原生场量和逐步结果字段
+python scripts/run_calculix_multistep.py --calculix D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe --output-dir mechagent_output/calculix-multistep
 python scripts/check_wheel_install.py
 python -m mkdocs build --strict
 python scripts/clean_artifacts.py
@@ -158,13 +160,15 @@ PR 和发布工作流中的第三方 action 固定到完整 commit SHA；PR 工�
 
 结果选择器在 `ResultFieldSpec.unit` 非空时要求后端场声明相同单位；单位缺失或不一致的必需字段直接失败，不能用请求单位覆盖实际单位。选定字段、单元质心映射和统一语义字段分别保留来源与推导信息。字段位置或单位与另一后端不一致时，`requested_fields` 和 `comparison_fields` 返回 `failed`；原始 `fields` 和 `mapped_fields` 保持 `unverified`，避免把不同离散语义的值按标签配对。
 
-`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，其他情况标记为 `unverified`。结果提取根据节点坐标和单元连接生成 `mesh_digest`；`element` 和 `integration_point` 场只有在两侧指纹一致且字段键对应时才按键比较，否则保持 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；节点场必须覆盖单元所需节点，只有梁允许对截面展开节点按主轴站位聚合，板和实体在覆盖不足时不生成统一字段。统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，校验失败返回 `failed`。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，按 `load_steps.sequence` 排列；缺失分析步保持失败或未验证状态。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行选定工具并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
+`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，其他情况标记为 `unverified`。结果提取根据节点坐标和单元连接生成 `mesh_digest`；`element` 和 `integration_point` 场只有在两侧指纹一致且字段键对应时才按键比较，否则保持 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；节点场必须覆盖单元所需节点，只有梁允许对截面展开节点按主轴站位聚合，板和实体在覆盖不足时不生成统一字段。统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，校验失败返回 `failed`。案例指纹不一致也直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，按 `load_steps.sequence` 排列；缺失分析步保持失败或未验证状态。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行选定工具并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。多步和跨工具脚本在写入清单前等待产物连续两次快照一致，并确认目录内没有活动求解锁。
 
 本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段、统一单元质心字段和统一语义摘要均通过。当前权威清单为 `mechagent_output/backend-comparison-current/manifest.json`，状态为 `passed`。位移使用 `line-coordinate-centerline` 或 `node-coordinate` 对齐；统一单元质心字段包含 `stress_sxx`、`strain_exx` 和 `volume`，实体案例还包含 `strain_energy_density`，阈值为相对误差 10% 或绝对误差 0.005。统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力，阈值为相对误差 3% 或绝对误差 0.005。当前真实跨工具案例使用不同网格，原始场比较因节点/积分点、截面展开和反力离散分布差异记录为 `unverified` 或 `failed`；逐积分点应力、逐节点反力、原始能量场、其他网格、单元族和物理域仍需独立验收。
 
 适配器测试覆盖许可证探针非零返回、进程内槽位等待超时、共享 SQLite 队列的跨进程容量限制、租约释放和容量漂移拒绝；这些记录适配器和队列的失败路径。Abaqus 实际许可证不可用时仍需保存本机审计记录。共享队列的验证范围是同一可用文件系统上的 Python 进程协调；FLEXnet 和集群许可证服务的容量状态需单独审计。
 
-`scripts/run_abaqus_multistep.py` 的本机验证清单为 `mechagent_output/abaqus-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 2 个 ODB 帧、101 个节点、400 个积分点应力和应变值、100 个单元体积值、400 个应变能密度值、101 个节点反力值、全局 `ALLIE` 能量值以及 4 个逐帧结果记录。两个步骤均保留 `ALLIE`、`ALLSE`、`ALLWK` 和 `ALLPD` 历史能量；`requested_fields` 与 `step_results` 均包含位移、应力分量、应变、体积和能量字段。该证据验证 Abaqus 适配器的本机多步执行与场提取路径，不扩大到非线性、接触或其他单元族。
+`scripts/run_abaqus_multistep.py` 的本机验证清单为 `mechagent_output/abaqus-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 2 个 ODB 帧、101 个节点、400 个积分点应力和应变值、100 个单元体积值、400 个应变能密度值、101 个节点反力值、全局 `ALLIE` 能量值以及 4 个逐帧结果记录。两个步骤均保留 `ALLIE`、`ALLSE`、`ALLWK` 和 `ALLPD` 历史能量；`requested_fields` 与 `step_results` 均包含位移、应力分量、应变、体积、应变能密度、反力和能量字段。每个逐帧记录都经过相同字段覆盖检查。该证据验证 Abaqus 适配器的本机多步执行与场提取路径，不扩大到非线性、接触或其他单元族。
+
+`scripts/run_calculix_multistep.py` 的本机验证清单为 `mechagent_output/calculix-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 1 个 FRD 结果帧、404 个节点场值、100 个单元体积值以及位移、应力、应变、应变能密度、节点反力和单元能量字段；`requested_fields` 与 `step_results` 覆盖同一组物理量。CalculiX 当前输出的应力、应变和反力位置为节点，体积、应变能密度和能量位置为单元；这些原生位置保留在结果契约中，跨后端比较通过坐标对应或单元质心映射完成。该证据验证 CalculiX 适配器的多步 FRD 解析路径，不把原生节点场声明为积分点场。
 
 Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
 

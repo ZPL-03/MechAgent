@@ -20,7 +20,7 @@ from mechagent.core.adapters.abaqus import AbaqusAdapter  # noqa: E402
 from mechagent.core.models import LoadStepSpec, ResultFieldSpec, SimulationCase  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.core.validation import tc01_model_params  # noqa: E402
-from mechagent.evidence import artifact_records  # noqa: E402
+from mechagent.evidence import stable_artifact_records  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_json(args.output_dir / "result.json", result)
     summary = _summary(result, case_digest)
-    summary["artifacts"] = artifact_records(args.output_dir)
+    summary["artifacts"] = stable_artifact_records(args.output_dir)
     _write_json(args.output_dir / "manifest.json", summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["status"] == "passed" else 1
@@ -76,6 +76,13 @@ def _case() -> SimulationCase:
         ),
         ResultFieldSpec(name="strain", quantity="E", location="integration_point"),
         ResultFieldSpec(name="volume", quantity="EVOL", location="element", unit="mm^3"),
+        ResultFieldSpec(
+            name="strain_energy_density",
+            quantity="SENER",
+            location="integration_point",
+            unit="N/mm^2",
+        ),
+        ResultFieldSpec(name="reaction_force", quantity="RF", location="node", unit="N"),
         ResultFieldSpec(name="energy", quantity="ENER", location="global", unit="N*mm"),
     ]
     return SimulationCase.from_model_params(params, provenance_confidence=1.0).model_copy(
@@ -100,7 +107,15 @@ def _case() -> SimulationCase:
     )
 
 
-def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
+def _summary(
+    result: dict[str, object],
+    case_digest: str,
+    *,
+    case_id: str = "TC-01-multistep",
+    required_history: set[str] | None = None,
+    minimum_frames: int = 2,
+    minimum_history_count: int = 4,
+) -> dict[str, object]:
     steps = result.get("steps")
     fields = result.get("fields")
     history = result.get("field_history")
@@ -114,6 +129,23 @@ def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
             if not isinstance(step, dict):
                 continue
             step_fields = step.get("fields")
+            frames = step.get("frames")
+            frame_items = frames if isinstance(frames, list) else []
+            frame_field_counts = [
+                _field_counts(frame.get("fields"))
+                for frame in frame_items
+                if isinstance(frame, dict) and isinstance(frame.get("fields"), dict)
+            ]
+            step_history = step.get("history")
+            history_counts = (
+                {
+                    str(key): len(value)
+                    for key, value in step_history.items()
+                    if isinstance(value, list)
+                }
+                if isinstance(step_history, dict)
+                else {}
+            )
             step_rows.append(
                 {
                     "name": step.get("name"),
@@ -122,15 +154,33 @@ def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
                     if isinstance(step.get("frames"), list)
                     else 0,
                     "field_counts": _field_counts(step_fields),
+                    "frame_field_counts": frame_field_counts,
                     "history_keys": sorted(step.get("history", {}).keys())
                     if isinstance(step.get("history"), dict)
                     else [],
+                    "history_counts": history_counts,
                 }
             )
     field_counts = _field_counts(fields)
-    required = {"displacement", "stress", "strain", "volume", "energy"}
+    required = {
+        "displacement",
+        "stress",
+        "strain",
+        "volume",
+        "strain_energy_density",
+        "reaction_force",
+        "energy",
+    }
     requested_counts = _field_counts(requested)
-    requested_names = {"displacement", "stress_sxx", "strain", "volume", "energy"}
+    requested_names = {
+        "displacement",
+        "stress_sxx",
+        "strain",
+        "volume",
+        "strain_energy_density",
+        "reaction_force",
+        "energy",
+    }
     step_result_names = [
         sorted(item.get("fields", {}).keys())
         for item in step_result_items
@@ -144,6 +194,11 @@ def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
         and all(requested_names.issubset(set(names)) for names in step_result_names)
     )
     step_fields_complete = all(_step_row_complete(row, required) for row in step_rows)
+    frame_fields_complete = all(_step_frames_complete(row, required) for row in step_rows)
+    history_keys = (
+        {"ALLIE", "ALLSE", "ALLWK", "ALLPD"} if required_history is None else required_history
+    )
+    history_complete = all(_step_history_complete(row, history_keys) for row in step_rows)
     history_count = len(history) if isinstance(history, list) else 0
     nodes = result.get("nodes")
     node_count = len(nodes) if isinstance(nodes, dict) else 0
@@ -151,18 +206,20 @@ def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
         bool(result.get("success"))
         and valid_steps
         and isinstance(history, list)
-        and history_count >= 4
+        and history_count >= minimum_history_count
         and step_fields_complete
+        and frame_fields_complete
+        and history_complete
         and selected_fields_complete
         and node_count > 0
         and required.issubset(field_counts)
         and all(count > 0 for key, count in field_counts.items() if key in required)
-        and all(_step_row_has_frames(row, minimum=2) for row in step_rows)
+        and all(_step_row_has_frames(row, minimum=minimum_frames) for row in step_rows)
     )
     return {
         "schema_version": 1,
         "status": "passed" if passed else "failed",
-        "case_id": "TC-01-multistep",
+        "case_id": case_id,
         "case_digest": case_digest,
         "step_count": len(steps) if isinstance(steps, list) else 0,
         "field_history_count": history_count,
@@ -170,6 +227,8 @@ def _summary(result: dict[str, object], case_digest: str) -> dict[str, object]:
         "field_counts": field_counts,
         "requested_field_counts": requested_counts,
         "step_result_fields": step_result_names,
+        "required_fields": sorted(required),
+        "required_history": sorted(history_keys),
         "steps": step_rows,
         "result_json": "result.json",
         "input": _output_name(result, ".inp"),
@@ -199,10 +258,31 @@ def _step_row_complete(row: dict[str, object], required: set[str]) -> bool:
         "S": "stress",
         "E": "strain",
         "EVOL": "volume",
+        "SENER": "strain_energy_density",
+        "RF": "reaction_force",
         "ENER": "energy",
     }
-    normalized = {aliases.get(str(name), str(name)) for name in values}
-    return required.issubset(normalized)
+    normalized = {aliases.get(str(name), str(name)): count for name, count in values.items()}
+    return required.issubset(normalized) and all(
+        isinstance(normalized.get(name), int) and normalized[name] > 0 for name in required
+    )
+
+
+def _step_frames_complete(row: dict[str, object], required: set[str]) -> bool:
+    frames = row.get("frame_field_counts")
+    if not isinstance(frames, list) or not frames:
+        return False
+    return all(
+        isinstance(counts, dict) and _step_row_complete({"field_counts": counts}, required)
+        for counts in frames
+    )
+
+
+def _step_history_complete(row: dict[str, object], required: set[str]) -> bool:
+    counts = row.get("history_counts")
+    return isinstance(counts, dict) and all(
+        isinstance(counts.get(name), int) and counts[name] > 0 for name in required
+    )
 
 
 def _step_row_has_frames(row: dict[str, object], *, minimum: int) -> bool:

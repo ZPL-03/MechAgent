@@ -198,6 +198,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "run_llm_smoke.py",
         "run_abaqus_smoke.py",
         "run_abaqus_multistep.py",
+        "run_calculix_multistep.py",
         "audit_abaqus_license.py",
         "run_cad_topology_case.py",
         "run_backend_comparison.py",

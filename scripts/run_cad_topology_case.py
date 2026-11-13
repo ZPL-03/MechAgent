@@ -25,7 +25,7 @@ from mechagent.core.adapters.gmsh_cad_mesh import GmshCADInpMesher  # noqa: E402
 from mechagent.core.mesher import MeshConfig  # noqa: E402
 from mechagent.core.models import ElementType  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
-from mechagent.evidence import artifact_records  # noqa: E402
+from mechagent.evidence import stable_artifact_records  # noqa: E402
 from mechagent.orchestrator.agents.geometry import GeometryAgent  # noqa: E402
 
 _HOLE_CENTER = (50.0, 20.0)
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest: dict[str, object]
     if not analysis.success or analysis.candidate is None:
         manifest = {"status": "failed", "stage": "cad_import", "error": analysis.error_message}
-        manifest["artifacts"] = artifact_records(args.output_dir)
+        manifest["artifacts"] = stable_artifact_records(args.output_dir)
         _write_json(args.output_dir / "manifest.json", manifest)
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return 1
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - 证据清单必须保留失败原因
         manifest = {"schema_version": 1, "status": "failed", "error": str(exc)}
 
-    manifest["artifacts"] = artifact_records(args.output_dir)
+    manifest["artifacts"] = stable_artifact_records(args.output_dir)
     _write_json(args.output_dir / "manifest.json", manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
     return 0 if manifest["status"] == "passed" else 1

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import platform
+import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -64,6 +66,34 @@ def artifact_records(
             }
         )
     return records
+
+
+def stable_artifact_records(
+    directory: Path,
+    *,
+    attempts: int = 20,
+    interval_seconds: float = 0.25,
+) -> list[dict[str, Any]]:
+    """等待证据目录稳定且没有活动求解锁后返回文件清单。"""
+
+    if attempts < 2:
+        raise ValueError("证据稳定性检查至少需要两次快照。")
+    if interval_seconds <= 0.0 or not math.isfinite(interval_seconds):
+        raise ValueError("证据稳定性检查间隔必须为正数。")
+    root = directory.resolve()
+    previous: list[dict[str, Any]] | None = None
+    current: list[dict[str, Any]] = []
+    for index in range(attempts):
+        current = artifact_records(root)
+        locks = [path for path in root.rglob("*.lck") if path.is_file()]
+        if not locks and previous == current:
+            return current
+        previous = current
+        if index + 1 < attempts:
+            time.sleep(interval_seconds)
+    if locks:
+        raise RuntimeError("证据目录仍存在活动求解锁，无法生成稳定清单。")
+    raise RuntimeError("证据目录在限定时间内未稳定，无法生成清单。")
 
 
 def _is_sqlite_journal(path: Path) -> bool:
