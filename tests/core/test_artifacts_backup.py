@@ -66,6 +66,18 @@ def test_artifact_store_preserves_destination_when_restore_integrity_fails(tmp_p
     assert not list(tmp_path.glob(".restored.bin.*.tmp"))
 
 
+def test_artifact_store_repairs_existing_corrupt_object(tmp_path: Path) -> None:
+    artifacts = ArtifactStore(tmp_path / "objects")
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"expected")
+    digest = artifacts.put_file(source)
+    artifacts.path_for(digest).write_bytes(b"corrupt")
+
+    assert artifacts.put_file(source) == digest
+    assert artifacts.verify(digest)
+    assert artifacts.path_for(digest).read_bytes() == b"expected"
+
+
 def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     class FakeS3:
         def __init__(self) -> None:
@@ -120,6 +132,37 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
         store.get_file(digest, destination)
     assert destination.read_text(encoding="utf-8") == "keep"
     assert not list(tmp_path.glob(".restored.json.*.tmp"))
+
+
+def test_s3_artifact_store_rejects_tampered_upload(tmp_path: Path) -> None:
+    class TamperingS3:
+        def __init__(self) -> None:
+            self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+
+        def upload_file(
+            self, _source: str, bucket: str, key: str, *, ExtraArgs: dict[str, Any]
+        ) -> None:
+            self.objects[(bucket, key)] = (b"tampered", dict(ExtraArgs["Metadata"]))
+
+        def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+            try:
+                content, metadata = self.objects[(Bucket, Key)]
+            except KeyError as exc:
+                error = type("NotFound", (Exception,), {})()
+                error.response = {"Error": {"Code": "404"}}
+                raise error from exc
+            return {"ContentLength": len(content), "Metadata": metadata}
+
+        def download_file(self, bucket: str, key: str, destination: str) -> None:
+            Path(destination).write_bytes(self.objects[(bucket, key)][0])
+
+    client = TamperingS3()
+    store = S3ArtifactStore("results", client=client)
+    source = tmp_path / "result.bin"
+    source.write_bytes(b"expected")
+
+    with pytest.raises(ValueError, match="内容校验失败"):
+        store.put_file(source)
 
 
 def test_s3_probe_writes_verifiable_evidence_without_retaining_object(tmp_path: Path) -> None:

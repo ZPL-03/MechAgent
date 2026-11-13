@@ -212,7 +212,7 @@ python scripts/drill_studio_recovery.py `
 S3 兼容对象存储通过 `pip install "mechagent[s3]"` 和 `studio.artifact_backend=s3` 启用；
 访问密钥由 boto3 标准凭据链提供。`studio.artifact_s3_endpoint_url` 和
 `studio.artifact_s3_region` 可选择 S3 兼容私有端点和区域。当前仓库包含客户端、摘要校验和恢复
-接口，远端桶权限、跨主机备份保留和灾难恢复时间指标需要部署环境单独验收。
+接口；上传、下载和恢复均校验对象内容与 SHA-256 摘要。远端桶权限、跨主机备份保留和灾难恢复时间指标需要部署环境单独验收。
 
 ```powershell
 python scripts/check_s3_storage.py `

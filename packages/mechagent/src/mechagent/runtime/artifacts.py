@@ -28,18 +28,21 @@ class ArtifactStore:
             raise FileNotFoundError(source)
         digest = _sha256_file(source)
         destination = self.path_for(digest)
-        if not destination.is_file():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
-            source_bytes = source.read_bytes()
-            temporary.write_bytes(source_bytes)
+        if destination.is_file() and _sha256_file(destination) == digest:
+            return digest
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            shutil.copyfile(source, temporary)
             if _sha256_file(temporary) != digest:
-                temporary.unlink(missing_ok=True)
                 raise ValueError("对象写入后完整性校验失败。")
-            try:
-                temporary.replace(destination)
-            except FileExistsError:
-                temporary.unlink(missing_ok=True)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
         return digest
 
     def put_bytes(self, content: bytes) -> str:
@@ -233,6 +236,8 @@ class S3ArtifactStore:
         head = self.client.head_object(Bucket=self.bucket, Key=key)
         if str(head.get("Metadata", {}).get("sha256", "")) != digest:
             raise ValueError("S3 对象写入后完整性校验失败。")
+        if not self.verify(digest):
+            raise ValueError("S3 对象写入后内容校验失败。")
         return digest
 
     def put_bytes(self, content: bytes) -> str:
@@ -249,6 +254,8 @@ class S3ArtifactStore:
         head = self.client.head_object(Bucket=self.bucket, Key=key)
         if str(head.get("Metadata", {}).get("sha256", "")) != digest:
             raise ValueError("S3 对象写入后完整性校验失败。")
+        if not self.verify(digest):
+            raise ValueError("S3 对象写入后内容校验失败。")
         return digest
 
     def verify(self, digest: str) -> bool:
