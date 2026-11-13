@@ -637,8 +637,14 @@ def test_calculix_frd_history_aligns_sparse_fields_by_analysis_step() -> None:
         (1, 1),
         (2, 1),
     ]
-    assert set(history[0]) == {"step_index", "frame_index", "displacement"}
-    assert set(history[1]) == {"step_index", "frame_index", "displacement", "stress"}
+    assert set(history[0]) == {"step_index", "frame_index", "frame_role", "displacement"}
+    assert set(history[1]) == {
+        "step_index",
+        "frame_index",
+        "frame_role",
+        "displacement",
+        "stress",
+    }
     assert history[1]["stress"]["values"] == {"1": [20.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
 
 

@@ -140,7 +140,11 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                 payload: dict[str, Any] = {
                     "step_name": step_name,
                     "frames": [
-                        {"frame_index": frame.get("frame_index"), "fields": selected}
+                        {
+                            "frame_index": frame.get("frame_index"),
+                            "frame_role": frame.get("frame_role"),
+                            "fields": selected,
+                        }
                         for frame, selected in zip(frames, fields_frames, strict=True)
                     ],
                     "fields": fields_frames[-1] if fields_frames else {},
@@ -183,6 +187,7 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                     "frames": [
                         {
                             "frame_index": frame.get("frame_index", frame_index),
+                            "frame_role": frame.get("frame_role"),
                             "fields": selected,
                         }
                         for frame_index, (frame, selected) in enumerate(
@@ -505,6 +510,7 @@ def _map_history_to_elements(
             )
             mapped_frame: dict[str, Any] = {
                 "frame_index": frame.get("frame_index", index),
+                "frame_role": frame.get("frame_role"),
                 "mapped_fields": mapped,
             }
             mapped_frames.append(mapped_frame)

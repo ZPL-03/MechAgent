@@ -200,7 +200,7 @@ PR 和发布工作流中的第三方 action 固定到完整 commit SHA；PR 工�
 结果选择器在 `ResultFieldSpec.unit` 非空时要求后端场声明相同单位；单位缺失或不一致的必需字段直接失败，不能用请求单位覆盖实际单位。选定字段、单元质心映射和统一语义字段分别保留来源与推导信息。字段位置或单位与另一后端不一致时，`requested_fields` 和 `comparison_fields` 返回 `failed`；原始 `fields` 和 `mapped_fields` 保持 `unverified`，避免把不同离散语义的值按标签配对。
 
 `scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，其他情况标记为 `unverified`。结果提取根据节点坐标和单元连接生成 `mesh_digest`；`element` 和 `integration_point` 场只有在两侧指纹一致且字段键对应时才按键比较，否则保持 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；节点场必须覆盖单元所需节点，只有梁允许对截面展开节点按主轴站位聚合。板和实体的部分覆盖会保留已映射单元并记录不完整覆盖，比较器不把它作为可通过的跨后端结果。每个映射字段保留源值数量、目标单元数量、已映射数量、覆盖率、完整性、源位置和映射方法；比较器对覆盖率不足的 `mapped_fields` 返回 `unverified`。统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含完整 `case_digest` 和后端无关的 `physical_case_digest`，并保留单位、坐标系、输入摘要和工作目录内产物摘要。`case_digest` 包含结果字段原生位置；`physical_case_digest` 包含物理输入、分析步和求解控制，排除来源元数据、案例标识以及结果字段的原生位置。两侧完整指纹不一致时，只有物理指纹同时存在且一致才允许继续比较；物理指纹不一致直接返回 `failed`。字段位置、单位或离散语义仍按字段契约校验，不能由物理指纹一致性覆盖。比较器在两侧结果只要有一侧声明 `units` 或 `coordinate_system` 时，要求另一侧同时声明且内容完全一致，校验失败返回 `failed`。多步结果统一提供 `steps`、逐帧字段、`step_results`、兼容别名 `result_steps` 和逐步逐帧的 `mapped_step_fields`，按 `load_steps.sequence` 排列；缺失分析步保持失败或未验证状态。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段、误差以及每个字段的 `status`、`reason`、`alignment`、比较数量、映射方法和双方覆盖率。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行选定工具并保存案例摘要、原始结果、统一单元质心字段、统一语义字段、反力平衡报告和比较清单；清单中的后端结果引用使用相对于输出目录的 POSIX 路径，便于独立归档和验证。默认跨后端阈值为相对误差 3%、绝对误差 0.005；单元质心字段默认相对误差阈值为 10%。多步和跨工具脚本在写入清单前等待产物连续两次快照一致，并确认目录内没有活动求解锁。
-`compare_backend_step_fields()` 进一步按 `step_id` 或 `sequence` 配对分析步，再按 `frame_index` 配对输出帧；它对每个帧复用同一结果级契约、网格对齐、字段覆盖和误差阈值，缺步或缺帧返回 `failed`，没有逐步结果返回 `unverified`。
+`compare_backend_step_fields()` 进一步按 `step_id` 或 `sequence` 配对分析步，再按求解帧标识配对输出帧；它对每个帧复用同一结果级契约、网格对齐、字段覆盖和误差阈值。只由一侧输出且标记为 `initial` 的基准帧保留在 `unmatched_frames`，不作为求解帧数值对应项；缺少其他求解帧或分析步返回 `failed`，没有逐步结果返回 `unverified`。
 
 Studio API 路径隔离门禁覆盖健康检查、环境诊断、预检、worker 结果、进度事件和历史作业读取。测试使用 POSIX、Windows 驱动器、UNC 和父目录跳转样例，确认公开响应只保留文件名或工作目录内相对路径，并保留请求正文与非路径诊断信息。该门禁与结果清单的相对路径校验分开执行：前者限制 API 可见内容，后者校验归档文件的完整性和越界引用。HTTP 错误门禁覆盖缺少凭据、权限拒绝、参数校验、空请求、限流和未知作业，要求 `/api/v1` 与兼容 `/api` 返回稳定 `code`、诊断 `detail` 及正确的版本/弃用响应头。
 
@@ -212,7 +212,7 @@ Studio API 路径隔离门禁覆盖健康检查、环境诊断、预检、worker
 
 `scripts/run_calculix_multistep.py` 的本机验证清单为 `mechagent_output/calculix-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 1 个 FRD 结果帧、404 个节点场值、100 个单元体积值以及位移、应力、应变、应变能密度、节点反力和单元能量字段；`requested_fields` 与 `step_results` 覆盖同一组物理量。CalculiX 当前输出的应力、应变和反力位置为节点，体积、应变能密度和能量位置为单元；这些原生位置保留在结果契约中，跨后端比较通过坐标对应或单元质心映射完成。该证据验证 CalculiX 适配器的多步 FRD 解析路径，不把原生节点场声明为积分点场。
 
-`mechagent_output/multistep-comparison-current/manifest.json` 保存 Abaqus 与 CalculiX 双步 `mapped_fields` 的逐帧比较。两侧 `physical_case_digest` 一致，每个分析步的末帧比较通过；Abaqus 还保留每步初始帧，而 CalculiX 没有对应帧，因此清单状态为 `failed`，缺失帧为 `id:step-1[0]` 和 `id:step-2[0]`。在输出帧语义统一前，该结果不能作为完整多步跨后端通过证据。
+`mechagent_output/multistep-comparison-current/manifest.json` 保存 Abaqus 与 CalculiX 双步 `mapped_fields` 的逐帧比较。两侧 `physical_case_digest` 一致，每个分析步的求解帧比较通过；Abaqus 还保留每步 `initial` 基准帧，而 CalculiX 不输出这类帧，基准帧记录在 `unmatched_frames`，不影响求解帧状态。清单状态只有在所有分析步和求解帧均通过时才为 `passed`。
 
 Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
 

@@ -240,6 +240,7 @@ class AbaqusAdapter(AbstractSolver):
                         {
                             "step_name": step.get("name"),
                             "frame_index": frame.get("frame_index"),
+                            "frame_role": frame.get("frame_role"),
                             **_canonicalize_fields(frame["fields"]),
                         }
                     )
@@ -496,7 +497,9 @@ try:
                 if key not in frame.fieldOutputs:
                     continue
                 fields[key] = _field_payload(key, frame.fieldOutputs[key])
-            frames.append({{"frame_index": frame_index, "fields": fields}})
+            frames.append({{"frame_index": frame_index,
+                            "frame_role": "initial" if frame_index == 0 else "solution",
+                            "fields": fields}})
         history = _history_payload(step)
         energy_history = history.get("ALLIE", [])
         for frame_index, frame in enumerate(frames):

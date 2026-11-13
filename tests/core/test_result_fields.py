@@ -515,6 +515,7 @@ def test_mapped_step_fields_follow_declared_step_sequence_and_frame_order() -> N
                 {
                     "step_name": "step-2",
                     "frame_index": 0,
+                    "frame_role": "initial",
                     "stress": {
                         "location": "integration_point",
                         "unit": "MPa",
@@ -547,5 +548,6 @@ def test_mapped_step_fields_follow_declared_step_sequence_and_frame_order() -> N
     steps = extracted["mapped_step_fields"]
     assert [item["step_id"] for item in steps] == ["step-1", "step-2"]
     assert [frame["frame_index"] for frame in steps[1]["frames"]] == [0, 1]
+    assert steps[1]["frames"][0]["frame_role"] == "initial"
     assert steps[0]["mapped_fields"]["stress_sxx"]["values"] == {"10": 10.0}
     assert steps[1]["frames"][1]["mapped_fields"]["stress_sxx"]["values"] == {"10": 25.0}

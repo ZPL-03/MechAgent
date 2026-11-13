@@ -1868,7 +1868,7 @@ def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         fields = {
             key: value
             for key, value in frames[-1].items()
-            if key not in {"step_index", "frame_index"}
+            if key not in {"step_index", "frame_index", "frame_role"}
         }
         steps.append(
             {
@@ -1878,10 +1878,11 @@ def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "frames": [
                     {
                         "frame_index": index,
+                        "frame_role": frame.get("frame_role"),
                         "fields": {
                             key: value
                             for key, value in frame.items()
-                            if key not in {"step_index", "frame_index"}
+                            if key not in {"step_index", "frame_index", "frame_role"}
                         },
                     }
                     for index, frame in enumerate(frames)
@@ -2052,6 +2053,7 @@ def _merge_frd_history(
             {
                 "step_index": step_index,
                 "frame_index": frame_index,
+                "frame_role": "solution",
                 **fields,
             }
         )

@@ -791,3 +791,86 @@ def test_multistep_comparison_rejects_missing_frame() -> None:
 
     assert result.status == "failed"
     assert result.missing_frames == ["id:step-1[1]"]
+
+
+def test_multistep_comparison_records_unmatched_initial_frame() -> None:
+    common = {
+        "physical_case_digest": "p" * 64,
+        "units": {"length": "mm"},
+        "coordinate_system": {"name": "global"},
+        "element_centroids": {"1": [0.5, 0.0, 0.0]},
+    }
+    left = {
+        **common,
+        "case_digest": "a" * 64,
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {
+                        "frame_index": 1,
+                        "frame_role": "solution",
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"1": 10.0},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    right = {
+        **common,
+        "case_digest": "b" * 64,
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "frame_role": "initial",
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"1": 0.0},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                    {
+                        "frame_index": 1,
+                        "frame_role": "solution",
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"1": 10.0},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    result = compare_backend_step_fields(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "passed"
+    assert result.missing_frames == []
+    assert result.unmatched_frames == ["id:step-1[initial]"]
+    assert [item.frame_role for item in result.steps] == ["solution"]

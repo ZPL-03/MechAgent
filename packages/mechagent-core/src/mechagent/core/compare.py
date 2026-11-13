@@ -66,11 +66,16 @@ class StepFrameComparison(BaseModel):
     step_id: str | None = None
     sequence: int | None = None
     frame_index: int | None = None
+    frame_role: str | None = None
     comparison: BackendComparison
 
 
 class BackendStepComparison(BaseModel):
-    """多步结果的逐步逐帧跨后端比较。"""
+    """多步结果的逐步逐帧跨后端比较。
+
+    ``unmatched_frames`` 记录只由一侧输出的初始基准帧；这类帧保留在结果
+    证据中，但不作为求解帧的数值对应项。其他缺帧仍进入 ``missing_frames``。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +86,7 @@ class BackendStepComparison(BaseModel):
     steps: list[StepFrameComparison] = Field(default_factory=list)
     missing_steps: list[str] = Field(default_factory=list)
     missing_frames: list[str] = Field(default_factory=list)
+    unmatched_frames: list[str] = Field(default_factory=list)
     reason: str | None = None
 
 
@@ -599,8 +605,9 @@ def compare_backend_step_fields(
     """按分析步和输出帧比较两个结果的字段。
 
     ``mapped_fields`` 从 ``mapped_step_fields`` 读取逐帧单元质心场，其他场源从
-    ``step_results`` 读取。步和帧按稳定标识配对；任一侧缺少声明的步或帧时，
-    比较状态为 ``failed``，避免只比较两侧最后一帧而掩盖不完整结果。
+    ``step_results`` 读取。步和求解帧按稳定标识配对；只由一侧输出且明确标记
+    为 ``initial`` 的基准帧记录到 ``unmatched_frames``，其他缺少分析步或求解
+    帧时比较状态为 ``failed``，避免只比较两侧最后一帧而掩盖不完整结果。
     """
 
     left_steps = _step_records(left, field_source)
@@ -621,6 +628,7 @@ def compare_backend_step_fields(
     missing_steps = sorted(set(left_by_key) ^ set(right_by_key))
     frame_results: list[StepFrameComparison] = []
     missing_frames: list[str] = []
+    unmatched_frames: list[str] = []
     statuses: list[str] = []
     for step_key in step_keys:
         left_step = left_by_key.get(step_key)
@@ -634,7 +642,11 @@ def compare_backend_step_fields(
             right_frame = right_frames.get(frame_key)
             frame_label = f"{step_key}[{frame_key}]"
             if left_frame is None or right_frame is None:
-                missing_frames.append(frame_label)
+                present_frame = left_frame or right_frame
+                if present_frame is not None and present_frame.get("frame_role") == "initial":
+                    unmatched_frames.append(frame_label)
+                else:
+                    missing_frames.append(frame_label)
                 continue
             left_payload = _step_frame_payload(left, field_source, left_frame["fields"])
             right_payload = _step_frame_payload(right, field_source, right_frame["fields"])
@@ -657,6 +669,7 @@ def compare_backend_step_fields(
                     frame_index=left_frame.get("frame_index")
                     if left_frame.get("frame_index") is not None
                     else right_frame.get("frame_index"),
+                    frame_role=left_frame.get("frame_role") or right_frame.get("frame_role"),
                     comparison=comparison,
                 )
             )
@@ -679,6 +692,7 @@ def compare_backend_step_fields(
         steps=frame_results,
         missing_steps=missing_steps,
         missing_frames=missing_frames,
+        unmatched_frames=unmatched_frames,
     )
 
 
@@ -709,7 +723,8 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
                 if not isinstance(raw_frame, dict):
                     continue
                 frame_key_value = raw_frame.get("frame_index", frame_index)
-                frame_key = str(frame_key_value)
+                frame_role = raw_frame.get("frame_role")
+                frame_key = "initial" if frame_role == "initial" else str(frame_key_value)
                 fields_key = "mapped_fields" if field_source == "mapped_fields" else "fields"
                 frame_fields = raw_frame.get(fields_key)
                 frames.append(
@@ -718,6 +733,7 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
                         "frame_index": frame_key_value
                         if isinstance(frame_key_value, int)
                         else None,
+                        "frame_role": frame_role if isinstance(frame_role, str) else None,
                         "fields": frame_fields if isinstance(frame_fields, dict) else {},
                     }
                 )
@@ -728,6 +744,7 @@ def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, A
                 {
                     "key": "final",
                     "frame_index": None,
+                    "frame_role": "solution",
                     "fields": step_fields if isinstance(step_fields, dict) else {},
                 }
             )
