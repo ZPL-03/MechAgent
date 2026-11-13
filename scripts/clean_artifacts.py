@@ -140,17 +140,42 @@ def main(argv: list[str] | None = None) -> int:
         for path in ordered:
             print(path)
     else:
+        removed: list[Path] = []
         for path in ordered:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink(missing_ok=True)
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            except PermissionError as exc:
+                raise RuntimeError(_locked_target_message(path, removed)) from exc
+            removed.append(path)
         for name in ("knowledge/raw", "knowledge/external", "knowledge", "output"):
             path = REPO_ROOT / name
             if path.is_dir() and not any(path.iterdir()) and path not in tracked:
                 _ensure_inside_repo(path)
                 path.rmdir()
     return 0
+
+
+def _locked_target_message(path: Path, removed: list[Path]) -> str:
+    """返回文件被占用时可直接执行的处理提示。"""
+
+    escaped = str(path).replace("'", "''")
+    command = (
+        f"Remove-Item -LiteralPath '{escaped}' -Recurse -Force"
+        if path.is_dir()
+        else f"Remove-Item -LiteralPath '{escaped}' -Force"
+    )
+    removed_note = ""
+    if removed:
+        removed_note = f"已删除 {len(removed)} 个目标后停止；再次执行前请核对工作树。"
+    return (
+        f"清理目标被其他进程占用，无法删除: {path}。{removed_note}"
+        "关闭占用该路径的 Python、Node、编辑器或求解器进程后，重新执行："
+        "python scripts/clean_artifacts.py。"
+        f"若仍需手动处理，可执行：{command}"
+    )
 
 
 def _tracked_paths() -> set[Path]:
