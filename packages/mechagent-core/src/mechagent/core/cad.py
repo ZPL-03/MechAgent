@@ -374,6 +374,7 @@ class RegionCandidate(BaseModel):
         side: 端面方位，``min`` / ``max``。
         center: 面中心坐标，单位为 mm。
         area: 面面积，单位为 mm^2。
+        part_ids: 候选拓扑面所属的三维实体 ID；空列表表示适配器没有提供零件归属。
 
     Returns:
         RegionCandidate: 单点定义的区域候选。
@@ -394,6 +395,7 @@ class RegionCandidate(BaseModel):
     center: tuple[float, float, float]
     area: float = Field(ge=0)
     topology_ids: list[str] = Field(default_factory=list)
+    part_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     status: Literal["mapped", "ambiguous", "unresolved"] = "unresolved"
 

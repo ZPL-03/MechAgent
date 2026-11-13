@@ -275,6 +275,17 @@ def _nodes_for_topology_ids(
     missing = sorted(set(normalized_ids) - topology_by_id.keys())
     if missing:
         raise ValueError(f"CAD 区域 {region_name} 引用了未知拓扑 ID: {', '.join(missing)}")
+    expected_dimension = 1 if _region_alias(region_name) == "all_edges" else 2
+    wrong_dimension = sorted(
+        stable_id
+        for stable_id in normalized_ids
+        if int(topology_by_id[stable_id].dimension) != expected_dimension
+    )
+    if wrong_dimension:
+        raise ValueError(
+            f"CAD 区域 {region_name} 需要 {expected_dimension}D 拓扑实体: "
+            + ", ".join(wrong_dimension)
+        )
     node_ids: set[int] = set()
     for stable_id in normalized_ids:
         entity = topology_by_id[stable_id]

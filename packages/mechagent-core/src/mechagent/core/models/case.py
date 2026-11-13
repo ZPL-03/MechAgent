@@ -190,6 +190,7 @@ class RegionSpec(BaseModel):
     kind: Literal["named", "topology", "mesh_set", "coordinate", "unknown"] = "named"
     stable_id: str = Field(default="", max_length=256)
     topology_ids: list[str] = Field(default_factory=list, max_length=4096)
+    part_ids: list[str] = Field(default_factory=list, max_length=4096)
     provenance: Provenance
 
 
@@ -695,6 +696,20 @@ def _region_spec_from_model_metadata(
                 if stable_id in topology_dimensions:
                     duplicate_topology_ids.add(stable_id)
                 topology_dimensions[stable_id] = dimension
+    parts_by_topology: dict[str, set[str]] = {}
+    parts = cad_geometry.get("parts")
+    if isinstance(parts, list):
+        for item in parts:
+            if not isinstance(item, dict) or not isinstance(item.get("part_id"), str):
+                continue
+            part_id = str(item["part_id"])
+            for key in ("face_ids", "edge_ids"):
+                values = item.get(key)
+                if not isinstance(values, list):
+                    continue
+                for topology_id in values:
+                    if isinstance(topology_id, str) and topology_id:
+                        parts_by_topology.setdefault(topology_id, set()).add(part_id)
 
     alias = {
         "root": "x_min",
@@ -762,6 +777,27 @@ def _region_spec_from_model_metadata(
                     f"cad.region_candidates 区域需要 {expected_dimension}D 拓扑实体: "
                     + ", ".join(wrong_dimension),
                 )
+            derived_part_ids = sorted(
+                {
+                    part_id
+                    for topology_id in normalized_ids
+                    for part_id in parts_by_topology.get(topology_id, set())
+                }
+            )
+            candidate_part_ids = candidate.get("part_ids")
+            if candidate_part_ids is not None:
+                if (
+                    not isinstance(candidate_part_ids, list)
+                    or any(not isinstance(item, str) or not item for item in candidate_part_ids)
+                    or len(set(candidate_part_ids)) != len(candidate_part_ids)
+                ):
+                    return _unresolved_region_spec(
+                        region_name, "cad.region_candidates 零件 ID 无效"
+                    )
+                if derived_part_ids and sorted(candidate_part_ids) != derived_part_ids:
+                    return _unresolved_region_spec(
+                        region_name, "cad.region_candidates 零件归属与拓扑摘要不一致"
+                    )
             stable_id = (
                 normalized_ids[0] if len(normalized_ids) == 1 else _topology_set_id(normalized_ids)
             )
@@ -770,6 +806,7 @@ def _region_spec_from_model_metadata(
                 kind="topology",
                 stable_id=stable_id,
                 topology_ids=normalized_ids,
+                part_ids=derived_part_ids,
                 provenance=Provenance(
                     source="import",
                     reference=f"cad.region_candidates.{alias}",
@@ -791,11 +828,19 @@ def _region_spec_from_model_metadata(
                 if isinstance(edge_stable_id, str) and edge_stable_id:
                     edge_ids.append(edge_stable_id)
         if edge_ids:
+            part_ids = sorted(
+                {
+                    part_id
+                    for edge_id in edge_ids
+                    for part_id in parts_by_topology.get(edge_id, set())
+                }
+            )
             return RegionSpec(
                 name=region_name,
                 kind="topology",
                 stable_id=_topology_set_id(edge_ids),
                 topology_ids=sorted(set(edge_ids)),
+                part_ids=part_ids,
                 provenance=Provenance(
                     source="import",
                     reference="cad.topology_entities.dimension=1",

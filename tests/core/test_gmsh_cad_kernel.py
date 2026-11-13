@@ -48,6 +48,9 @@ def test_gmsh_cad_kernel_imports_step_box(tmp_path: Path) -> None:
     assert summary.bbox_max[0] == pytest.approx(100.0, abs=1e-6)
     assert summary.bbox_max[1] == pytest.approx(20.0, abs=1e-6)
     assert len(summary.topology_entities) == 19
+    assert len(summary.parts) == 1
+    assert len(summary.parts[0].face_ids) == 6
+    assert len(summary.parts[0].edge_ids) == 12
     assert {entity.dimension for entity in summary.topology_entities} == {1, 2, 3}
     assert all(entity.stable_id.startswith("topology-") for entity in summary.topology_entities)
     solid = next(entity for entity in summary.topology_entities if entity.dimension == 3)
@@ -57,6 +60,7 @@ def test_gmsh_cad_kernel_imports_step_box(tmp_path: Path) -> None:
     mapped_regions = {item.name: item for item in summary.region_candidates}
     assert set(mapped_regions) == {"x_min", "x_max", "y_min", "y_max", "z_min", "z_max"}
     assert mapped_regions["x_min"].topology_ids
+    assert mapped_regions["x_min"].part_ids == [summary.parts[0].part_id]
     assert mapped_regions["x_min"].status == "mapped"
 
 

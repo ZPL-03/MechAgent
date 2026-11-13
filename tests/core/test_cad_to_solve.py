@@ -194,6 +194,33 @@ def test_cad_mesh_rejects_unknown_explicit_case_region(tmp_path: Path) -> None:
     assert "未知拓扑 ID" in (output.mesh_result.error_message or "")
 
 
+def test_cad_mesh_rejects_solid_topology_for_face_region(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    case = params.to_simulation_case(provenance_confidence=1.0)
+    projected = case.to_model_params()
+    topology = projected.metadata["cad_geometry"]["topology_entities"]
+    solid_id = next(item["stable_id"] for item in topology if item["dimension"] == 3)
+    case_regions = dict(projected.metadata["case_regions"])
+    root = dict(case_regions["root"])
+    root["topology_ids"] = [solid_id]
+    root["stable_id"] = solid_id
+    case_regions["root"] = root
+    bad_params = projected.model_copy(
+        update={"metadata": {**projected.metadata, "case_regions": case_regions}}
+    )
+
+    output = MeshAgent(config, tmp_path / "mesh-wrong-dimension").generate_with_trace(bad_params)
+
+    assert output.mesh_result.success is False
+    assert "需要 2D 拓扑实体" in (output.mesh_result.error_message or "")
+
+
 def test_cad_mesh_does_not_fallback_for_unresolved_case_region(tmp_path: Path) -> None:
     step = tmp_path / "solid.step"
     _write_box_step(step, 100.0, 40.0, 30.0)
@@ -322,6 +349,9 @@ def test_multi_solid_cad_exposes_part_topology_without_execution_claim(tmp_path:
     assert len(analysis.candidate.parts) == 2
     assert all(len(part.face_ids) == 6 for part in analysis.candidate.parts)
     assert all(len(part.edge_ids) == 12 for part in analysis.candidate.parts)
+    mapped = {item.name: item for item in analysis.candidate.region_candidates}
+    assert len(mapped["x_min"].part_ids) == 1
+    assert len(mapped["y_min"].part_ids) == 2
 
     params = GeometryAgent(config, tmp_path).to_model_params(
         step, "材料钢，左端固定，右端承受10MPa轴向拉伸"

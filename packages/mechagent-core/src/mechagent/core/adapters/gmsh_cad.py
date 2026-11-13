@@ -122,7 +122,7 @@ class GmshCADKernel(AbstractCADKernel):
             area = sum(gmsh.model.occ.getMass(2, tag) for _dim, tag in faces)
             topology = _topology_entities(solids, faces, edges)
             parts = _part_summaries(topology)
-            region_candidates = _face_region_candidates(topology, bbox)
+            region_candidates = _face_region_candidates(topology, bbox, parts)
             topology_digest = _topology_digest(topology)
             return CADGeometrySummary(
                 source_format=source_format,
@@ -289,12 +289,18 @@ def _sha256_file(path: Path) -> str:
 
 
 def _face_region_candidates(
-    topology: list[CADTopologyEntity], bbox: tuple[float, float, float, float, float, float]
+    topology: list[CADTopologyEntity],
+    bbox: tuple[float, float, float, float, float, float],
+    parts: list[CADPartSummary],
 ) -> list[RegionCandidate]:
     faces = [entity for entity in topology if entity.dimension == 2]
     if not faces:
         return []
     bounds = ((bbox[0], bbox[3]), (bbox[1], bbox[4]), (bbox[2], bbox[5]))
+    part_by_face: dict[str, set[str]] = {}
+    for part in parts:
+        for face_id in part.face_ids:
+            part_by_face.setdefault(face_id, set()).add(part.part_id)
     candidates: list[RegionCandidate] = []
     for axis, (low, high) in zip(("x", "y", "z"), bounds, strict=True):
         extent = max(high - low, 1.0e-12)
@@ -324,6 +330,13 @@ def _face_region_candidates(
                     center=center_tuple,
                     area=entity.measure,
                     topology_ids=[item.stable_id for item in tied],
+                    part_ids=sorted(
+                        {
+                            part_id
+                            for item in tied
+                            for part_id in part_by_face.get(item.stable_id, set())
+                        }
+                    ),
                     confidence=confidence,
                     status=status,
                 )
