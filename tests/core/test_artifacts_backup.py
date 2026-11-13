@@ -85,9 +85,11 @@ def test_s3_artifact_store_uses_sha256_metadata(tmp_path: Path) -> None:
     source = tmp_path / "result.json"
     source.write_text('{"ok":true}', encoding="utf-8")
     digest = store.put_file(source)
+    bytes_digest = store.put_bytes(b"memory-result")
     destination = tmp_path / "restored.json"
 
     assert store.verify(digest)
+    assert store.verify(bytes_digest)
     assert store.get_file(digest, destination).read_text(encoding="utf-8") == source.read_text(
         encoding="utf-8"
     )
@@ -191,6 +193,35 @@ def test_studio_backup_round_trip_and_tamper_detection(tmp_path: Path) -> None:
     restored_database = restore_studio(clean_backup, tmp_path / "restored-clean")
     assert restored_database.is_file()
     assert JobStore(restored_database).get(job["job_id"])["request"] == "backup"
+
+
+def test_studio_backup_stages_and_restores_referenced_external_objects(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    store = JobStore(database)
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    job = store.submit("remote backup", False, config, max_queued=2)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+    digest = str(store.get(job["job_id"])["result_hash"])
+    external = ArtifactStore(tmp_path / "external-objects")
+    external.put_file(store.directory(job["job_id"]) / "result.json")
+
+    backup = backup_studio(database, tmp_path / "external-backup", artifact_store=external)
+    staged = backup / "objects" / digest[:2] / digest[2:]
+    assert staged.is_file()
+    target = ArtifactStore(tmp_path / "restored-objects")
+    restored_database = restore_studio(
+        backup,
+        tmp_path / "external-restored",
+        artifact_store=target,
+    )
+
+    assert target.verify(digest)
+    restored_store = JobStore(restored_database, artifact_store=target)
+    assert restored_store.payload(restored_store.get(job["job_id"]))["result"] == {"ok": True}
 
 
 def test_studio_backup_rejects_active_jobs_and_unlisted_files(tmp_path: Path) -> None:

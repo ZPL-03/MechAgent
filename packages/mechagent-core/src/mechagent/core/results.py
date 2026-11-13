@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -58,6 +60,20 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
     的“成功”结果。
     """
 
+    # The case fingerprint travels with every adapter result.  A backend
+    # comparison can therefore reject results produced from different input
+    # contracts before it compares numerical fields.
+    case_payload = case.model_dump(mode="json")
+    extracted["case_digest"] = hashlib.sha256(
+        json.dumps(case_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    extracted["case_schema_version"] = case.schema_version
+    extracted["case_id"] = case.case_id or case.model.case_id
+    extracted["units"] = case.units.model_dump(mode="json")
+    extracted["coordinate_system"] = case.coordinate_system.model_dump(mode="json")
+
     raw_fields = extracted.get("fields")
     if not isinstance(raw_fields, Mapping):
         raw_fields = {}
@@ -104,8 +120,49 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                         }
                     )
                 step_results.append(payload)
+        ordinal_groups: dict[int, list[dict[str, Any]]] = {}
+        if not named_groups:
+            for frame in history:
+                if isinstance(frame, Mapping) and isinstance(frame.get("step_index"), int):
+                    ordinal_groups.setdefault(int(frame["step_index"]), []).append(dict(frame))
+        if ordinal_groups:
+            ordered_steps = sorted(case.load_steps, key=lambda item: item.sequence)
+            for index, (step_number, frames) in enumerate(sorted(ordinal_groups.items())):
+                step = next(
+                    (item for item in ordered_steps if item.sequence == step_number),
+                    ordered_steps[index] if index < len(ordered_steps) else None,
+                )
+                specs = _step_result_specs(case, step)
+                fields_frames = [
+                    _select_fields(
+                        {
+                            key: value
+                            for key, value in frame.items()
+                            if key in _QUANTITY_ALIASES.values()
+                        },
+                        specs,
+                        required=True,
+                    )
+                    for frame in frames
+                ]
+                payload = {
+                    "step_index": step_number,
+                    "frames": [
+                        {
+                            "frame_index": frame.get("frame_index", frame_index),
+                            "fields": selected,
+                        }
+                        for frame_index, (frame, selected) in enumerate(
+                            zip(frames, fields_frames, strict=True)
+                        )
+                    ],
+                    "fields": fields_frames[-1] if fields_frames else {},
+                }
+                if step is not None:
+                    payload.update({"step_id": step.step_id, "sequence": step.sequence})
+                step_results.append(payload)
         for index, frame in enumerate(history):
-            if named_groups:
+            if named_groups or ordinal_groups:
                 break
             if not isinstance(frame, Mapping):
                 continue
@@ -117,7 +174,7 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                 selected = _select_fields(
                     frame_fields,
                     _step_result_specs(case, step),
-                    required=False,
+                    required=True,
                 )
                 step_results.append(
                     {
@@ -130,9 +187,39 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
                 selected = _select_fields(frame_fields, case.result_fields, required=False)
             if index >= len(case.load_steps) and selected:
                 step_results.append({"step_index": index + 1, "fields": selected})
+    if not step_results and len(case.load_steps) == 1:
+        # A backend may expose only a final field map for a single-step run.
+        # Keep the result contract complete without inventing additional
+        # frames; multi-step runs are required to expose every declared step.
+        step = case.load_steps[0]
+        step_results = [
+            {
+                "step_id": step.step_id,
+                "sequence": step.sequence,
+                "fields": _select_fields(
+                    raw_fields,
+                    _step_result_specs(case, step),
+                    required=True,
+                ),
+            }
+        ]
+    if len(case.load_steps) > 1:
+        expected = {step.step_id for step in case.load_steps}
+        actual = {
+            str(item.get("step_id"))
+            for item in step_results
+            if isinstance(item, Mapping) and item.get("step_id") is not None
+        }
+        if len(step_results) != len(case.load_steps) or actual != expected:
+            raise SolverError(
+                "多步结果缺少完整分析步字段："
+                f"需要 {len(case.load_steps)} 步，实际 {len(step_results)} 步。"
+            )
     extracted["requested_fields"] = requested
-    if step_results:
-        extracted["step_results"] = step_results
+    extracted["step_results"] = step_results
+    # ``result_steps`` is the stable name for the selected, per-step contract;
+    # ``step_results`` remains for compatibility with existing reports.
+    extracted["result_steps"] = step_results
     return extracted
 
 

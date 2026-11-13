@@ -127,6 +127,8 @@ def create_studio_app(
                     root=settings.artifact_root or settings.database.parent / "objects",
                     bucket=settings.artifact_s3_bucket,
                     prefix=settings.artifact_s3_prefix,
+                    endpoint_url=settings.artifact_s3_endpoint_url,
+                    region_name=settings.artifact_s3_region,
                 ),
                 max_active_jobs_per_project=settings.max_active_jobs_per_project,
                 max_result_bytes=settings.max_result_bytes,

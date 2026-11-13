@@ -54,9 +54,13 @@ npm --prefix apps/mechagent-studio run build
 SDK 通过 `MechAgent.from_config()` 加载配置时按以下优先级展开环境变量：显式进程环境变量、
 配置文件同目录 `.env`、当前工作目录 `.env`。`.env` 内容只参与当前配置解析，不写入进程级环境变量。
 
-Abaqus 的 `solver.abaqus.max_concurrent` 限制同一 Python 进程内的适配器槽位；
+Abaqus 的 `solver.abaqus.max_concurrent` 定义许可证槽位容量；未配置
+`solver.abaqus.license_queue_path` 时只限制同一 Python 进程。配置共享 SQLite 路径后，多个
+进程通过事务租约共同遵守容量，租约带心跳和过期回收；不同进程必须使用相同容量，配置漂移会拒绝
+执行。`solver.abaqus.license_lease_seconds` 控制异常进程租约的最长保留时间。
 `solver.abaqus.license_probe` 可配置只读命令片段，使用 `{launcher}` 引用启动器。探针返回非零
-状态时作业失败并保留诊断；未配置探针不代表许可证可用，跨进程和集群许可证仍由外部队列管理。
+状态时作业失败并保留诊断。共享队列只适用于同一可用文件系统，不等同于 Abaqus/FLEXnet 集群
+许可证服务或跨主机高可用调度。
 
 ## LLM
 

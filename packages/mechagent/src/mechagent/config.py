@@ -93,7 +93,7 @@ class CalculiXSettings(BaseModel):
 
 
 class AbaqusSettings(BaseModel):
-    """Abaqus/Standard launcher、许可证探针和本地槽位配置。"""
+    """Abaqus/Standard launcher、许可证探针和共享槽位配置。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -102,6 +102,8 @@ class AbaqusSettings(BaseModel):
     timeout: int = Field(default=3600, ge=1)
     max_concurrent: int = Field(default=1, ge=1)
     license_probe: tuple[str, ...] | None = None
+    license_queue_path: Path | None = None
+    license_lease_seconds: float = Field(default=900.0, gt=0)
 
     @field_validator("license_probe")
     @classmethod
@@ -110,6 +112,13 @@ class AbaqusSettings(BaseModel):
     ) -> tuple[str, ...] | None:
         if value is not None and any(not item.strip() for item in value):
             raise ValueError("solver.abaqus.license_probe 不能包含空命令片段。")
+        return value
+
+    @field_validator("license_lease_seconds")
+    @classmethod
+    def _license_lease_seconds_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("solver.abaqus.license_lease_seconds 必须是有限数值。")
         return value
 
 
@@ -409,6 +418,8 @@ class StudioSettings(BaseModel):
     artifact_backend: str = "filesystem"
     artifact_s3_bucket: str = ""
     artifact_s3_prefix: str = "mechagent"
+    artifact_s3_endpoint_url: str = ""
+    artifact_s3_region: str = ""
     max_workers: int = Field(default=2, ge=1, le=32)
     max_queued: int = Field(default=32, ge=1, le=10000)
     max_active_jobs_per_project: int = Field(default=8, ge=1, le=10000)

@@ -8,6 +8,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from mechagent.runtime.artifacts import create_artifact_store
 from mechagent.runtime.backup import restore_studio, verify_backup
 
 
@@ -16,6 +17,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backup", type=Path, required=True)
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--artifact-backend", choices=("filesystem", "s3"), default="filesystem")
+    parser.add_argument("--bucket", default="")
+    parser.add_argument("--prefix", default="mechagent")
+    parser.add_argument("--endpoint-url", default="")
+    parser.add_argument("--region", default="")
     args = parser.parse_args(argv)
     errors = verify_backup(args.backup)
     if errors:
@@ -32,7 +38,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.destination is None:
         parser.error("恢复模式必须提供 --destination。")
-    database = restore_studio(args.backup, args.destination)
+    artifact_store = None
+    if args.artifact_backend == "s3":
+        artifact_store = create_artifact_store(
+            "s3",
+            bucket=args.bucket,
+            prefix=args.prefix,
+            endpoint_url=args.endpoint_url,
+            region_name=args.region,
+        )
+    database = restore_studio(args.backup, args.destination, artifact_store=artifact_store)
     with closing(sqlite3.connect(database)) as connection:
         integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
         jobs = int(connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])

@@ -157,17 +157,32 @@ class S3ArtifactStore:
     对本地文件做摘要校验。凭据由 boto3 标准链提供，不从配置或日志读取。
     """
 
-    def __init__(self, bucket: str, prefix: str = "mechagent/", *, client: Any = None) -> None:
+    def __init__(
+        self,
+        bucket: str,
+        prefix: str = "mechagent/",
+        *,
+        client: Any = None,
+        endpoint_url: str = "",
+        region_name: str = "",
+    ) -> None:
         if not bucket.strip():
             raise ValueError("S3 bucket 不能为空。")
         self.bucket = bucket.strip()
         self.prefix = prefix.strip("/")
+        self.endpoint_url = endpoint_url.strip()
+        self.region_name = region_name.strip()
         if client is None:
             try:
                 import boto3
             except ImportError as exc:
                 raise RuntimeError("S3 对象存储需要安装 mechagent[s3]。") from exc
-            client = boto3.client("s3")
+            client_kwargs: dict[str, str] = {}
+            if self.endpoint_url:
+                client_kwargs["endpoint_url"] = self.endpoint_url
+            if self.region_name:
+                client_kwargs["region_name"] = self.region_name
+            client = boto3.client("s3", **client_kwargs)
         self.client = client
 
     def _key(self, digest: str) -> str:
@@ -213,12 +228,16 @@ class S3ArtifactStore:
         import io
 
         digest = hashlib.sha256(content).hexdigest()
+        key = self._key(digest)
         self.client.upload_fileobj(
             io.BytesIO(content),
             self.bucket,
-            self._key(digest),
+            key,
             ExtraArgs={"Metadata": {"sha256": digest}},
         )
+        head = self.client.head_object(Bucket=self.bucket, Key=key)
+        if str(head.get("Metadata", {}).get("sha256", "")) != digest:
+            raise ValueError("S3 对象写入后完整性校验失败。")
         return digest
 
     def verify(self, digest: str) -> bool:
@@ -293,6 +312,8 @@ def create_artifact_store(
     root: Path | None = None,
     bucket: str = "",
     prefix: str = "mechagent",
+    endpoint_url: str = "",
+    region_name: str = "",
 ) -> ArtifactStore | S3ArtifactStore:
     """按显式配置创建对象存储，不在后端不可用时静默降级。"""
 
@@ -301,5 +322,10 @@ def create_artifact_store(
             raise ValueError("filesystem 对象存储需要 artifact_root。")
         return ArtifactStore(root)
     if backend == "s3":
-        return S3ArtifactStore(bucket, prefix)
+        return S3ArtifactStore(
+            bucket,
+            prefix,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+        )
     raise ValueError(f"不支持的对象存储后端：{backend}")

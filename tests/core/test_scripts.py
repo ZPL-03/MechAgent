@@ -9,6 +9,7 @@ import pytest
 from pytest import MonkeyPatch
 from scripts import (
     build_release_manifest,
+    check_release_tag,
     check_wheel_install,
     generate_sbom,
     natural_language_cases,
@@ -17,11 +18,42 @@ from scripts import (
     run_benchmarks,
     run_llm_smoke,
     run_natural_language_cases,
+    sign_release,
 )
 
 from mechagent.config import MechAgentConfig, OutputSettings
 from mechagent.core.validation import BenchmarkResult
 from mechagent.evidence import verify_manifest
+
+
+def test_release_tag_matches_both_package_versions(tmp_path: Path) -> None:
+    for package in ("mechagent-core", "mechagent"):
+        path = tmp_path / "packages" / package
+        path.mkdir(parents=True)
+        path.joinpath("pyproject.toml").write_text(
+            '[project]\nname = "demo"\nversion = "1.2.3"\n', encoding="utf-8"
+        )
+
+    assert check_release_tag.validate_release_tag(tmp_path, "v1.2.3") == "1.2.3"
+    with pytest.raises(ValueError, match="不一致"):
+        check_release_tag.validate_release_tag(tmp_path, "v1.2.4")
+
+
+def test_sign_release_requires_complete_keyless_identity(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"provenance": {"source": {"gitDirty": False}}}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="certificate-identity"):
+        sign_release.main(
+            [
+                "--manifest",
+                str(manifest),
+                "--bundle",
+                str(tmp_path / "bundle.json"),
+            ]
+        )
 
 
 def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:

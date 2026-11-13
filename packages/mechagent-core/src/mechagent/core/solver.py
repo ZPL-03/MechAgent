@@ -23,8 +23,10 @@ class SolverConfig(BaseModel):
         work_dir: 求解工作目录。
         num_cpus: 并行 CPU 核数。
         timeout: 最大允许求解时间，单位为 s。
-        max_concurrent: 适配器本地并发槽位上限；不使用许可证队列的求解器忽略该字段。
+        max_concurrent: 适配器并发槽位上限；配置共享许可证队列时由多个进程共同遵守。
         license_probe: 可选的许可证探针命令片段；仅由支持该契约的适配器执行。
+        license_queue_path: 可选的共享 SQLite 许可证队列路径；仅由支持该契约的适配器执行。
+        license_lease_seconds: 跨进程许可证租约时长，必须大于 0。
 
     Returns:
         SolverConfig: 经过校验的求解器配置。
@@ -45,6 +47,8 @@ class SolverConfig(BaseModel):
     timeout: int = Field(default=3600, ge=1)
     max_concurrent: int = Field(default=1, ge=1)
     license_probe: tuple[str, ...] | None = None
+    license_queue_path: Path | None = None
+    license_lease_seconds: float = Field(default=900.0, gt=0)
 
     @field_validator("license_probe")
     @classmethod
@@ -53,6 +57,13 @@ class SolverConfig(BaseModel):
     ) -> tuple[str, ...] | None:
         if value is not None and any(not item.strip() for item in value):
             raise ValueError("solver.license_probe 不能包含空命令片段。")
+        return value
+
+    @field_validator("license_lease_seconds")
+    @classmethod
+    def _license_lease_seconds_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("solver.license_lease_seconds 必须是有限数值。")
         return value
 
 

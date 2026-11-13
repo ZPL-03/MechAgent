@@ -159,11 +159,20 @@ def test_config_normalizes_supported_backend_names() -> None:
 
 def test_config_exposes_abaqus_license_policy() -> None:
     settings = SolverSettings.model_validate(
-        {"abaqus": {"max_concurrent": 2, "license_probe": ["{launcher}", "--version"]}}
+        {
+            "abaqus": {
+                "max_concurrent": 2,
+                "license_probe": ["{launcher}", "--version"],
+                "license_queue_path": "mechagent_output/abaqus-license.sqlite3",
+                "license_lease_seconds": 120,
+            }
+        }
     )
 
     assert settings.abaqus.max_concurrent == 2
     assert settings.abaqus.license_probe == ("{launcher}", "--version")
+    assert settings.abaqus.license_queue_path is not None
+    assert settings.abaqus.license_lease_seconds == 120
     with pytest.raises(ValueError, match="license_probe"):
         SolverSettings.model_validate({"abaqus": {"license_probe": [""]}})
 

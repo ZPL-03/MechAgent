@@ -129,6 +129,10 @@ def test_cleanup_removes_common_cache_files_and_dry_run_is_non_destructive(
     cache_file.write_text("cache", encoding="utf-8")
     pyc_file = tmp_path / "module.pyc"
     pyc_file.write_bytes(b"cache")
+    coverage_fragment = tmp_path / ".coverage.12345"
+    coverage_fragment.write_text("cache", encoding="utf-8")
+    upload_fragment = tmp_path / ".upload.12345.tmp"
+    upload_fragment.write_bytes(b"cache")
 
     assert clean_artifacts.main(["--dry-run"]) == 0
     assert cache_file.exists()
@@ -141,6 +145,8 @@ def test_cleanup_removes_common_cache_files_and_dry_run_is_non_destructive(
     assert clean_artifacts.main([]) == 0
     assert not cache_file.exists()
     assert not pyc_file.exists()
+    assert not coverage_fragment.exists()
+    assert not upload_fragment.exists()
 
 
 def test_explicit_studio_runtime_cleanup_preserves_formal_evidence(

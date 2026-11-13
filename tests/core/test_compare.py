@@ -9,6 +9,31 @@ from mechagent.core.compare import (
 )
 
 
+def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
+    left = {
+        "case_digest": "a" * 64,
+        "requested_fields": {
+            "u": {"location": "node", "values": {"1": 1.0}},
+        },
+    }
+    right = {
+        "case_digest": "b" * 64,
+        "requested_fields": {
+            "u": {"location": "node", "values": {"1": 1.0}},
+        },
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.differences[0]["reason"] == "case_digest_mismatch"
+
+
 def test_backend_comparison_passes_within_tolerance() -> None:
     left = {"requested_fields": {"u": {"values": {"1": [1.0, 0.0, 0.0]}}}}
     right = {"requested_fields": {"u": {"values": {"1": [1.0001, 0.0, 0.0]}}}}

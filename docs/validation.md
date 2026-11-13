@@ -135,21 +135,27 @@ python scripts/clean_artifacts.py
 
 测试覆盖数据契约、解析与单位、能力及工具工厂、编排和错误归因、LLM 响应与脱敏、SDK/CLI/Studio API、求解与后处理、知识索引、安装包、文档链接、主题和翻译。前端测试检查翻译插值、动态摘要、占位符一致性、标签键盘切换、作业状态和幂等提交；浏览器检查覆盖真实求解、场量、报告、历史、语言、主题和窄屏布局。
 
-当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 595 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
+当前维护基线包括五个标准算例、28 个自然语言案例以及 15 项 LLM smoke 检查。标准算例均满足上表阈值；自然语言案例按是否有参考分别报告。Python 测试收集 611 项并全部通过，便携测试以最终门禁输出为准；测试环境有 2 条第三方弃用告警。前端 19 项测试、TypeScript/Vite 构建、生产依赖 `npm audit --omit=dev --audit-level=high`、Python 运行时外部依赖审计（`scripts/audit_python_dependencies.py --runtime-only`）、Ruff、mypy、隔离 wheel 安装、依赖一致性及严格文档构建通过。`scripts/audit_python_dependencies.py` 从两个包的 `pyproject.toml` 收集运行、开发和文档依赖，排除仓库内未发布到 PyPI 的本地发行包，再调用 `pip-audit`；网络或漏洞服务不可用时审计失败，不得解释为无漏洞。CI 使用 `scripts/check_env.py --profile portable` 和 `pytest -m "not real_solver"`，不替代本机真实求解验证。
 
 `scripts/generate_sbom.py` 生成 SPDX 2.3 JSON，包含当前 Python 环境和 `package-lock.json` 中的依赖及 purl。依赖缺少许可证元数据时保留 `NOASSERTION`；该清单可作为发布前许可证审计输入，不替代许可证人工确认。
 
 `scripts/build_release_manifest.py` 要求两个包各有一个当前版本的 wheel 和 sdist，并记录 Git 提交、UTC 时间、相对路径、大小、媒体类型、SHA-256 和构建上下文 provenance。provenance 包含源提交状态、Python/Node/平台版本和 `SOURCE_DATE_EPOCH`；它不提供签名、作者身份或可信构建服务证明。`scripts/sign_release.py` 支持受控密钥签名和 GitHub OIDC keyless 签名，签名后立即执行 `verify-blob`；发布清单必须声明干净 Git 源状态。缺少签名工具、密钥或 OIDC 证书身份时以失败结束。
+`.github/workflows/release.yml` 在构建前执行 `scripts/check_release_tag.py`，要求 `v<版本>` 与两个包的版本完全一致；构建后使用 GitHub OIDC 生成 build provenance attestation，并由 cosign 对发布清单执行 keyless 签名和验证。工作流只响应显式版本 tag；本地构建清单和源码状态不能替代可信 CI 的签名与 attestation。
 
-`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
+`scripts/compare_backends.py` 支持比较 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`。请求字段优先按节点坐标建立一一对应，梁类一维网格按主轴位置聚合；原始场只有在位置、单位和离散映射可证明一致时才逐值比较，否则标记为 `unverified`。统一单元质心字段由单元连接、节点坐标和原始场值确定性聚合；统一语义字段由应力本构、全场极值和支撑区域合力推导。每个适配器结果包含 `case_digest`、单位、坐标系和版本字段；比较器发现两侧案例指纹缺失或不一致时直接失败。多步结果统一提供 `steps`、逐帧字段、`step_results` 和兼容别名 `result_steps`，不得用最终帧替代缺失分析步。比较结果保留来源、推导、对齐方式、缺失字段、未验证字段和误差。`run_backend_comparison.py` 在同一 `SimulationCase` 上运行两个后端并保存案例摘要、原始结果、统一单元质心字段、统一语义字段和比较清单。
 
 本机 Abaqus 2023 与 CalculiX 2.23 的真实适配器运行中，TC-01、TC-03、TC-04 的请求位移字段、统一单元质心字段和统一语义摘要均通过。当前权威清单为 `mechagent_output/backend-comparison-current/manifest.json`，状态为 `passed`。位移使用 `line-coordinate-centerline` 或 `node-coordinate` 对齐；统一单元质心字段包含 `stress_sxx`、`strain_exx` 和 `volume`，实体案例还包含 `strain_energy_density`，阈值为相对误差 10% 或绝对误差 0.005。统一语义字段覆盖应力最大分量、应变能密度摘要和支撑区域反力合力，阈值为相对误差 3% 或绝对误差 0.005。原始场比较仍因节点/积分点、截面展开和反力离散分布记录为 `unverified` 或 `failed`；该清单不证明逐积分点应力、逐节点反力或原始能量场等价，也不扩大到其他网格、单元族或物理域。
 
-适配器测试覆盖许可证探针非零返回、许可证槽位等待超时和配置校验；这些是注入执行器的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。
+适配器测试覆盖许可证探针非零返回、进程内槽位等待超时、共享 SQLite 队列的跨进程容量限制、租约释放和容量漂移拒绝；这些是适配器和队列的失败路径证据，不能替代 Abaqus 实际许可证不可用时的本机审计记录。共享队列只证明同一可用文件系统上的 Python 进程协调，不证明 FLEXnet 或集群许可证服务的容量状态。
 
 `scripts/run_abaqus_multistep.py` 的本机验证清单为 `mechagent_output/abaqus-multistep-evidence/manifest.json`，状态为 `passed`。该运行包含 2 个分析步、每步 2 个 ODB 帧、101 个节点、400 个积分点应力和应变值、100 个单元体积值、400 个应变能密度值、101 个节点反力值、全局 `ALLIE` 能量值以及 4 个逐帧结果记录。两个步骤均保留 `ALLIE`、`ALLSE`、`ALLWK` 和 `ALLPD` 历史能量；`requested_fields` 与 `step_results` 均包含位移、应力分量、应变、体积和能量字段。该证据验证 Abaqus 适配器的本机多步执行与场提取路径，不扩大到非线性、接触或其他单元族。
 
 Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
+
+真实 S3 验收使用 `scripts/check_s3_storage.py --bucket <bucket>`，可附加
+`--endpoint-url <url>` 和 `--require-lifecycle-id <id>`。脚本通过 boto3 标准凭据链创建随机探针
+对象，验证 SHA-256 metadata、下载、前缀列举和默认删除，失败时返回非零并给出不含凭据的清理命令。
+通过该探针只表示指定桶当前权限和生命周期读取结果通过，不代表跨主机恢复、容量配额或灾备指标。
 
 Studio 本机磁盘配额通过 `studio.max_storage_bytes` 配置。配额统计数据库父目录及本地 `artifact_root` 内的普通文件，提交前和成功结果写入后检查；超额提交返回 HTTP 507，超额结果记录 `storage_quota_exceeded`，不保留公开结果引用。`null` 表示不启用配额，S3 远端对象不计入本机目录用量。`tests/core/test_artifacts_backup.py` 覆盖提交前超额、结果写入后超额、外置本地对象目录和指标状态，`tests/core/test_studio.py` 覆盖 HTTP 507 映射。
 
@@ -158,6 +164,25 @@ python scripts/backup_studio.py create --database mechagent_output/.studio/jobs.
 python scripts/restore_studio.py --backup mechagent_output/studio-backup --destination mechagent_output/studio-restore
 python scripts/restore_studio.py --backup mechagent_output/studio-backup --destination mechagent_output/studio-restore --verify-only
 ```
+
+数据库使用 S3 结果对象时，冷备份必须显式指定对象存储；脚本会将数据库引用的对象下载到备份清单，
+恢复时可上传到目标桶：
+
+```powershell
+python scripts/backup_studio.py create `
+  --database mechagent_output/.studio/jobs.sqlite3 `
+  --destination mechagent_output/studio-backup `
+  --artifact-backend s3 --bucket <source-bucket> --prefix mechagent `
+  --endpoint-url <source-endpoint> --region <source-region>
+python scripts/restore_studio.py `
+  --backup mechagent_output/studio-backup `
+  --destination mechagent_output/studio-restore `
+  --artifact-backend s3 --bucket <target-bucket> --prefix mechagent `
+  --endpoint-url <target-endpoint> --region <target-region>
+```
+
+备份与恢复命令使用 boto3 标准凭据链，不在清单或日志写入凭据；目标桶权限和跨主机 RTO/RPO 仍须
+通过独立演练记录。
 
 灾难恢复演练使用独立的空 workspace，不覆盖既有备份或恢复目录。脚本记录源数据库和恢复数据库的完整性、作业数量、备份/恢复耗时、RPO 丢失作业数和总 RTO，并按显式目标判定退出码。RPO 基准是演练开始时可见的作业 ID；RTO 从演练开始计时到恢复数据库完成完整性检查。当前机器的实际 Studio 数据库演练证据为 `mechagent_output/studio-recovery-evidence/manifest.json`，源库含 1 个终态作业，恢复后作业 ID 丢失数为 0，RTO 约 0.089 秒，目标为 60 秒，清单状态为 `passed`。该证据只能证明指定机器、数据库、对象目录和目标阈值，不代表跨主机或 S3 部署已验收。
 
@@ -172,8 +197,21 @@ python scripts/drill_studio_recovery.py `
 退出码为 0 且 `recovery-drill.json` 的 `status` 为 `passed` 才算该环境的演练通过。目标目录已存在、数据库含活动作业、备份清单不完整、作业 ID 丢失或 RTO 超限均保留失败状态；不要删除失败证据后重跑。
 
 S3 兼容对象存储通过 `pip install "mechagent[s3]"` 和 `studio.artifact_backend=s3` 启用；
-访问密钥由 boto3 标准凭据链提供。当前仓库包含客户端、摘要校验和恢复接口，远端桶权限、跨主机
-备份保留和灾难恢复时间指标需要部署环境单独验收。
+访问密钥由 boto3 标准凭据链提供。`studio.artifact_s3_endpoint_url` 和
+`studio.artifact_s3_region` 可选择 S3 兼容私有端点和区域。当前仓库包含客户端、摘要校验和恢复
+接口，远端桶权限、跨主机备份保留和灾难恢复时间指标需要部署环境单独验收。
+
+真实桶验收命令：
+
+```powershell
+python scripts/check_s3_storage.py `
+  --bucket <bucket> `
+  --prefix mechagent/probe `
+  --require-lifecycle-id <lifecycle-rule-id>
+```
+
+退出码为 0 且 JSON 中 `status` 为 `passed` 才表示该桶的当前写入、读取、列举、删除和生命周期
+检查通过。该探针不证明跨主机备份恢复、容量配额或对象锁策略；这些仍需在部署环境执行独立演练。
 
 结果对象保留清理按数据库中的 `result_hash` 引用保护对象，并拒绝在存在未终态作业时执行。默认
 只列出超过年龄阈值且无引用的对象；只有显式加入 `--apply` 才会删除。文件系统和 S3 使用同一
@@ -226,7 +264,7 @@ python scripts/clean_artifacts.py --include-studio-runtime
 python scripts/clean_artifacts.py --include-runs
 ```
 
-`--dry-run` 会执行相同的作业数据库、求解锁、仓库边界和 Git 跟踪文件检查，只输出待删除路径。默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录、可再生成知识索引以及常见一次性缓存文件（`.pyc`、`.pyo`、`.tsbuildinfo`、`.eslintcache`、调试日志和系统缩略图），保留 `mechagent_output/` 与 FEM 运行文件。`--include-studio-runtime` 仅删除 `mechagent_output/.studio` 的本地 Studio 运行时数据库、作业目录和对象目录，保留正式证据目录；`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用后两个选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
+`--dry-run` 会执行相同的作业数据库、求解锁、仓库边界和 Git 跟踪文件检查，只输出待删除路径。默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录、可再生成知识索引以及常见一次性缓存文件（`.pyc`、`.pyo`、`.tsbuildinfo`、`.eslintcache`、`.coverage.*`、`.upload.*.tmp`、交换文件、调试日志和系统缩略图），保留 `mechagent_output/` 与 FEM 运行文件。`--include-studio-runtime` 仅删除 `mechagent_output/.studio` 的本地 Studio 运行时数据库、作业目录和对象目录，保留正式证据目录；`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。使用后两个选项前应将需要保留的报告、ODB、输入和发布包移出清理目标，并确认没有活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队/启动/运行/取消中任务时拒绝运行证据清理。
 
 若默认清理后仍有一次性文件，使用以下命令列出未跟踪文件并逐项确认：
 

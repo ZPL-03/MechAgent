@@ -23,6 +23,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: Validate release tag
+        shell: pwsh
+        run: python scripts/check_release_tag.py --tag "${{ github.ref_name }}"
       - name: Install packages and build frontend
         shell: pwsh
         run: |
@@ -40,6 +43,14 @@ jobs:
           python scripts/build_release_manifest.py --output dist/mechagent-release-manifest.json
           python scripts/check_wheel_install.py
       - uses: sigstore/cosign-installer@v3
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            packages/mechagent-core/dist/*
+            packages/mechagent/dist/*
+            dist/mechagent-sbom.spdx.json
+            dist/mechagent-release-manifest.json
       - name: Sign release manifest with GitHub OIDC
         shell: pwsh
         env:

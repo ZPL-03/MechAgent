@@ -92,7 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         params = geometry.to_model_params(source, args.completion)
         params = params.model_copy(
-            update={"mesh": params.mesh.model_copy(update={"element_type": ElementType.C3D4})}
+            update={
+                "mesh": params.mesh.model_copy(
+                    update={"element_type": ElementType.C3D4, "seed_size": args.seed_size}
+                )
+            }
         )
         case = params.to_simulation_case(
             raw_request=args.completion,

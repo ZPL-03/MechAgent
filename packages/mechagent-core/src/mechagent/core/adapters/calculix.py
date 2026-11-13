@@ -6,7 +6,7 @@ import re
 import shutil
 from collections.abc import Sequence
 from itertools import combinations
-from math import isfinite, sqrt
+from math import isfinite, pi, sqrt
 from pathlib import Path
 from typing import Any, Optional
 
@@ -233,11 +233,20 @@ class CalculiXAdapter(AbstractSolver):
         parsed = _parse_frd(frd_file, mesh_nodes) if frd_file else {}
         element_volumes = _result_element_volumes(result.output_files, mesh_nodes)
         if element_volumes:
-            parsed.setdefault("fields", {})["volume"] = {
+            volume_field = {
                 "location": "element",
                 "unit": "mm^3",
                 "values": {str(label): value for label, value in element_volumes.items()},
             }
+            parsed.setdefault("fields", {})["volume"] = volume_field
+            history = parsed.get("field_history")
+            if isinstance(history, list):
+                for frame in history:
+                    if isinstance(frame, dict):
+                        # 单元几何体积与分析步无关；为每个结果帧补齐 EVOL，
+                        # 使多步字段契约不会只在最终帧看似完整。
+                        frame.setdefault("volume", volume_field)
+                parsed["steps"] = _steps_from_history(history)
         result_payload = {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
@@ -1186,7 +1195,13 @@ def _element_centroids(
 def _result_element_volumes(
     paths: list[Path], nodes: dict[int, tuple[float, float, float]]
 ) -> dict[int, float]:
-    """从输入网格重建实体单元体积，作为缺少 FRD EVOL 时的确定性字段。"""
+    """从输入网格重建单元体积，作为缺少 FRD EVOL 时的确定性字段。
+
+    CalculiX 不会为所有单元族写出 ``EVOL`` FRD 记录，尤其是梁和壳单元。
+    输入文件包含单元拓扑以及梁截面/壳厚度，因此可以在不猜测求解结果的
+    情况下重建几何体积。未知单元族保持缺失，调用方会按结果字段契约拒绝
+    声称完整的场量。
+    """
 
     input_file = _first_file_with_suffix(paths, ".inp")
     if input_file is None or not nodes:
@@ -1195,45 +1210,160 @@ def _result_element_volumes(
         lines = input_file.read_text(encoding="utf-8").splitlines()
     except OSError:
         return {}
+    element_blocks = _parse_element_blocks(lines)
+    beam_area, shell_thickness = _parse_section_properties(lines)
     volumes: dict[int, float] = {}
-    for element_id, connectivity in _parse_solid_element_rows(lines):
-        try:
-            points = [nodes[node_id] for node_id in connectivity]
-        except KeyError:
-            continue
-        if len(points) == 4:
-            volume = _tetra_volume(points)
-        elif len(points) == 8:
-            volume = _hexa_volume(points)
-        else:
-            continue
-        if isfinite(volume) and volume > 0.0:
-            volumes[element_id] = volume
+    for element_type, rows in element_blocks:
+        for element_id, connectivity in rows:
+            try:
+                points = [nodes[node_id] for node_id in connectivity]
+            except KeyError:
+                continue
+            volume: float | None = None
+            if element_type.startswith("C3D"):
+                corners = _solid_corner_points(element_type, points)
+                if len(corners) == 4:
+                    volume = _tetra_volume(corners)
+                elif len(corners) == 6:
+                    volume = _wedge_volume(corners)
+                elif len(corners) == 8:
+                    volume = _hexa_volume(corners)
+            elif element_type.startswith("B3") and beam_area is not None:
+                volume = _polyline_length(points) * beam_area
+            elif element_type.startswith("S") and shell_thickness is not None:
+                volume = _surface_area(points, element_type) * shell_thickness
+            if volume is None:
+                continue
+            if isfinite(volume) and volume > 0.0:
+                volumes[element_id] = volume
     return volumes
+
+
+def _parse_element_blocks(
+    lines: list[str],
+) -> list[tuple[str, list[tuple[int, tuple[int, ...]]]]]:
+    """解析输入文件中每个 ``*ELEMENT`` 块的类型和连接关系。"""
+
+    blocks: list[tuple[str, list[tuple[int, tuple[int, ...]]]]] = []
+    current_type = ""
+    current_rows: list[tuple[int, tuple[int, ...]]] = []
+
+    def flush() -> None:
+        nonlocal current_type, current_rows
+        if current_type and current_rows:
+            blocks.append((current_type, current_rows))
+        current_type = ""
+        current_rows = []
+
+    for raw in lines + ["*"]:
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("*ELEMENT"):
+            flush()
+            match = re.search(r"TYPE\s*=\s*([A-Z0-9]+)", upper)
+            current_type = match.group(1) if match else ""
+            continue
+        if line.startswith("*"):
+            flush()
+            continue
+        if not current_type or not line:
+            continue
+        expected_nodes = _element_node_count(f"TYPE={current_type}")
+        parts = [part.strip() for part in line.split(",")]
+        if not expected_nodes or len(parts) < expected_nodes + 1:
+            continue
+        try:
+            current_rows.append(
+                (int(parts[0]), tuple(int(part) for part in parts[1 : expected_nodes + 1]))
+            )
+        except ValueError:
+            continue
+    return blocks
+
+
+def _parse_section_properties(lines: list[str]) -> tuple[float | None, float | None]:
+    """读取支持的梁截面积和壳厚度；未知截面保持缺失。"""
+
+    beam_area: float | None = None
+    shell_thickness: float | None = None
+    for index, raw in enumerate(lines):
+        header = raw.strip().upper()
+        if not header.startswith(("*BEAM SECTION", "*SHELL SECTION")):
+            continue
+        for data in lines[index + 1 :]:
+            value = data.strip()
+            if not value or value.startswith("**"):
+                continue
+            if value.startswith("*"):
+                break
+            try:
+                numbers = [float(item.strip()) for item in value.split(",") if item.strip()]
+            except ValueError:
+                break
+            if header.startswith("*BEAM SECTION"):
+                section_match = re.search(r"SECTION\s*=\s*([A-Z0-9]+)", header)
+                section = section_match.group(1) if section_match else ""
+                if section == "RECT" and len(numbers) >= 2:
+                    area = numbers[0] * numbers[1]
+                elif section == "CIRC" and numbers:
+                    area = pi * (numbers[0] / 2.0) ** 2
+                else:
+                    area = 0.0
+                if isfinite(area) and area > 0.0:
+                    beam_area = area
+            elif header.startswith("*SHELL SECTION") and numbers:
+                thickness = numbers[0]
+                if isfinite(thickness) and thickness > 0.0:
+                    shell_thickness = thickness
+            break
+    return beam_area, shell_thickness
+
+
+def _solid_corner_points(
+    element_type: str, points: list[tuple[float, float, float]]
+) -> list[tuple[float, float, float]]:
+    if element_type.startswith("C3D10") or element_type.startswith("C3D4"):
+        return points[:4]
+    if element_type.startswith("C3D15") or element_type.startswith("C3D6"):
+        return points[:6]
+    if element_type.startswith("C3D20") or element_type.startswith("C3D8"):
+        return points[:8]
+    return []
+
+
+def _polyline_length(points: list[tuple[float, float, float]]) -> float:
+    return sum(
+        sqrt(sum((right[index] - left[index]) ** 2 for index in range(3)))
+        for left, right in zip(points, points[1:], strict=False)
+    )
+
+
+def _surface_area(points: list[tuple[float, float, float]], element_type: str = "") -> float:
+    """按壳单元角点连接计算面积，忽略二次单元的中边节点。"""
+
+    corner_count = 3 if element_type.startswith(("S3", "S6")) else 4
+    corners = points[:corner_count]
+    return _polygon_area(corners) if len(corners) >= 3 else 0.0
+
+
+def _wedge_volume(points: list[tuple[float, float, float]]) -> float:
+    if len(points) != 6:
+        return 0.0
+    tetrahedra = ((0, 1, 2, 3), (1, 2, 4, 3), (2, 4, 5, 3))
+    return sum(
+        _tetra_volume([points[index] for index in tetrahedron]) for tetrahedron in tetrahedra
+    )
 
 
 def _parse_solid_element_rows(
     lines: list[str],
 ) -> list[tuple[int, tuple[int, ...]]]:
+    """兼容旧调用方，只返回实体单元连接关系。"""
+
     rows: list[tuple[int, tuple[int, ...]]] = []
-    active = False
-    expected_nodes = 0
-    for raw in lines:
-        line = raw.strip()
-        upper = line.upper()
-        if upper.startswith("*ELEMENT"):
-            active = "C3D8" in upper or "C3D4" in upper
-            expected_nodes = 8 if "C3D8" in upper else 4 if "C3D4" in upper else 0
-            continue
-        if active and line.startswith("*"):
-            active = False
-            expected_nodes = 0
-            continue
-        if not active or not line:
-            continue
-        parts = [part.strip() for part in line.split(",")]
-        if expected_nodes and len(parts) >= expected_nodes + 1:
-            rows.append((int(parts[0]), tuple(int(part) for part in parts[1 : expected_nodes + 1])))
+    for element_type, block in _parse_element_blocks(lines):
+        if element_type.startswith("C3D"):
+            rows.extend(block)
     return rows
 
 
@@ -1266,11 +1396,17 @@ def _parse_frd(
     if frd_coordinates:
         node_coordinates = frd_coordinates
     displacement_frames: list[dict[int, tuple[float, float, float]]] = []
+    displacement_steps: list[int] = []
     stress_frames: list[dict[int, tuple[float, float, float, float, float, float]]] = []
+    stress_steps: list[int] = []
     strain_frames: list[dict[int, tuple[float, ...]]] = []
+    strain_steps: list[int] = []
     volume_frames: list[dict[int, float]] = []
+    volume_steps: list[int] = []
     reaction_frames: list[dict[int, tuple[float, float, float]]] = []
+    reaction_steps: list[int] = []
     energy_frames: list[dict[int, float]] = []
+    energy_steps: list[int] = []
     displacements: dict[int, tuple[float, float, float]] = {}
     stresses: dict[int, tuple[float, float, float, float, float, float]] = {}
     strains: dict[int, tuple[float, ...]] = {}
@@ -1278,29 +1414,41 @@ def _parse_frd(
     reactions: dict[int, tuple[float, float, float]] = {}
     energies: dict[int, float] = {}
     mode: str | None = None
+    current_step_number = 1
 
     def flush() -> None:
         nonlocal displacements, stresses, strains, volumes, reactions, energies
         if displacements:
             displacement_frames.append(displacements)
+            displacement_steps.append(current_step_number)
             displacements = {}
         if stresses:
             stress_frames.append(stresses)
+            stress_steps.append(current_step_number)
             stresses = {}
         if strains:
             strain_frames.append(strains)
+            strain_steps.append(current_step_number)
             strains = {}
         if volumes:
             volume_frames.append(volumes)
+            volume_steps.append(current_step_number)
             volumes = {}
         if reactions:
             reaction_frames.append(reactions)
+            reaction_steps.append(current_step_number)
             reactions = {}
         if energies:
             energy_frames.append(energies)
+            energy_steps.append(current_step_number)
             energies = {}
 
     for line in lines:
+        if line.strip().startswith("1PSTEP"):
+            flush()
+            current_step_number = _parse_frd_step_number(line, current_step_number)
+            mode = None
+            continue
         if line.startswith(" -4  DISP"):
             flush()
             mode = "disp"
@@ -1431,7 +1579,7 @@ def _parse_frd(
         }
     if volumes:
         result.setdefault("fields", {})["volume"] = {
-            "location": "node",
+            "location": "element",
             "unit": "mm^3",
             "values": {str(node): value for node, value in volumes.items()},
         }
@@ -1450,7 +1598,7 @@ def _parse_frd(
             "values": {str(node): value for node, value in energies.items()},
         }
         result.setdefault("fields", {})["strain_energy_density"] = {
-            "location": "node",
+            "location": "element",
             "unit": "N/mm^2",
             "components": ["strain_energy_density"],
             "values": {str(node): value for node, value in energies.items()},
@@ -1470,7 +1618,19 @@ def _parse_frd(
             len(energy_frames),
         )
     ):
-        frame: dict[str, Any] = {"step_index": index + 1}
+        step_numbers = (
+            displacement_steps,
+            stress_steps,
+            strain_steps,
+            volume_steps,
+            reaction_steps,
+            energy_steps,
+        )
+        frame_step = next(
+            (steps[index] for steps in step_numbers if index < len(steps)),
+            index + 1,
+        )
+        frame: dict[str, Any] = {"step_index": frame_step}
         if index < len(displacement_frames):
             frame["displacement"] = {
                 "location": "node",
@@ -1499,7 +1659,7 @@ def _parse_frd(
             }
         if index < len(volume_frames):
             frame["volume"] = {
-                "location": "node",
+                "location": "element",
                 "unit": "mm^3",
                 "values": {str(node): value for node, value in volume_frames[index].items()},
             }
@@ -1520,14 +1680,47 @@ def _parse_frd(
                 "values": {str(node): value for node, value in energy_frames[index].items()},
             }
             frame["strain_energy_density"] = {
-                "location": "node",
+                "location": "element",
                 "unit": "N/mm^2",
                 "values": {str(node): value for node, value in energy_frames[index].items()},
             }
         history.append(frame)
     if history:
         result["field_history"] = history
+        result["steps"] = _steps_from_history(history)
     return result
+
+
+def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 FRD 的逐帧记录整理为与 ODB 一致的分析步结构。"""
+
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for frame in history:
+        step_index = frame.get("step_index")
+        if not isinstance(step_index, int):
+            continue
+        grouped.setdefault(step_index, []).append(frame)
+    steps: list[dict[str, Any]] = []
+    for step_index, frames in sorted(grouped.items()):
+        fields = {key: value for key, value in frames[-1].items() if key != "step_index"}
+        steps.append(
+            {
+                "name": f"step-{step_index}",
+                "frame": len(frames) - 1,
+                "fields": fields,
+                "frames": [
+                    {
+                        "frame_index": index,
+                        "fields": {
+                            key: value for key, value in frame.items() if key != "step_index"
+                        },
+                    }
+                    for index, frame in enumerate(frames)
+                ],
+                "history": {},
+            }
+        )
+    return steps
 
 
 def _parse_frd_coordinates(lines: list[str]) -> dict[int, tuple[float, float, float]]:
@@ -1549,6 +1742,21 @@ def _parse_frd_coordinates(lines: list[str]) -> dict[int, tuple[float, float, fl
         node, values = parsed
         coordinates[node] = (values[1], values[2], values[3])
     return coordinates
+
+
+def _parse_frd_step_number(line: str, default: int) -> int:
+    """读取 FRD ``1PSTEP`` 记录中的分析步编号。"""
+
+    parts = line.split()
+    if len(parts) < 2:
+        return default
+    try:
+        # CalculiX uses the first numeric value for the output sequence and
+        # the last value for the analysis step number.
+        step = int(parts[-1])
+    except ValueError:
+        return default
+    return step if step >= 1 else default
 
 
 def _max_abs_component_on_axis(

@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     targets = [path for pattern in patterns for path in _iter_repo_paths(pattern) if path.is_dir()]
     file_patterns = [
         ".coverage",
+        ".coverage.*",
         "coverage.xml",
         ".eslintcache",
         ".stylelintcache",
@@ -64,6 +65,10 @@ def main(argv: list[str] | None = None) -> int:
         "yarn-debug.log*",
         "yarn-error.log*",
         "pnpm-debug.log*",
+        ".upload.*.tmp",
+        ".tmp.*",
+        "*.swp",
+        "*.swo",
     ]
     targets.extend(
         path for pattern in file_patterns for path in _iter_repo_paths(pattern) if path.is_file()

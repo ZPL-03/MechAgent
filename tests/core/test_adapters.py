@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,7 +22,7 @@ from mechagent.core.adapters import (
     CalculiXAdapter,
     CalculiXInpMesher,
 )
-from mechagent.core.adapters.calculix import _parse_frd_data_line
+from mechagent.core.adapters.calculix import _parse_frd_data_line, _result_element_volumes
 from mechagent.core.exceptions import SolverError
 from mechagent.core.executor import (
     AbstractJobExecutor,
@@ -29,6 +31,7 @@ from mechagent.core.executor import (
     JobSpec,
     JobStatus,
 )
+from mechagent.core.license_queue import FileLicenseQueue, LicenseQueueError
 from mechagent.core.mesher import MeshConfig
 from mechagent.core.models import (
     AnalysisSpec,
@@ -38,8 +41,11 @@ from mechagent.core.models import (
     GeometrySpec,
     GeometryType,
     LoadSpec,
+    LoadStepSpec,
     LoadType,
     MaterialType,
+    ResultFieldSpec,
+    SimulationCase,
 )
 from mechagent.core.solver import SolverConfig, SolverResult
 from mechagent.core.validation import tc01_model_params, tc02_model_params, tc03_model_params
@@ -348,6 +354,73 @@ def test_abaqus_queue_timeout_reports_license_slot_exhaustion(tmp_path: Path) ->
     assert not thread.is_alive()
 
 
+def test_shared_license_queue_enforces_capacity_across_processes(tmp_path: Path) -> None:
+    queue_path = tmp_path / "abaqus-license.sqlite3"
+    ready_path = tmp_path / "holder.ready"
+    release_path = tmp_path / "holder.release"
+    holder_script = """
+import sys
+import time
+from pathlib import Path
+from mechagent.core.license_queue import FileLicenseQueue
+
+queue = FileLicenseQueue(
+    Path(sys.argv[1]), sys.argv[4], 1, lease_seconds=5, poll_interval_seconds=0.01
+)
+with queue.acquire(3):
+    Path(sys.argv[2]).write_text("ready", encoding="utf-8")
+    while not Path(sys.argv[3]).exists():
+        time.sleep(0.01)
+"""
+    env = os.environ.copy()
+    source_roots = [
+        str(Path(__file__).resolve().parents[2] / "packages/mechagent-core/src"),
+        str(Path(__file__).resolve().parents[2] / "packages/mechagent/src"),
+    ]
+    env["PYTHONPATH"] = os.pathsep.join(source_roots + [env.get("PYTHONPATH", "")])
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            holder_script,
+            str(queue_path),
+            str(ready_path),
+            str(release_path),
+            "abaqus-test",
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 3
+        while not ready_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready_path.exists(), "许可证队列持有进程未在限定时间内取得槽位。"
+        queue = FileLicenseQueue(
+            queue_path,
+            "abaqus-test",
+            1,
+            lease_seconds=5,
+            poll_interval_seconds=0.01,
+        )
+        with pytest.raises(LicenseQueueError, match="共享槽位超时"), queue.acquire(0.15):
+            pass
+    finally:
+        release_path.write_text("release", encoding="utf-8")
+        stdout, stderr = holder.communicate(timeout=5)
+        assert holder.returncode == 0, stderr or stdout
+
+
+def test_shared_license_queue_rejects_capacity_drift(tmp_path: Path) -> None:
+    queue_path = tmp_path / "abaqus-license.sqlite3"
+    first = FileLicenseQueue(queue_path, "abaqus-test", 1)
+    assert first.path == queue_path.resolve()
+    with pytest.raises(LicenseQueueError, match="容量已登记"):
+        FileLicenseQueue(queue_path, "abaqus-test", 2)
+
+
 def test_abaqus_input_requests_full_field_and_energy_output(tmp_path: Path) -> None:
     adapter = AbaqusAdapter(SolverConfig(work_dir=tmp_path))
 
@@ -472,6 +545,150 @@ def test_calculix_frd_data_line_parser_accepts_common_numeric_formats() -> None:
     )
     assert _parse_frd_data_line("        12 0.0 -4 5.") == (12, [12.0, 0.0, -4.0, 5.0])
     assert _parse_frd_data_line(" no node") is None
+
+
+def test_calculix_reconstructs_beam_element_volume_from_section(tmp_path: Path) -> None:
+    adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
+    input_file = adapter.generate_input(tc01_model_params())
+    nodes = {
+        1: (0.0, 0.0, 0.0),
+        2: (10.0, 0.0, 0.0),
+    }
+    input_file.write_text(
+        "\n".join(
+            [
+                "*NODE",
+                "1, 0., 0., 0.",
+                "2, 10., 0., 0.",
+                "*ELEMENT, TYPE=B31, ELSET=EALL",
+                "1, 1, 2",
+                "*BEAM SECTION, ELSET=EALL, MATERIAL=MAT, SECTION=RECT",
+                "2., 3.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    volumes = _result_element_volumes([input_file], nodes)
+
+    assert volumes == {1: pytest.approx(60.0)}
+
+
+def test_calculix_reconstructs_quadratic_shell_volume_from_corner_nodes(tmp_path: Path) -> None:
+    input_file = tmp_path / "shell.inp"
+    input_file.write_text(
+        "\n".join(
+            [
+                "*NODE",
+                "1, 0., 0., 0.",
+                "2, 2., 0., 0.",
+                "3, 2., 3., 0.",
+                "4, 0., 3., 0.",
+                "5, 1., 0., 0.",
+                "6, 2., 1.5, 0.",
+                "7, 1., 3., 0.",
+                "8, 0., 1.5, 0.",
+                "*ELEMENT, TYPE=S8, ELSET=EALL",
+                "1, 1, 2, 3, 4, 5, 6, 7, 8",
+                "*SHELL SECTION, ELSET=EALL, MATERIAL=MAT",
+                "0.5",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    volumes = _result_element_volumes(
+        [input_file],
+        {
+            1: (0.0, 0.0, 0.0),
+            2: (2.0, 0.0, 0.0),
+            3: (2.0, 3.0, 0.0),
+            4: (0.0, 3.0, 0.0),
+            5: (1.0, 0.0, 0.0),
+            6: (2.0, 1.5, 0.0),
+            7: (1.0, 3.0, 0.0),
+            8: (0.0, 1.5, 0.0),
+        },
+    )
+
+    assert volumes == {1: pytest.approx(3.0)}
+
+
+def test_calculix_run_case_preserves_all_requested_fields_and_steps(tmp_path: Path) -> None:
+    params = tc01_model_params()
+    fields = [
+        ResultFieldSpec(
+            name="displacement",
+            quantity="U",
+            location="node",
+            invariant="magnitude",
+            unit="mm",
+        ),
+        ResultFieldSpec(
+            name="stress_sxx", quantity="S", location="node", component="sxx", unit="MPa"
+        ),
+        ResultFieldSpec(name="strain", quantity="E", location="node"),
+        ResultFieldSpec(name="volume", quantity="EVOL", location="element", unit="mm^3"),
+        ResultFieldSpec(name="energy", quantity="ENER", location="element", unit="N*mm"),
+    ]
+    case = SimulationCase.from_model_params(
+        params, raw_request="CalculiX multi-step field contract", provenance_confidence=1.0
+    ).model_copy(
+        update={
+            "result_fields": fields,
+            "load_steps": [
+                LoadStepSpec(
+                    step_id="step-1",
+                    sequence=1,
+                    analysis=params.analysis.type,
+                    result_fields=[field.name for field in fields],
+                ),
+                LoadStepSpec(
+                    step_id="step-2",
+                    sequence=2,
+                    analysis=params.analysis.type,
+                    load_scale=0.5,
+                    result_fields=[field.name for field in fields],
+                ),
+            ],
+        }
+    )
+
+    if not Path(r"D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe").is_file():
+        pytest.skip("本机未配置 CalculiX。")
+    result = CalculiXAdapter(
+        SolverConfig(
+            solver_path=r"D:/Calculix/CalculiX-2.23.0-win-x64/bin/ccx_MT.exe",
+            work_dir=tmp_path,
+            timeout=120,
+        )
+    ).run_case(case)
+
+    assert result["success"] is True
+    assert result["step_count"] == 2
+    assert len(result["step_results"]) == 2
+    assert set(result["requested_fields"]) == {
+        "displacement",
+        "stress_sxx",
+        "strain",
+        "volume",
+        "energy",
+    }
+    assert result["fields"]["volume"]["values"]
+    assert result["fields"]["energy"]["values"]
+    assert all(
+        set(step["fields"])
+        == {
+            "displacement",
+            "stress_sxx",
+            "strain",
+            "volume",
+            "energy",
+        }
+        for step in result["step_results"]
+    )
 
 
 def test_calculix_inp_mesher_generates_beam_inp_without_external_process(

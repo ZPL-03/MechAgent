@@ -32,6 +32,48 @@ def test_result_fields_select_magnitude_and_mises() -> None:
     )
     assert extracted["requested_fields"]["u_mag"]["values"] == {"1": 5.0}
     assert extracted["requested_fields"]["s_mises"]["values"]["1"] == pytest.approx(3.0)
+    assert len(extracted["result_steps"]) == 1
+    assert extracted["result_steps"][0]["step_id"] == "step-1"
+
+
+def test_result_fields_reject_incomplete_multistep_history() -> None:
+    case = _case().model_copy(
+        update={
+            "load_steps": [
+                LoadStepSpec(step_id="step-1", sequence=1, result_fields=["u_mag"]),
+                LoadStepSpec(step_id="step-2", sequence=2, result_fields=["s_mises"]),
+            ]
+        }
+    )
+    with pytest.raises(SolverError, match="多步结果缺少完整分析步字段"):
+        attach_case_result_fields(
+            {
+                "fields": {
+                    "displacement": {
+                        "location": "node",
+                        "values": {"1": [3, 4, 0]},
+                    },
+                    "stress": {
+                        "location": "node",
+                        "values": {"1": [3, 0, 0, 0, 0, 0]},
+                    },
+                },
+                "field_history": [
+                    {
+                        "step_index": 1,
+                        "displacement": {
+                            "location": "node",
+                            "values": {"1": [3, 4, 0]},
+                        },
+                        "stress": {
+                            "location": "node",
+                            "values": {"1": [3, 0, 0, 0, 0, 0]},
+                        },
+                    }
+                ],
+            },
+            case,
+        )
 
 
 def test_result_fields_select_strain_volume_and_global_energy() -> None:

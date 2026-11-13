@@ -116,13 +116,7 @@ class GmshCADKernel(AbstractCADKernel):
             area = sum(gmsh.model.occ.getMass(2, tag) for _dim, tag in faces)
             topology = _topology_entities(solids, faces, edges)
             region_candidates = _face_region_candidates(topology, bbox)
-            topology_digest = hashlib.sha256(
-                json.dumps(
-                    [entity.model_dump(mode="json") for entity in topology],
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ).encode("utf-8")
-            ).hexdigest()
+            topology_digest = _topology_digest(topology)
             return CADGeometrySummary(
                 source_format=source_format,
                 source_sha256=_sha256_file(source),
@@ -227,6 +221,18 @@ def _stable_topology_id(dimension: int, box: tuple[float, ...], measure: float, 
         separators=(",", ":"),
     ).encode("utf-8")
     return f"topology-{dimension}d-{hashlib.sha256(payload).hexdigest()[:16]}-{index:04d}"
+
+
+def _topology_digest(topology: list[CADTopologyEntity]) -> str:
+    """为拓扑实体及其父子关系生成稳定摘要。"""
+
+    return hashlib.sha256(
+        json.dumps(
+            [entity.model_dump(mode="json") for entity in topology],
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:

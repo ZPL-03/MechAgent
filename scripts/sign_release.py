@@ -26,14 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         raise FileNotFoundError(args.key)
     if args.key is not None and args.certificate_identity:
         raise ValueError("--key 与 keyless 证书身份参数不能同时使用。")
-    if args.key is None and not args.certificate_identity and not args.bundle:
-        raise ValueError(
-            "密钥模式需要 --key；keyless 模式需要 --certificate-identity 和 --bundle。"
-        )
     if args.key is not None and not args.signature:
         raise ValueError("密钥模式必须提供 --signature。")
-    if args.key is None and not args.bundle:
-        raise ValueError("keyless 模式必须提供 --bundle。")
+    if args.key is None and (not args.bundle or not args.certificate_identity):
+        raise ValueError("keyless 模式必须同时提供 --certificate-identity 和 --bundle。")
     document = json.loads(args.manifest.read_text(encoding="utf-8"))
     provenance = document.get("provenance", {}).get("source", {})
     if provenance.get("gitDirty") is not False:

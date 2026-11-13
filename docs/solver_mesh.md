@@ -100,4 +100,4 @@ A = b h
 
 位移参考为 `pL/E=0.000476190476 mm`，应力参考为 1 MPa。检查要求体积 10000 mm³、正节点/单元数、求解器 `.sta` 明确成功、ODB 解锁且位移与应力相对误差均不大于 1%。CAE `job.status` 与求解器完成来源分别记录，不能只依据启动器退出码判定成功。
 
-结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是双后端工程验收。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`；真实对比还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和两个后端的运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一单元质心字段只表示明确的单元连接/坐标聚合，统一语义字段才能作为跨后端物理量门禁。商业工具的安装与许可由使用者维护。
+结果保存为运行目录中的 `result.json`，并保留 INP、ODB 与日志。这是独立环境和工具证据，不是双后端工程验收。两个后端的案例结果均保留 `case_digest`、单位、坐标系、原始字段、逐步 `steps` 与逐帧场；比较器拒绝案例指纹不一致或缺失的结果。`mechagent.core.compare.compare_backend_results()` 与 `scripts/compare_backends.py` 支持 `requested_fields`、原始 `fields`、统一单元质心 `mapped_fields` 和统一语义 `comparison_fields`；真实对比还必须保存同一案例摘要、单位、边界、网格、单元、求解控制和两个后端的运行证据。原始场在位置或离散方式不一致时标记为 `unverified`，统一单元质心字段只表示明确的单元连接/坐标聚合，统一语义字段才能作为跨后端物理量门禁。Abaqus 适配器可通过 `solver.abaqus.license_queue_path` 使用共享 SQLite 租约队列，在同一可用文件系统上的多个 Python 进程之间限制许可证槽位；该队列不替代 FLEXnet 或集群许可证服务。商业工具的安装与许可由使用者维护。

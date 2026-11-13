@@ -17,6 +17,8 @@ solver:
     timeout: 3600
     max_concurrent: 1
     license_probe: null
+    license_queue_path: null
+    license_lease_seconds: 900
 
 mesher:
   default: calculix-inp
@@ -46,6 +48,8 @@ studio:
   artifact_backend: filesystem
   artifact_s3_bucket: ""
   artifact_s3_prefix: mechagent
+  artifact_s3_endpoint_url: ""
+  artifact_s3_region: ""
   max_workers: 2
   max_queued: 32
   max_active_jobs_per_project: 8

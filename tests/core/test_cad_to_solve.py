@@ -150,6 +150,25 @@ def test_cad_solid_direct_mesh_preserves_region_node_sets(tmp_path: Path) -> Non
     assert "*NSET, NSET=END_FACE" in mesh_text
 
 
+def test_cad_mesh_rejects_topology_digest_drift(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    cad_geometry = dict(params.metadata["cad_geometry"])
+    cad_geometry["topology_digest"] = "0" * 64
+    bad_params = params.model_copy(
+        update={"metadata": {**params.metadata, "cad_geometry": cad_geometry}}
+    )
+    output = MeshAgent(config, tmp_path / "mesh-drift").generate_with_trace(bad_params)
+
+    assert output.mesh_result.success is False
+    assert "拓扑摘要" in (output.mesh_result.error_message or "")
+
+
 @pytest.mark.real_solver
 def test_cad_to_solve_closed_loop(tmp_path: Path) -> None:
     step = tmp_path / "beam.step"

@@ -19,6 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--bucket", default="")
     parser.add_argument("--prefix", default="mechagent")
+    parser.add_argument("--endpoint-url", default="")
+    parser.add_argument("--region", default="")
     parser.add_argument("--apply", action="store_true", help="确认删除候选对象")
     args = parser.parse_args(argv)
     if args.older_than_days <= 0:
@@ -30,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
             root=args.artifact_root or args.database.resolve().parent / "objects",
             bucket=args.bucket,
             prefix=args.prefix,
+            endpoint_url=args.endpoint_url,
+            region_name=args.region,
         ),
     )
     cutoff = time.time() - args.older_than_days * 86400.0

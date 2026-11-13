@@ -18,7 +18,7 @@ import gmsh
 from mechagent.core.mesher import AbstractMesher, MeshResult
 from mechagent.core.models import GeometryType, ModelParams
 
-from .gmsh_cad import _topology_entities
+from .gmsh_cad import _topology_digest, _topology_entities
 
 
 class GmshCADInpMesher(AbstractMesher):
@@ -77,6 +77,23 @@ class GmshCADInpMesher(AbstractMesher):
                     error_message="Gmsh 未生成可用的 C3D4 四面体网格。",
                 )
             topology = _topology_entities(volumes, faces, gmsh.model.getEntities(1))
+            expected_topology_digest = cad_geometry.get("topology_digest")
+            actual_topology_digest = _topology_digest(topology)
+            if (
+                isinstance(expected_topology_digest, str)
+                and expected_topology_digest
+                and expected_topology_digest != actual_topology_digest
+            ):
+                return MeshResult(
+                    success=False,
+                    error_message=(
+                        "CAD 拓扑摘要与网格导入结果不一致，拒绝使用可能错位的区域映射。"
+                    ),
+                    metadata={
+                        "expected_topology_digest": expected_topology_digest,
+                        "actual_topology_digest": actual_topology_digest,
+                    },
+                )
             topology_by_id = {item.stable_id: item for item in topology}
             region_sets = _region_node_sets(cad_geometry, topology_by_id)
             required = _required_region_names(model_params)
@@ -108,7 +125,12 @@ class GmshCADInpMesher(AbstractMesher):
                     "direct_cad": True,
                     "source_path": str(source),
                     "source_sha256": expected_hash or _sha256_file(source),
-                    "topology_digest": cad_geometry.get("topology_digest", ""),
+                    "topology_digest": actual_topology_digest,
+                    "region_candidates": [
+                        item
+                        for item in cad_geometry.get("region_candidates", [])
+                        if isinstance(item, dict)
+                    ],
                     "region_node_sets": {
                         name: sorted(set(values)) for name, values in region_sets.items()
                     },

@@ -146,5 +146,7 @@ class SolverAgent:
                 timeout=abaqus.timeout,
                 max_concurrent=abaqus.max_concurrent,
                 license_probe=abaqus.license_probe,
+                license_queue_path=abaqus.license_queue_path,
+                license_lease_seconds=abaqus.license_lease_seconds,
             )
         return SolverConfig(work_dir=self.work_dir)

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import threading
 from collections.abc import Iterator
@@ -24,6 +25,7 @@ from mechagent.core.executor import (
     JobStatus,
     LocalCommandExecutor,
 )
+from mechagent.core.license_queue import FileLicenseQueue, LicenseQueueError
 from mechagent.core.models import AnalysisType, GeometryType, ModelParams, SimulationCase
 from mechagent.core.paths import safe_file_stem
 from mechagent.core.results import attach_case_result_fields, attach_mapped_result_fields
@@ -34,21 +36,29 @@ from .calculix import _beam_static_inp, _plate_static_inp, _solid_static_inp
 
 @dataclass(frozen=True)
 class AbaqusExecutionPolicy:
-    """Abaqus 本地许可证探针和进程内并发配额。
+    """Abaqus 许可证探针、本地并发配额和可选跨进程租约队列。
 
     ``license_probe`` 是可选的只读命令模板，例如
     ``("abaqus", "licensing", "ru")``。命令返回非零状态时作业拒绝提交。
-    ``max_concurrent`` 只约束同一 Python 进程；跨进程或集群许可证由外部队列负责。
+    ``queue_path`` 指向共享 SQLite 数据库时，多个 Python 进程会共同遵守
+    ``max_concurrent``；未配置时只约束当前进程。该队列不替代集群许可证服务。
     """
 
     max_concurrent: int = 1
     license_probe: tuple[str, ...] | None = None
+    queue_path: Path | None = None
+    lease_seconds: float = 900.0
+    poll_interval_seconds: float = 0.25
 
     def __post_init__(self) -> None:
         if self.max_concurrent < 1:
             raise ValueError("Abaqus max_concurrent 必须为正数。")
         if self.license_probe is not None and any(not item.strip() for item in self.license_probe):
             raise ValueError("Abaqus license_probe 不能包含空命令片段。")
+        if self.lease_seconds <= 0 or not math.isfinite(self.lease_seconds):
+            raise ValueError("Abaqus license lease_seconds 必须为正的有限数值。")
+        if self.poll_interval_seconds <= 0 or not math.isfinite(self.poll_interval_seconds):
+            raise ValueError("Abaqus license poll_interval_seconds 必须为正的有限数值。")
 
 
 _POLICY_LOCK = threading.Lock()
@@ -96,6 +106,8 @@ class AbaqusAdapter(AbstractSolver):
         self.policy = policy or AbaqusExecutionPolicy(
             max_concurrent=config.max_concurrent,
             license_probe=config.license_probe,
+            queue_path=config.license_queue_path,
+            lease_seconds=config.license_lease_seconds,
         )
 
     def generate_input(self, model_params: ModelParams) -> Path:
@@ -293,7 +305,22 @@ class AbaqusAdapter(AbstractSolver):
         semaphore = _policy_semaphore(launcher, self.policy)
         if not semaphore.acquire(timeout=self.config.timeout):
             raise SolverError("Abaqus 本地执行队列已满，等待许可证槽位超时。")
+        lease: Any = None
+        lease_context: Any = None
         try:
+            if self.policy.queue_path is not None:
+                try:
+                    queue = FileLicenseQueue(
+                        self.policy.queue_path,
+                        launcher,
+                        self.policy.max_concurrent,
+                        lease_seconds=self.policy.lease_seconds,
+                        poll_interval_seconds=self.policy.poll_interval_seconds,
+                    )
+                    lease_context = queue.acquire(self.config.timeout)
+                    lease = lease_context.__enter__()
+                except LicenseQueueError as exc:
+                    raise SolverError(str(exc)) from exc
             if self.policy.license_probe is not None:
                 probe_command = [
                     launcher if item == "{launcher}" else item for item in self.policy.license_probe
@@ -313,6 +340,8 @@ class AbaqusAdapter(AbstractSolver):
                     raise SolverError(f"Abaqus 许可证探针失败: {detail or '未知错误'}")
             yield
         finally:
+            if lease is not None:
+                lease_context.__exit__(None, None, None)
             semaphore.release()
 
 
