@@ -91,7 +91,14 @@ from mechagent.core.rules import (
     ensure_parameter_ranges,
     ensure_static_execution_contract,
 )
-from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
+from mechagent.core.solver import (
+    AbstractSolver,
+    SolverArtifact,
+    SolverConfig,
+    SolverResult,
+    collect_solver_artifacts,
+    enrich_solver_result,
+)
 
 __all__ = [
     "AbstractCADKernel",
@@ -146,9 +153,12 @@ __all__ = [
     "attach_mapped_result_fields",
     "compute_mesh_digest",
     "RuleViolation",
+    "SolverArtifact",
     "SolverConfig",
     "SolverError",
     "SolverResult",
+    "collect_solver_artifacts",
+    "enrich_solver_result",
     "create_cad_kernel",
     "create_executor",
     "create_mesher",

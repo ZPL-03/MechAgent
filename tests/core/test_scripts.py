@@ -466,6 +466,14 @@ def test_backend_comparison_script_writes_verifiable_manifest(
     }
 
 
+def test_backend_comparison_paths_are_portable() -> None:
+    root = Path("C:/evidence")
+    assert (
+        run_backend_comparison._portable_path(root, root / "TC-01" / "calculix" / "result.json")
+        == "TC-01/calculix/result.json"
+    )
+
+
 def test_run_benchmarks_script_uses_configured_output_dir(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

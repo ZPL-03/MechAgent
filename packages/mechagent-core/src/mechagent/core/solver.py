@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from abc import ABC, abstractmethod
@@ -67,6 +68,78 @@ class SolverConfig(BaseModel):
         return value
 
 
+class SolverArtifact(BaseModel):
+    """求解输入或输出文件的可迁移完整性记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    size: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def collect_solver_artifacts(root: Path, paths: list[Path]) -> list[SolverArtifact]:
+    """为求解目录内的文件生成相对路径、大小和 SHA-256 记录。
+
+    求解器产物必须位于同一个工作目录内；符号链接和目录外文件不进入
+    结果契约，避免证据引用不可迁移的本机路径。
+    """
+
+    resolved_root = root.resolve()
+    records: list[SolverArtifact] = []
+    seen: set[str] = set()
+    normalized_paths: set[Path] = set()
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.is_absolute() and (root / path).is_file():
+            path = root / path
+        normalized_paths.add(path)
+    for path in sorted(normalized_paths, key=lambda item: str(item)):
+        if path.is_symlink():
+            raise SolverError(f"求解产物不能是符号链接: {path}")
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(resolved_root).as_posix()
+        except ValueError as exc:
+            raise SolverError(f"求解产物超出工作目录: {path}") from exc
+        if relative in seen:
+            continue
+        records.append(
+            SolverArtifact(
+                path=relative,
+                size=resolved.stat().st_size,
+                sha256=_sha256_file(resolved),
+            )
+        )
+        seen.add(relative)
+    return records
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def enrich_solver_result(result: SolverResult, input_file: Path) -> SolverResult:
+    """补齐输入摘要和工作目录内的产物记录。"""
+
+    if result.input_sha256 is not None and result.artifacts:
+        return result
+    return result.model_copy(
+        update={
+            "input_sha256": _sha256_file(input_file) if input_file.is_file() else None,
+            "artifacts": collect_solver_artifacts(
+                input_file.parent, [input_file, *result.output_files]
+            ),
+        }
+    )
+
+
 class SolverResult(BaseModel):
     """求解器执行结果。
 
@@ -76,6 +149,8 @@ class SolverResult(BaseModel):
         output_files: 物理输出文件路径列表。
         summary: 关键标量结果。
         error_message: 失败诊断信息。
+        input_sha256: 求解输入文件的 SHA-256；未生成输入文件时为空。
+        artifacts: 工作目录内输入和输出文件的相对路径、大小和 SHA-256。
 
     Returns:
         SolverResult: 统一求解器结果对象。
@@ -95,6 +170,8 @@ class SolverResult(BaseModel):
     output_files: list[Path] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    artifacts: list["SolverArtifact"] = Field(default_factory=list)
 
     @field_validator("wall_time")
     @classmethod
@@ -211,6 +288,7 @@ class AbstractSolver(ABC):
         start = time.perf_counter()
         input_file = self.generate_input(model_params)
         result = self.solve(input_file)
+        result = enrich_solver_result(result, input_file)
         if not result.success:
             raise SolverError(result.error_message or "求解器返回失败状态。")
         extracted = self.extract_results(result)

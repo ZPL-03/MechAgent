@@ -254,8 +254,8 @@ def _run_case(
         "case_id": case_id,
         "case_digest": case_digest,
         "case": case_payload,
-        "calculix_result": str((left_dir / "result.json").resolve()),
-        "abaqus_result": str((right_dir / "result.json").resolve()),
+        "calculix_result": _portable_path(output_dir, left_dir / "result.json"),
+        "abaqus_result": _portable_path(output_dir, right_dir / "result.json"),
         "comparison": comparison,
         "status": comparison["status"],
     }
@@ -267,6 +267,15 @@ def _combined_status(*statuses: str) -> str:
     if "unverified" in statuses:
         return "unverified"
     return "passed"
+
+
+def _portable_path(root: Path, path: Path) -> str:
+    """返回证据根目录内的 POSIX 相对路径。"""
+
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"比较证据路径超出输出目录: {path}") from exc
 
 
 if __name__ == "__main__":

@@ -32,7 +32,12 @@ from mechagent.core.models import (
 )
 from mechagent.core.paths import safe_file_stem
 from mechagent.core.results import attach_case_result_fields, attach_mapped_result_fields
-from mechagent.core.solver import AbstractSolver, SolverConfig, SolverResult
+from mechagent.core.solver import (
+    AbstractSolver,
+    SolverConfig,
+    SolverResult,
+    enrich_solver_result,
+)
 
 _FRD_FLOAT_PATTERN = re.compile(r"[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[Ee][+-]\d{2,3})?")
 
@@ -149,6 +154,7 @@ class CalculiXAdapter(AbstractSolver):
         input_file = self.config.work_dir / f"{case_id}.inp"
         input_file.write_text(prefix + "".join(sections), encoding="utf-8")
         result = self.solve(input_file)
+        result = enrich_solver_result(result, input_file)
         extracted = self.extract_results(result)
         extracted = attach_case_result_fields(extracted, case)
         extracted = attach_mapped_result_fields(extracted, case)
@@ -262,6 +268,8 @@ class CalculiXAdapter(AbstractSolver):
         result_payload = {
             "success": True,
             "output_files": [str(path) for path in result.output_files],
+            "input_sha256": result.input_sha256,
+            "artifacts": [item.model_dump(mode="json") for item in result.artifacts],
             **parsed,
             **result.summary,
         }

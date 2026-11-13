@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from mechagent.core.exceptions import SolverError
 from mechagent.core.mesher import MeshConfig
 from mechagent.core.models import (
     BCSpec,
@@ -26,7 +28,7 @@ from mechagent.core.models import (
     SimulationCase,
     UnitSystem,
 )
-from mechagent.core.solver import SolverResult
+from mechagent.core.solver import SolverResult, enrich_solver_result
 from mechagent.core.validation import tc01_model_params
 from mechagent.orchestrator.llm_advisor import AgentLLMTrace
 from mechagent.orchestrator.models import (
@@ -86,6 +88,49 @@ def test_core_numeric_specs_reject_non_finite_values() -> None:
 
     with pytest.raises(ValidationError, match="wall_time"):
         SolverResult(success=True, wall_time=float("inf"))
+
+
+def test_solver_result_records_relative_artifact_hashes(tmp_path: Path) -> None:
+    input_file = tmp_path / "case.inp"
+    output_file = tmp_path / "case.frd"
+    input_file.write_text("*HEADING\n", encoding="utf-8")
+    output_file.write_bytes(b"result")
+
+    enriched = enrich_solver_result(
+        SolverResult(success=True, wall_time=0.1, output_files=[output_file]), input_file
+    )
+
+    assert enriched.input_sha256 == hashlib.sha256(input_file.read_bytes()).hexdigest()
+    assert [item.path for item in enriched.artifacts] == ["case.frd", "case.inp"]
+    assert all(len(item.sha256) == 64 for item in enriched.artifacts)
+
+
+def test_solver_result_resolves_filename_relative_to_work_directory(tmp_path: Path) -> None:
+    input_file = tmp_path / "case.inp"
+    output_file = tmp_path / "case.frd"
+    input_file.write_text("*HEADING\n", encoding="utf-8")
+    output_file.write_bytes(b"result")
+
+    enriched = enrich_solver_result(
+        SolverResult(success=True, wall_time=0.1, output_files=[Path(output_file.name)]),
+        input_file,
+    )
+
+    assert [item.path for item in enriched.artifacts] == ["case.frd", "case.inp"]
+
+
+def test_solver_result_rejects_artifact_outside_work_directory(tmp_path: Path) -> None:
+    input_file = tmp_path / "case.inp"
+    outside = tmp_path.parent / "outside.frd"
+    input_file.write_text("*HEADING\n", encoding="utf-8")
+    outside.write_text("result", encoding="utf-8")
+    try:
+        with pytest.raises(SolverError, match="超出工作目录"):
+            enrich_solver_result(
+                SolverResult(success=True, wall_time=0.1, output_files=[outside]), input_file
+            )
+    finally:
+        outside.unlink(missing_ok=True)
 
 
 def test_line_load_type_is_valid() -> None:
