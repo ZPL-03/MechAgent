@@ -29,7 +29,7 @@ MeshAgent 要求成功网格结果提供存在的 `mesh_file`，并在结果元�
 
 适配器在 `.inp` 生成前校验 `ModelParams` 的材料类型、几何非线性开关、单元类型、边界条件、载荷区域和载荷方向。不属于上述验证物理子域的输入以 `SolverError` 结束，不生成与请求不一致的求解文件。CalculiX 的 `ccx` 进程调用经作业执行器抽象 `AbstractJobExecutor` 执行：适配器构造 `JobSpec` 并由执行器运行，默认使用同步本地执行器 `LocalCommandExecutor`，可注入远程/HPC/容器执行器在不改求解逻辑的前提下切换执行后端（见 [架构与数据契约](architecture.md)）。`solver.calculix.num_cpus` 通过 `OMP_NUM_THREADS` 传入 CalculiX 子进程；`solver.calculix.timeout` 传入子进程超时控制。默认 `num_cpus=1` 用于小型标准验证和自然语言验收案例的确定性执行；工程任务可在配置中提高该值。标准验证和生产求解共用这两个配置。网格文件和求解输入文件使用 core 层统一的文件名规范化函数，`ModelParams.case_id` 不会作为路径片段写出到工作目录外。
 
-`CalculiXAdapter.run_case()` 支持 `SimulationCase` 的多个线性静力 `LoadStepSpec`。每个步骤的载荷比例、增量和输出间隔进入同一个输入文件，结果解析保留 `field_history`，并由统一结果选择器生成 `requested_fields` 与 `step_results`。旧 `run(ModelParams)` 入口仍保持单步兼容语义。
+`CalculiXAdapter.run_case()` 支持 `SimulationCase` 的多个线性静力 `LoadStepSpec`。每个步骤的载荷比例、增量和输出间隔进入同一个输入文件。FRD 解析按分析步编号和字段类别内的输出顺序合并 `field_history`，字段缺失会保留在对应帧而不会借用相邻分析步的值；统一结果选择器据此生成 `requested_fields`、逐步 `step_results` 和兼容别名 `result_steps`，必需字段缺失时作业失败。旧 `run(ModelParams)` 入口仍保持单步兼容语义。
 
 `.frd` 后处理请求应力、应变、体积、反力和能量输出；CalculiX 的 `TOSTRAIN` 记录归一为 `strain`，实体输入网格按节点坐标重建原始 `volume`，`ENER` 同时保留原始 `energy` 字段和单位为 `N/mm^2` 的 `strain_energy_density` 别名。实体体积重建只覆盖 C3D8/C3D4 网格；梁、壳和无法识别的单元不会生成原始体积字段。结果解析同时保留网格节点、单元连接和单元质心；统一结果层可根据梁截面尺寸和单元轴向长度生成带明确限制的 `mapped_fields.volume`。选定字段、单元映射字段和统一语义字段保留位置、单位、来源、推导和映射方式；`ResultFieldSpec.unit` 非空时必须与后端单位完全一致，不能用请求标签掩盖单位冲突。后端位置不同的原始场只能通过统一单元质心字段或统一语义摘要比较。
 

@@ -22,7 +22,11 @@ from mechagent.core.adapters import (
     CalculiXAdapter,
     CalculiXInpMesher,
 )
-from mechagent.core.adapters.calculix import _parse_frd_data_line, _result_element_volumes
+from mechagent.core.adapters.calculix import (
+    _merge_frd_history,
+    _parse_frd_data_line,
+    _result_element_volumes,
+)
 from mechagent.core.exceptions import SolverError
 from mechagent.core.executor import (
     AbstractJobExecutor,
@@ -545,6 +549,34 @@ def test_calculix_frd_data_line_parser_accepts_common_numeric_formats() -> None:
     )
     assert _parse_frd_data_line("        12 0.0 -4 5.") == (12, [12.0, 0.0, -4.0, 5.0])
     assert _parse_frd_data_line(" no node") is None
+
+
+def test_calculix_frd_history_aligns_sparse_fields_by_analysis_step() -> None:
+    history = _merge_frd_history(
+        displacement_frames=[
+            {1: (1.0, 0.0, 0.0)},
+            {1: (2.0, 0.0, 0.0)},
+        ],
+        displacement_steps=[1, 2],
+        stress_frames=[{1: (20.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+        stress_steps=[2],
+        strain_frames=[],
+        strain_steps=[],
+        volume_frames=[],
+        volume_steps=[],
+        reaction_frames=[],
+        reaction_steps=[],
+        energy_frames=[],
+        energy_steps=[],
+    )
+
+    assert [(item["step_index"], item["frame_index"]) for item in history] == [
+        (1, 1),
+        (2, 1),
+    ]
+    assert set(history[0]) == {"step_index", "frame_index", "displacement"}
+    assert set(history[1]) == {"step_index", "frame_index", "displacement", "stress"}
+    assert history[1]["stress"]["values"] == {"1": [20.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
 
 
 def test_calculix_reconstructs_beam_element_volume_from_section(tmp_path: Path) -> None:

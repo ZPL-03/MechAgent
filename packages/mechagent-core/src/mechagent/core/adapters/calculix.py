@@ -1607,84 +1607,20 @@ def _parse_frd(
         result["nodes"] = {
             str(node): list(point) for node, point in sorted(node_coordinates.items())
         }
-    history: list[dict[str, Any]] = []
-    for index in range(
-        max(
-            len(displacement_frames),
-            len(stress_frames),
-            len(strain_frames),
-            len(volume_frames),
-            len(reaction_frames),
-            len(energy_frames),
-        )
-    ):
-        step_numbers = (
-            displacement_steps,
-            stress_steps,
-            strain_steps,
-            volume_steps,
-            reaction_steps,
-            energy_steps,
-        )
-        frame_step = next(
-            (steps[index] for steps in step_numbers if index < len(steps)),
-            index + 1,
-        )
-        frame: dict[str, Any] = {"step_index": frame_step}
-        if index < len(displacement_frames):
-            frame["displacement"] = {
-                "location": "node",
-                "unit": "mm",
-                "components": ["ux", "uy", "uz"],
-                "values": {
-                    str(node): list(values) for node, values in displacement_frames[index].items()
-                },
-            }
-        if index < len(stress_frames):
-            frame["stress"] = {
-                "location": "node",
-                "unit": "MPa",
-                "components": ["sxx", "syy", "szz", "sxy", "syz", "sxz"],
-                "values": {
-                    str(node): list(values) for node, values in stress_frames[index].items()
-                },
-            }
-        if index < len(strain_frames):
-            frame["strain"] = {
-                "location": "node",
-                "unit": "",
-                "values": {
-                    str(node): list(values) for node, values in strain_frames[index].items()
-                },
-            }
-        if index < len(volume_frames):
-            frame["volume"] = {
-                "location": "element",
-                "unit": "mm^3",
-                "values": {str(node): value for node, value in volume_frames[index].items()},
-            }
-        if index < len(reaction_frames):
-            frame["reaction_force"] = {
-                "location": "node",
-                "unit": "N",
-                "components": ["rf1", "rf2", "rf3"],
-                "values": {
-                    str(node): list(values) for node, values in reaction_frames[index].items()
-                },
-            }
-        if index < len(energy_frames):
-            frame["energy"] = {
-                "location": "element",
-                "unit": "N*mm",
-                "components": ["energy"],
-                "values": {str(node): value for node, value in energy_frames[index].items()},
-            }
-            frame["strain_energy_density"] = {
-                "location": "element",
-                "unit": "N/mm^2",
-                "values": {str(node): value for node, value in energy_frames[index].items()},
-            }
-        history.append(frame)
+    history = _merge_frd_history(
+        displacement_frames,
+        displacement_steps,
+        stress_frames,
+        stress_steps,
+        strain_frames,
+        strain_steps,
+        volume_frames,
+        volume_steps,
+        reaction_frames,
+        reaction_steps,
+        energy_frames,
+        energy_steps,
+    )
     if history:
         result["field_history"] = history
         result["steps"] = _steps_from_history(history)
@@ -1702,7 +1638,11 @@ def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped.setdefault(step_index, []).append(frame)
     steps: list[dict[str, Any]] = []
     for step_index, frames in sorted(grouped.items()):
-        fields = {key: value for key, value in frames[-1].items() if key != "step_index"}
+        fields = {
+            key: value
+            for key, value in frames[-1].items()
+            if key not in {"step_index", "frame_index"}
+        }
         steps.append(
             {
                 "name": f"step-{step_index}",
@@ -1712,7 +1652,9 @@ def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     {
                         "frame_index": index,
                         "fields": {
-                            key: value for key, value in frame.items() if key != "step_index"
+                            key: value
+                            for key, value in frame.items()
+                            if key not in {"step_index", "frame_index"}
                         },
                     }
                     for index, frame in enumerate(frames)
@@ -1745,18 +1687,148 @@ def _parse_frd_coordinates(lines: list[str]) -> dict[int, tuple[float, float, fl
 
 
 def _parse_frd_step_number(line: str, default: int) -> int:
-    """读取 FRD ``1PSTEP`` 记录中的分析步编号。"""
+    """读取 FRD ``1PSTEP`` 记录中的分析步编号。
+
+    CalculiX 的 FRD 文件把每一种输出量写成独立的 ``1PSTEP`` 区块。
+    第一个数是输出区块序号，最后一个数是分析步编号；输出区块序号
+    在同一分析步内随字段类型递增，不能直接作为物理结果帧编号。
+    ``_merge_frd_history`` 按分析步及字段类别内的出现顺序建立帧键。
+    """
 
     parts = line.split()
     if len(parts) < 2:
         return default
     try:
-        # CalculiX uses the first numeric value for the output sequence and
-        # the last value for the analysis step number.
-        step = int(parts[-1])
+        step_index = int(parts[-1])
     except ValueError:
         return default
-    return step if step >= 1 else default
+    if step_index < 1:
+        return default
+    return step_index
+
+
+def _merge_frd_history(
+    displacement_frames: list[dict[int, tuple[float, float, float]]],
+    displacement_steps: list[int],
+    stress_frames: list[dict[int, tuple[float, float, float, float, float, float]]],
+    stress_steps: list[int],
+    strain_frames: list[dict[int, tuple[float, ...]]],
+    strain_steps: list[int],
+    volume_frames: list[dict[int, float]],
+    volume_steps: list[int],
+    reaction_frames: list[dict[int, tuple[float, float, float]]],
+    reaction_steps: list[int],
+    energy_frames: list[dict[int, float]],
+    energy_steps: list[int],
+) -> list[dict[str, Any]]:
+    """按显式 FRD 记录键合并字段，保留缺失字段和多输出帧。
+
+    字段数组不能按位置拼接：某个字段缺失时，后续数组位置仍然有效，
+    但它们已经不再对应同一个分析步。以 ``(step_index, frame_index)``
+    为键合并可避免把稀疏输出误归入相邻分析步。
+    """
+
+    grouped: dict[tuple[int, int], dict[str, Any]] = {}
+
+    def add(
+        name: str,
+        frames: list[Any],
+        keys: list[int],
+        field: Any,
+    ) -> None:
+        occurrences: dict[int, int] = {}
+        for values, step_index in zip(frames, keys, strict=True):
+            occurrence = occurrences.get(step_index, 0) + 1
+            occurrences[step_index] = occurrence
+            grouped.setdefault((step_index, occurrence), {})[name] = field(values)
+
+    add(
+        "displacement",
+        displacement_frames,
+        displacement_steps,
+        lambda values: {
+            "location": "node",
+            "unit": "mm",
+            "components": ["ux", "uy", "uz"],
+            "values": {str(node): list(value) for node, value in values.items()},
+        },
+    )
+    add(
+        "stress",
+        stress_frames,
+        stress_steps,
+        lambda values: {
+            "location": "node",
+            "unit": "MPa",
+            "components": ["sxx", "syy", "szz", "sxy", "syz", "sxz"],
+            "values": {str(node): list(value) for node, value in values.items()},
+        },
+    )
+    add(
+        "strain",
+        strain_frames,
+        strain_steps,
+        lambda values: {
+            "location": "node",
+            "unit": "",
+            "values": {str(node): list(value) for node, value in values.items()},
+        },
+    )
+    add(
+        "volume",
+        volume_frames,
+        volume_steps,
+        lambda values: {
+            "location": "element",
+            "unit": "mm^3",
+            "values": {str(node): value for node, value in values.items()},
+        },
+    )
+    add(
+        "reaction_force",
+        reaction_frames,
+        reaction_steps,
+        lambda values: {
+            "location": "node",
+            "unit": "N",
+            "components": ["rf1", "rf2", "rf3"],
+            "values": {str(node): list(value) for node, value in values.items()},
+        },
+    )
+
+    def energy_fields(values: dict[int, float]) -> dict[str, Any]:
+        energy_values = {str(node): value for node, value in values.items()}
+        payload = {
+            "location": "element",
+            "unit": "N*mm",
+            "components": ["energy"],
+            "values": energy_values,
+        }
+        return {
+            "energy": payload,
+            "strain_energy_density": {
+                "location": "element",
+                "unit": "N/mm^2",
+                "values": dict(energy_values),
+            },
+        }
+
+    occurrences: dict[int, int] = {}
+    for values, step_index in zip(energy_frames, energy_steps, strict=True):
+        occurrence = occurrences.get(step_index, 0) + 1
+        occurrences[step_index] = occurrence
+        grouped.setdefault((step_index, occurrence), {}).update(energy_fields(values))
+
+    history: list[dict[str, Any]] = []
+    for (step_index, frame_index), fields in sorted(grouped.items()):
+        history.append(
+            {
+                "step_index": step_index,
+                "frame_index": frame_index,
+                **fields,
+            }
+        )
+    return history
 
 
 def _max_abs_component_on_axis(
