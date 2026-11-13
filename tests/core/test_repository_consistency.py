@@ -152,6 +152,7 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
     assert "sigstore/cosign-installer" in release_workflow
     assert "id-token: write" in release_workflow
     assert "--certificate-identity" in release_workflow
+    assert "scripts/verify_release.py" in release_workflow
     for forbidden in (
         "D:/anaconda3",
         "self-hosted",
@@ -180,6 +181,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "drill_studio_recovery.py",
         "prune_artifacts.py",
         "check_wheel_install.py",
+        "verify_release.py",
         "clean_artifacts.py",
     ):
         assert f"scripts/{script}" in validation

@@ -61,6 +61,14 @@ jobs:
             --bundle dist/mechagent-release-manifest.sigstore.json `
             --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" `
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      - name: Verify signed release manifest
+        shell: pwsh
+        run: |
+          python scripts/verify_release.py `
+            --manifest dist/mechagent-release-manifest.json `
+            --bundle dist/mechagent-release-manifest.sigstore.json `
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" `
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - name: Upload signed release
         uses: softprops/action-gh-release@v2
         with:

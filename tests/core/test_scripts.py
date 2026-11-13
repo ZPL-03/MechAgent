@@ -19,6 +19,7 @@ from scripts import (
     run_llm_smoke,
     run_natural_language_cases,
     sign_release,
+    verify_release,
 )
 
 from mechagent.config import MechAgentConfig, OutputSettings
@@ -54,6 +55,83 @@ def test_sign_release_requires_complete_keyless_identity(tmp_path: Path) -> None
                 str(tmp_path / "bundle.json"),
             ]
         )
+
+
+def test_verify_release_checks_artifact_digest_and_rejects_tampering(tmp_path: Path) -> None:
+    artifact = tmp_path / "package.whl"
+    artifact.write_bytes(b"package")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "mechagent.release-manifest.v1",
+                "version": "1.2.3",
+                "provenance": {"source": {"gitDirty": False}},
+                "artifacts": [
+                    {
+                        "path": artifact.name,
+                        "size": artifact.stat().st_size,
+                        "sha256": verify_release._sha256(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert verify_release.load_manifest(manifest)["version"] == "1.2.3"
+    artifact.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="摘要不匹配"):
+        verify_release.load_manifest(manifest)
+
+
+def test_verify_release_invokes_keyless_cosign_with_identity(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    artifact = tmp_path / "package.whl"
+    artifact.write_bytes(b"package")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "mechagent.release-manifest.v1",
+                "version": "1.2.3",
+                "provenance": {"source": {"gitDirty": False}},
+                "artifacts": [
+                    {
+                        "path": artifact.name,
+                        "size": artifact.stat().st_size,
+                        "sha256": verify_release._sha256(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bundle = tmp_path / "bundle.json"
+    bundle.write_text("{}", encoding="utf-8")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(verify_release.shutil, "which", lambda _: "cosign.exe")
+    monkeypatch.setattr(
+        verify_release.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command),
+    )
+
+    verify_release.main(
+        [
+            "--manifest",
+            str(manifest),
+            "--bundle",
+            str(bundle),
+            "--certificate-identity",
+            "https://github.com/example/repo/.github/workflows/release.yml@refs/tags/v1.2.3",
+        ]
+    )
+
+    assert len(commands) == 1
+    assert commands[0][1:3] == ["verify-blob", "--bundle"]
+    assert "--certificate-identity" in commands[0]
 
 
 def test_abaqus_multistep_summary_requires_all_steps_and_fields() -> None:
