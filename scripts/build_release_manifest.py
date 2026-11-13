@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,9 +109,12 @@ def _media_type(path: Path) -> str:
 
 
 def _git_commit(root: Path) -> str:
+    executable = shutil.which("git")
+    if executable is None:
+        return "unknown"
     try:
         completed = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            [executable, "-C", str(root), "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
@@ -121,9 +125,12 @@ def _git_commit(root: Path) -> str:
 
 
 def _git_dirty(root: Path) -> bool | str:
+    executable = shutil.which("git")
+    if executable is None:
+        return "unknown"
     try:
         completed = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            [executable, "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
             check=True,
             capture_output=True,
             text=True,

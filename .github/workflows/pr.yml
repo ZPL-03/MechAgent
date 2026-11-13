@@ -28,6 +28,7 @@ jobs:
           npm --prefix apps/mechagent-studio ci --no-audit --no-fund
           npm --prefix apps/mechagent-studio test
           npm --prefix apps/mechagent-studio run build
+          git diff --exit-code -- packages/mechagent/src/mechagent/ui/static
       - name: Audit frontend production dependencies
         run: npm --prefix apps/mechagent-studio audit --omit=dev --audit-level=high
       - name: Quality checks

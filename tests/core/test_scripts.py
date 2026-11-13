@@ -676,6 +676,34 @@ def test_build_release_manifest_rejects_missing_artifacts(tmp_path: Path) -> Non
         build_release_manifest.build_document(tmp_path)
 
 
+def test_build_release_manifest_source_state_detects_untracked_files(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git 不在测试环境 PATH 中。")
+    subprocess.run([git, "init", "--quiet"], cwd=tmp_path, check=True)
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("tracked", encoding="utf-8")
+    subprocess.run([git, "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            git,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "init",
+            "--quiet",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    assert build_release_manifest._git_dirty(tmp_path) is False
+    (tmp_path / "untracked.txt").write_text("untracked", encoding="utf-8")
+    assert build_release_manifest._git_dirty(tmp_path) is True
+
+
 def test_check_wheel_install_import_check_validates_type_markers() -> None:
     assert "app_typed.exists()" in check_wheel_install._IMPORT_CHECK_CODE
     assert "core_typed.exists()" in check_wheel_install._IMPORT_CHECK_CODE

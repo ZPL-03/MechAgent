@@ -34,6 +34,7 @@ jobs:
           python -m pip install -e "packages/mechagent[dev,docs]"
           npm --prefix apps/mechagent-studio ci --no-audit --no-fund
           npm --prefix apps/mechagent-studio run build
+          git diff --exit-code -- packages/mechagent/src/mechagent/ui/static
       - name: Run release quality gates
         shell: pwsh
         run: |
