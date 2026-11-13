@@ -20,6 +20,8 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks-YYYYMMDD
 
 解析参考公式见 [求解器、网格与后处理](solver_mesh.md)。
 
+标准基准结果清单同时记录 `equilibrium`。该字段校核当前载荷契约能够计算的外加载荷合力与支撑反力合力；清单状态只有在主结果参考误差和反力平衡均为 `passed` 时才为 `passed`。缺少反力或区域证据时保留 `unverified`，不以求解进程成功代替平衡校核。
+
 本机标准算例的当前运行结果保存在 `mechagent_output/benchmarks-current/benchmark_results.json`，求解中间产物位于
 `mechagent_output/benchmarks-current/runs/`，对应清单为 `mechagent_output/benchmarks-current/manifest.json`。Abaqus
 多步、跨工具比较和 CAD 拓扑证据分别使用各自目录下的 `manifest.json`。这些清单都使用相对路径、文件大小

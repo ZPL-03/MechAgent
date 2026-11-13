@@ -10,6 +10,7 @@ from pytest import MonkeyPatch
 from mechagent import MechAgent
 from mechagent.core import validation as validation_module
 from mechagent.core.adapters.calculix import CalculiXAdapter
+from mechagent.core.compare import ComparisonTolerance, EquilibriumReport
 from mechagent.core.models import LoadStepSpec, SimulationCase
 from mechagent.core.solver import SolverConfig
 from mechagent.core.validation import (
@@ -225,6 +226,27 @@ def test_solid_benchmark_functions_prefer_axial_displacement_alias(
 
     assert run_tc03(solver_path="unit").predicted == pytest.approx(0.01)
     assert run_tc05(solver_path="unit").predicted == pytest.approx(0.01)
+
+
+def test_benchmark_result_exposes_equilibrium_status() -> None:
+    result = BenchmarkResult(
+        case_id="TC-01",
+        description="unit",
+        predicted=1.0,
+        reference=1.0,
+        relative_error=0.0,
+        tolerance=0.01,
+        quantity="tip_deflection",
+        unit="mm",
+        solver="calculix",
+        equilibrium=EquilibriumReport(
+            status="passed",
+            tolerance=ComparisonTolerance(relative=0.01, absolute=0.005),
+        ),
+    )
+
+    assert result.passed is True
+    assert result.equilibrium_passed is True
 
 
 def test_cantilever_tip_deflection_matches_euler_bernoulli_value() -> None:

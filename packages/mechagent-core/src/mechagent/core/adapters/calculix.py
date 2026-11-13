@@ -233,9 +233,16 @@ class CalculiXAdapter(AbstractSolver):
         if not result.success:
             raise SolverError(result.error_message or "CalculiX 求解失败。")
         frd_file = _first_file_with_suffix(result.output_files, ".frd")
+        input_file = _first_file_with_suffix(result.output_files, ".inp")
         mesh_nodes = _result_node_coordinates(result.output_files)
         elements = _result_element_connectivity(result.output_files)
         parsed = _parse_frd(frd_file, mesh_nodes) if frd_file else {}
+        if input_file is not None:
+            _normalize_reaction_field(
+                parsed,
+                _parse_calculix_cload_steps(input_file),
+                mesh_nodes,
+            )
         element_volumes = _result_element_volumes(result.output_files, mesh_nodes)
         if element_volumes:
             volume_field = {
@@ -1630,6 +1637,213 @@ def _parse_frd(
         result["field_history"] = history
         result["steps"] = _steps_from_history(history)
     return result
+
+
+def _parse_calculix_cload_steps(
+    path: Path,
+) -> list[dict[str, tuple[float, float, float]]]:
+    """读取输入文件每个分析步中的节点集中力。
+
+    CalculiX 的 `FORC` 结果同时包含节点外载荷和支撑反力。适配器生成的
+    静力输入把面压力、线载荷和端面载荷离散为 `*CLOAD`，因此可以从同一
+    输入文件恢复外载荷节点分配并在统一结果中分离支撑反力。集合名称、
+    非数值节点标签和超出前三个平移自由度的载荷不参与该转换。
+    """
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+    steps: list[dict[str, tuple[float, float, float]]] = []
+    current: dict[str, list[float]] | None = None
+    active = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        keyword = stripped.upper()
+        if keyword.startswith("*STEP"):
+            if current is not None:
+                steps.append(_freeze_load_vectors(current))
+            current = {}
+            active = False
+            continue
+        if keyword.startswith("*END STEP"):
+            if current is not None:
+                steps.append(_freeze_load_vectors(current))
+                current = None
+            active = False
+            continue
+        if keyword.startswith("*CLOAD"):
+            if current is None:
+                current = {}
+            active = True
+            continue
+        if stripped.startswith("*"):
+            active = False
+            continue
+        if not active:
+            continue
+        parts = [part.strip() for part in stripped.split(",")]
+        if len(parts) < 3:
+            continue
+        try:
+            node = str(int(parts[0]))
+            dof = int(parts[1])
+            value = float(parts[2])
+        except (ValueError, TypeError):
+            continue
+        if dof not in (1, 2, 3):
+            continue
+        if current is None:
+            continue
+        vector = current.setdefault(node, [0.0, 0.0, 0.0])
+        vector[dof - 1] += value
+    if current is not None:
+        steps.append(_freeze_load_vectors(current))
+    return steps
+
+
+def _freeze_load_vectors(
+    values: dict[str, list[float]],
+) -> dict[str, tuple[float, float, float]]:
+    return {node: (vector[0], vector[1], vector[2]) for node, vector in values.items()}
+
+
+def _normalize_reaction_field(
+    result: dict[str, Any],
+    applied_load_steps: list[dict[str, tuple[float, float, float]]],
+    input_nodes: dict[int, tuple[float, float, float]],
+) -> None:
+    """将 CalculiX `FORC` 字段转换为纯支撑反力。
+
+    `applied_load_steps` 为空时不改变结果，保留对外部输入文件和无 `*CLOAD`
+    测试结果的兼容性。
+    """
+
+    if not applied_load_steps:
+        return
+
+    result_nodes: dict[str, tuple[float, float, float]] = {}
+    raw_nodes = result.get("nodes")
+    if isinstance(raw_nodes, dict):
+        for label, point in raw_nodes.items():
+            if not isinstance(point, (list, tuple)) or len(point) < 3:
+                continue
+            try:
+                coordinates = (float(point[0]), float(point[1]), float(point[2]))
+            except (TypeError, ValueError):
+                continue
+            if all(isfinite(item) for item in coordinates):
+                result_nodes[str(label)] = coordinates
+    mapped_load_steps = [
+        _map_calculix_loads_to_result_nodes(loads, input_nodes, result_nodes)
+        for loads in applied_load_steps
+    ]
+    if not any(mapped_load_steps):
+        return
+
+    def normalize(
+        field: Any,
+        mapped_loads: dict[str, tuple[float, float, float]],
+    ) -> None:
+        if not isinstance(field, dict):
+            return
+        values = field.get("values")
+        if not isinstance(values, dict):
+            return
+        for label, load in mapped_loads.items():
+            value = values.get(label)
+            if not isinstance(value, (list, tuple)) or len(value) < 3:
+                continue
+            try:
+                values[label] = [
+                    float(value[0]) - load[0],
+                    float(value[1]) - load[1],
+                    float(value[2]) - load[2],
+                    *value[3:],
+                ]
+            except (TypeError, ValueError):
+                continue
+        field["source"] = "FORC - generated CLOAD"
+
+    fields = result.get("fields")
+    if isinstance(fields, dict):
+        normalize(fields.get("reaction_force"), mapped_load_steps[-1])
+    history = result.get("field_history")
+    if isinstance(history, list):
+        for frame in history:
+            if isinstance(frame, dict):
+                step_index = frame.get("step_index")
+                mapped_loads = mapped_load_steps[-1]
+                if isinstance(step_index, int) and 1 <= step_index <= len(mapped_load_steps):
+                    mapped_loads = mapped_load_steps[step_index - 1]
+                normalize(frame.get("reaction_force"), mapped_loads)
+        result["steps"] = _steps_from_history(history)
+
+
+def _map_calculix_loads_to_result_nodes(
+    applied_loads: dict[str, tuple[float, float, float]],
+    input_nodes: dict[int, tuple[float, float, float]],
+    result_nodes: dict[str, tuple[float, float, float]],
+) -> dict[str, tuple[float, float, float]]:
+    """按坐标把输入节点载荷映射到 FRD 节点。
+
+    壳单元的 FRD 节点位于中面两侧，节点编号与输入节点不同；同一中面
+    节点的载荷平均分配到两个 FRD 节点。实体节点优先使用三维坐标精确
+    匹配；梁单元按主轴位置分组，避免截面展开节点与输入中心线节点的
+    编号和坐标差异导致载荷丢失。
+    """
+
+    if not input_nodes or not result_nodes:
+        return {label: value for label, value in applied_loads.items() if label in result_nodes}
+    coordinates = list(result_nodes.values())
+    span = max(
+        max(point[index] for point in coordinates) - min(point[index] for point in coordinates)
+        for index in range(3)
+    )
+    tolerance = max(1.0e-8, span * 1.0e-8)
+    input_spans = [
+        max(point[index] for point in input_nodes.values())
+        - min(point[index] for point in input_nodes.values())
+        for index in range(3)
+    ]
+    varying_axes = [index for index, axis_span in enumerate(input_spans) if axis_span > tolerance]
+    beam_axis = varying_axes[0] if len(varying_axes) == 1 else None
+    mapped: dict[str, list[float]] = {}
+    for input_label, load in applied_loads.items():
+        try:
+            point = input_nodes[int(input_label)]
+        except (KeyError, ValueError):
+            if input_label in result_nodes:
+                labels = [input_label]
+            else:
+                continue
+        else:
+            labels = [
+                label
+                for label, candidate in result_nodes.items()
+                if all(abs(candidate[index] - point[index]) <= tolerance for index in range(3))
+            ]
+            if not labels:
+                labels = [
+                    label
+                    for label, candidate in result_nodes.items()
+                    if abs(candidate[0] - point[0]) <= tolerance
+                    and abs(candidate[1] - point[1]) <= tolerance
+                ]
+            if not labels and beam_axis is not None:
+                labels = [
+                    label
+                    for label, candidate in result_nodes.items()
+                    if abs(candidate[beam_axis] - point[beam_axis]) <= tolerance
+                ]
+        if not labels:
+            continue
+        portion = [component / len(labels) for component in load]
+        for label in labels:
+            target = mapped.setdefault(label, [0.0, 0.0, 0.0])
+            for index in range(3):
+                target[index] += portion[index]
+    return {label: (value[0], value[1], value[2]) for label, value in mapped.items()}
 
 
 def _steps_from_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:

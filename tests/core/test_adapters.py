@@ -23,6 +23,7 @@ from mechagent.core.adapters import (
     CalculiXInpMesher,
 )
 from mechagent.core.adapters.calculix import (
+    _map_calculix_loads_to_result_nodes,
     _merge_frd_history,
     _parse_frd_data_line,
     _result_element_volumes,
@@ -232,6 +233,67 @@ def test_calculix_extracts_reaction_and_energy_fields(tmp_path: Path) -> None:
     assert extracted["fields"]["strain_energy_density"]["values"]["1"] == 2.5
     assert extracted["fields"]["strain"]["values"]["1"] == [1.0, 2.0, 3.0]
     assert extracted["fields"]["volume"]["values"]["1"] == 4.0
+
+
+def test_calculix_normalizes_forc_with_generated_cload(tmp_path: Path) -> None:
+    input_file = tmp_path / "fields.inp"
+    input_file.write_text(
+        "\n".join(
+            [
+                "*NODE",
+                "1, 0, 0, 0",
+                "*STEP",
+                "*CLOAD",
+                "1, 3, 2.5",
+                "*NODE FILE",
+                "U, RF",
+                "*END STEP",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    frd_file = tmp_path / "fields.frd"
+    frd_file.write_text(
+        "\n".join(
+            [
+                " -4  FORC        4    1",
+                _frd_disp_line(1, 0.0, 0.0, 12.5),
+                " -3",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    adapter = CalculiXAdapter(SolverConfig(work_dir=tmp_path))
+
+    extracted = adapter.extract_results(
+        SolverResult(success=True, wall_time=0.0, output_files=[input_file, frd_file])
+    )
+
+    assert extracted["fields"]["reaction_force"]["values"]["1"] == [0.0, 0.0, 10.0]
+    assert extracted["fields"]["reaction_force"]["source"] == "FORC - generated CLOAD"
+
+
+def test_calculix_maps_loads_to_expanded_shell_and_beam_nodes() -> None:
+    shell = _map_calculix_loads_to_result_nodes(
+        {"1": (0.0, 0.0, -4.0)},
+        {1: (0.0, 0.0, 0.0)},
+        {"top": (0.0, 0.0, 2.5), "bottom": (0.0, 0.0, -2.5)},
+    )
+    beam = _map_calculix_loads_to_result_nodes(
+        {"1": (0.0, -4.0, 0.0)},
+        {1: (0.0, 0.0, 0.0), 2: (10.0, 0.0, 0.0)},
+        {
+            "1a": (0.0, -1.0, -1.0),
+            "1b": (0.0, 1.0, 1.0),
+            "2a": (10.0, -1.0, -1.0),
+        },
+    )
+
+    assert shell == {"top": (0.0, 0.0, -2.0), "bottom": (0.0, 0.0, -2.0)}
+    assert beam == {
+        "1a": (0.0, -2.0, 0.0),
+        "1b": (0.0, -2.0, 0.0),
+    }
 
 
 def test_calculix_reconstructs_hex_element_volume_when_frd_has_no_evol(tmp_path: Path) -> None:

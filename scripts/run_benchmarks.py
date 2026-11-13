@@ -92,11 +92,21 @@ def main(argv: list[str] | None = None) -> int:
         }
         for item in results
     ]
+    for row, item in zip(rows, results, strict=True):
+        if item.equilibrium is not None:
+            row["equilibrium"] = item.equilibrium.model_dump(mode="json")
     output_dir = evidence_dir or agent.config.output.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "benchmark_results.json"
     output_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    status = "passed" if all(item.passed for item in results) else "failed"
+    status = (
+        "passed"
+        if all(
+            item.passed and (item.equilibrium is None or item.equilibrium.status == "passed")
+            for item in results
+        )
+        else "failed"
+    )
     if evidence_dir is None:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
     else:
@@ -106,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
             details={
                 "case_count": len(rows),
                 "passed_count": sum(item.passed for item in results),
+                "equilibrium_status_counts": {
+                    status: sum(
+                        item.equilibrium is not None and item.equilibrium.status == status
+                        for item in results
+                    )
+                    for status in ("passed", "failed", "unverified")
+                },
                 "results_path": output_path.name,
             },
         )

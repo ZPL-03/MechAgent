@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from mechagent.core.adapters.calculix import CalculiXAdapter
+from mechagent.core.compare import ComparisonTolerance, EquilibriumReport, evaluate_reaction_balance
 from mechagent.core.defaults import DEFAULT_CALCULIX_PATH
 from mechagent.core.models import (
     AnalysisSpec,
@@ -66,6 +67,7 @@ class BenchmarkResult:
     quantity: str
     unit: str
     solver: str
+    equilibrium: EquilibriumReport | None = None
 
     @property
     def passed(self) -> bool:
@@ -86,6 +88,14 @@ class BenchmarkResult:
         """
 
         return self.relative_error <= self.tolerance
+
+    @property
+    def equilibrium_passed(self) -> bool | None:
+        """返回反力平衡状态；未计算时返回 ``None``。"""
+
+        if self.equilibrium is None:
+            return None
+        return self.equilibrium.status == "passed"
 
 
 def cantilever_tip_deflection(
@@ -678,9 +688,9 @@ def run_tc01(
     params = tc01_model_params()
     dimensions = params.geometry.dimensions
     load = abs(params.loads[0].magnitude)
-    predicted = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)[
-        "tip_deflection_mm"
-    ]
+    solver_result = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
+    predicted = solver_result["tip_deflection_mm"]
+    equilibrium = _benchmark_equilibrium(solver_result, params)
     reference = cantilever_tip_deflection(
         load,
         dimensions["length"],
@@ -697,6 +707,7 @@ def run_tc01(
         quantity="tip_deflection",
         unit="mm",
         solver="calculix",
+        equilibrium=equilibrium,
     )
 
 
@@ -725,9 +736,9 @@ def run_tc02(
     params = tc02_model_params()
     dimensions = params.geometry.dimensions
     pressure = abs(params.loads[0].magnitude)
-    predicted = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)[
-        "center_deflection_mm"
-    ]
+    solver_result = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
+    predicted = solver_result["center_deflection_mm"]
+    equilibrium = _benchmark_equilibrium(solver_result, params)
     reference = simply_supported_plate_center_deflection(
         pressure,
         dimensions["length"],
@@ -746,6 +757,7 @@ def run_tc02(
         quantity="center_deflection",
         unit="mm",
         solver="calculix",
+        equilibrium=equilibrium,
     )
 
 
@@ -773,9 +785,9 @@ def run_tc03(
     """
 
     params = tc03_model_params()
-    predicted = _axial_displacement_value(
-        _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
-    )
+    solver_result = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
+    predicted = _axial_displacement_value(solver_result)
+    equilibrium = _benchmark_equilibrium(solver_result, params)
     reference = _tc03_reference(params)
     return _benchmark_result(
         case_id="TC-03",
@@ -786,6 +798,7 @@ def run_tc03(
         quantity="axial_displacement",
         unit="mm",
         solver="calculix",
+        equilibrium=equilibrium,
     )
 
 
@@ -798,9 +811,9 @@ def run_tc04(
     """运行 TC-04 悬臂梁均布线载荷验证。"""
 
     params = tc04_model_params()
-    predicted = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)[
-        "tip_deflection_mm"
-    ]
+    solver_result = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
+    predicted = solver_result["tip_deflection_mm"]
+    equilibrium = _benchmark_equilibrium(solver_result, params)
     reference = _tc04_reference(params)
     return _benchmark_result(
         case_id="TC-04",
@@ -811,6 +824,7 @@ def run_tc04(
         quantity="tip_deflection",
         unit="mm",
         solver="calculix",
+        equilibrium=equilibrium,
     )
 
 
@@ -823,9 +837,9 @@ def run_tc05(
     """运行 TC-05 固支长方体端面合力轴向拉伸验证。"""
 
     params = tc05_model_params()
-    predicted = _axial_displacement_value(
-        _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
-    )
+    solver_result = _run_calculix_static(params, solver_path, work_dir, num_cpus, timeout)
+    predicted = _axial_displacement_value(solver_result)
+    equilibrium = _benchmark_equilibrium(solver_result, params)
     reference = _tc03_reference(params)
     return _benchmark_result(
         case_id="TC-05",
@@ -836,6 +850,7 @@ def run_tc05(
         quantity="axial_displacement",
         unit="mm",
         solver="calculix",
+        equilibrium=equilibrium,
     )
 
 
@@ -905,6 +920,7 @@ def _benchmark_result(
     quantity: str,
     unit: str,
     solver: str,
+    equilibrium: EquilibriumReport | None = None,
 ) -> BenchmarkResult:
     relative_error = 0.0 if reference == 0 else abs(predicted - reference) / abs(reference)
     return BenchmarkResult(
@@ -917,6 +933,18 @@ def _benchmark_result(
         quantity=quantity,
         unit=unit,
         solver=solver,
+        equilibrium=equilibrium,
+    )
+
+
+def _benchmark_equilibrium(
+    solver_result: dict[str, Any],
+    params: ModelParams,
+) -> EquilibriumReport:
+    return evaluate_reaction_balance(
+        solver_result,
+        params,
+        tolerance=ComparisonTolerance(relative=0.01, absolute=0.005),
     )
 
 
@@ -926,7 +954,7 @@ def _run_calculix_static(
     work_dir: Path | None,
     num_cpus: int,
     timeout: int,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     active_work_dir = work_dir or _new_benchmark_root() / (params.case_id or "RUN")
     active_work_dir.mkdir(parents=True, exist_ok=True)
     solver = CalculiXAdapter(
@@ -938,7 +966,7 @@ def _run_calculix_static(
         )
     )
     result = solver.run(params)
-    return {key: float(value) for key, value in result.items() if isinstance(value, (int, float))}
+    return result
 
 
 def _ensure_positive(**values: float) -> None:

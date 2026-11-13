@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mechagent.core.models import LoadType, ModelParams
+from mechagent.core.models import GeometryType, LoadType, ModelParams
 from mechagent.core.results import compute_mesh_digest
 
 
@@ -461,7 +461,7 @@ def evaluate_reaction_balance(
             tolerance=selected_tolerance,
             reason=load_reason,
         )
-    reaction = _result_reaction_resultant(result)
+    reaction = _result_reaction_resultant(result, model)
     if reaction is None:
         return EquilibriumReport(
             status="unverified",
@@ -551,7 +551,7 @@ def _known_pressure_area(model: ModelParams, region: str) -> float | None:
 
 
 def _result_reaction_resultant(
-    result: dict[str, Any],
+    result: dict[str, Any], model: ModelParams
 ) -> tuple[float, float, float] | None:
     fields = result.get("fields")
     reaction = fields.get("reaction_force") if isinstance(fields, dict) else None
@@ -562,7 +562,63 @@ def _result_reaction_resultant(
     nodes = _node_coordinates(result.get("nodes"))
     if not nodes:
         nodes = _node_coordinates(result.get("mesh_nodes"))
+    support_labels = _support_reaction_labels(vectors, nodes, model)
+    if support_labels:
+        return _sum_vectors(vectors, support_labels)
     return _root_resultant(vectors, nodes)
+
+
+def _support_reaction_labels(
+    vectors: dict[str, tuple[float, ...]],
+    nodes: dict[str, tuple[float, float, float]],
+    model: ModelParams,
+) -> list[str] | None:
+    """返回当前边界契约对应的支撑节点，无法确定时返回 ``None``。"""
+
+    if model.geometry.type is not GeometryType.PLATE:
+        return None
+    regions = {_normalized_region(boundary.region) for boundary in model.bcs}
+    if not regions.intersection({"all_edges", "all_boundaries", "boundary", "edges"}):
+        return None
+    common = set(vectors) & set(nodes)
+    if not common:
+        return None
+    points = [nodes[label] for label in common]
+    x_values = [point[0] for point in points]
+    y_values = [point[1] for point in points]
+    tolerance = max(
+        1.0e-8, max(max(x_values) - min(x_values), max(y_values) - min(y_values)) * 1.0e-8
+    )
+    x_min, x_max = min(x_values), max(x_values)
+    y_min, y_max = min(y_values), max(y_values)
+    labels = [
+        label
+        for label in common
+        if (
+            abs(nodes[label][0] - x_min) <= tolerance
+            or abs(nodes[label][0] - x_max) <= tolerance
+            or abs(nodes[label][1] - y_min) <= tolerance
+            or abs(nodes[label][1] - y_max) <= tolerance
+        )
+    ]
+    return labels or None
+
+
+def _sum_vectors(
+    vectors: dict[str, tuple[float, ...]], labels: list[str]
+) -> tuple[float, float, float] | None:
+    if not labels:
+        return None
+    resultant = [0.0, 0.0, 0.0]
+    for label in labels:
+        vector = vectors[label]
+        for index in range(min(len(vector), 3)):
+            resultant[index] += vector[index]
+    return (resultant[0], resultant[1], resultant[2])
+
+
+def _normalized_region(value: str) -> str:
+    return value.strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def _unit_vector(value: tuple[float, float, float]) -> tuple[float, float, float] | None:
@@ -699,12 +755,7 @@ def _root_resultant(
     labels = [label for label in common if abs(nodes[label][axis] - minimum) <= tolerance]
     if not labels:
         return None
-    resultant = [0.0, 0.0, 0.0]
-    for label in labels:
-        vector = vectors[label]
-        for index in range(min(len(vector), 3)):
-            resultant[index] += vector[index]
-    return (resultant[0], resultant[1], resultant[2])
+    return _sum_vectors(vectors, labels)
 
 
 def _coordinate_pairs(

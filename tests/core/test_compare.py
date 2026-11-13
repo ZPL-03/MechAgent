@@ -10,7 +10,7 @@ from mechagent.core.compare import (
 )
 from mechagent.core.models import GeometrySpec, GeometryType
 from mechagent.core.results import compute_mesh_digest
-from mechagent.core.validation import tc01_model_params, tc03_model_params
+from mechagent.core.validation import tc01_model_params, tc02_model_params, tc03_model_params
 
 
 def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
@@ -453,6 +453,35 @@ def test_reaction_balance_supports_known_pressure_area() -> None:
     )
     assert result.status == "passed"
     assert result.applied_resultant == (4000.0, 0.0, 0.0)
+
+
+def test_reaction_balance_sums_all_supported_plate_edges() -> None:
+    result = evaluate_reaction_balance(
+        {
+            "success": True,
+            "nodes": {
+                "1": [0.0, 0.0, 0.0],
+                "2": [300.0, 0.0, 0.0],
+                "3": [300.0, 200.0, 0.0],
+                "4": [0.0, 200.0, 0.0],
+            },
+            "fields": {
+                "reaction_force": {
+                    "values": {
+                        "1": [0.0, 0.0, 150.0],
+                        "2": [0.0, 0.0, 150.0],
+                        "3": [0.0, 0.0, 150.0],
+                        "4": [0.0, 0.0, 150.0],
+                    }
+                }
+            },
+        },
+        tc02_model_params(),
+    )
+
+    assert result.status == "passed"
+    assert result.applied_resultant == (0.0, 0.0, -600.0)
+    assert result.reaction_resultant == (0.0, 0.0, 600.0)
 
 
 def test_reaction_balance_keeps_unknown_load_area_unverified() -> None:
