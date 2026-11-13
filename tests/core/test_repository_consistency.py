@@ -145,6 +145,7 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "python -m build packages/mechagent-core --no-isolation",
         "python -m build packages/mechagent --no-isolation",
         "python scripts/check_wheel_install.py",
+        "python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence",
         "python -m mkdocs build --strict",
         "python scripts/clean_artifacts.py",
     ]
@@ -182,6 +183,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "backup_studio.py",
         "restore_studio.py",
         "drill_studio_recovery.py",
+        "studio_http_smoke.py",
         "prune_artifacts.py",
         "check_wheel_install.py",
         "verify_release.py",

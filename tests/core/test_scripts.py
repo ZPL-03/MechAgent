@@ -19,12 +19,22 @@ from scripts import (
     run_llm_smoke,
     run_natural_language_cases,
     sign_release,
+    studio_http_smoke,
     verify_release,
 )
 
 from mechagent.config import MechAgentConfig, OutputSettings
 from mechagent.core.validation import BenchmarkResult
 from mechagent.evidence import verify_manifest
+
+
+def test_studio_http_smoke_verifies_independent_process_and_writes_manifest(tmp_path: Path) -> None:
+    result = studio_http_smoke.run_smoke(tmp_path / "studio-http")
+
+    assert result["status"] == "passed"
+    assert result["server_stopped"] is True
+    assert result["manifest_errors"] == []
+    assert verify_manifest(Path(result["manifest"])) == []
 
 
 def test_release_tag_matches_both_package_versions(tmp_path: Path) -> None:

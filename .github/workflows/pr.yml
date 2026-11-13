@@ -40,6 +40,8 @@ jobs:
           python scripts/build_knowledge.py
           python scripts/index_knowledge.py
           python -m mechagent.cli config validate
+          python scripts/clean_artifacts.py
+          python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
           python -m pip check
           python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
           python -m build packages/mechagent-core --no-isolation
@@ -54,6 +56,7 @@ jobs:
             dist/mechagent-sbom.spdx.json
             dist/mechagent-release-manifest.json
             dist/mechagent-python-runtime-audit.json
+            dist/studio-http-evidence/**
             packages/mechagent-core/dist/*.whl
             packages/mechagent-core/dist/*.tar.gz
             packages/mechagent/dist/*.whl
@@ -64,4 +67,3 @@ jobs:
         run: |
           python scripts/check_wheel_install.py
           python -m mkdocs build --strict
-          python scripts/clean_artifacts.py

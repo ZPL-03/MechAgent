@@ -104,6 +104,7 @@ python -m pytest
 python scripts/run_benchmarks.py
 python scripts/run_natural_language_cases.py
 python scripts/run_llm_smoke.py
+python scripts/studio_http_smoke.py --output-dir mechagent_output/studio-http-evidence-live
 python scripts/build_knowledge.py
 python scripts/index_knowledge.py
 python -m mechagent.cli inspect "求解长1000mm、截面20mmx40mm、材料钢的悬臂梁，一端固支，端部向下1000N集中力静力分析" --json
@@ -254,6 +255,16 @@ Invoke-RestMethod http://127.0.0.1:8765/api/v1/metrics?project_id=default -Heade
 ```
 
 响应只包含作业状态计数、队列等待、执行时长、失败代码、结果对象大小、证据完整性计数、本机工作目录字节数与配额、数据库文件系统容量以及 worker 和可见子进程的 CPU 时间与峰值常驻内存，不包含请求正文、凭据、文件路径或原始 worker 诊断。资源或文件系统字段可能为空，表示边界内没有可读取的采样，不代表零消耗；本机工作目录配额和文件系统指标不等同于 S3 容量或集中 telemetry。
+
+独立 HTTP 验收使用 `scripts/studio_http_smoke.py`。脚本在临时输出目录生成只含 API key 摘要的配置，启动独立 Uvicorn 进程，并通过回环 TCP 请求验证缺少凭据、管理员认证、v1 响应头、主体创建、项目允许与拒绝、密钥轮换、旧密钥撤销、主体停用和审计读取。脚本只在进程结束后写入 `http-smoke.json` 和 `manifest.json`，不会输出明文 key；退出码为 0 且清单校验无错误才算通过：
+
+```powershell
+python scripts/studio_http_smoke.py --output-dir mechagent_output/studio-http-evidence-live
+```
+
+输出目录必须为空；保留已有清单时使用新的空目录执行，不覆盖既有证据。
+
+本机 HTTP 验收清单为 `mechagent_output/studio-http-evidence-live/manifest.json`，状态为 `passed`。该证据覆盖单机回环 HTTP 和单个 SQLite 数据库，不证明 TLS、反向代理、外部身份提供商、跨主机审计或分布式配额。
 
 ## 清理策略
 
