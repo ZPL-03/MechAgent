@@ -52,6 +52,78 @@ class GmshCADInpMesher(AbstractMesher):
         source = Path(source_value).resolve()
         if not source.is_file():
             return MeshResult(success=False, error_message=f"CAD 源文件不存在: {source}")
+        artifact = cad_geometry.get("artifact")
+        if isinstance(artifact, dict):
+            artifact_path = artifact.get("source_path")
+            artifact_hash = artifact.get("source_sha256")
+            artifact_size = artifact.get("source_size")
+            artifact_topology_digest = artifact.get("topology_digest")
+            if not isinstance(artifact_path, str) or not artifact_path.strip():
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 缺少源文件路径。",
+                )
+            if Path(artifact_path).resolve() != source:
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 的 source_path 与案例 CAD 源文件不一致。",
+                )
+            if not isinstance(artifact_hash, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", artifact_hash
+            ):
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 缺少有效的源文件 SHA-256。",
+                )
+            if not isinstance(artifact_size, int) or artifact_size < 0:
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 缺少有效的源文件大小。",
+                )
+            try:
+                source_size = source.stat().st_size
+            except OSError as exc:
+                return MeshResult(success=False, error_message=f"CAD 源文件无法读取: {exc}")
+            if artifact_size != source_size:
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 的源文件大小与实际文件不一致。",
+                )
+            expected_hash = cad_geometry.get("source_sha256")
+            if isinstance(expected_hash, str) and artifact_hash != expected_hash:
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 的源文件 SHA-256 与几何摘要不一致。",
+                )
+            expected_topology_digest = cad_geometry.get("topology_digest")
+            if (
+                isinstance(expected_topology_digest, str)
+                and artifact_topology_digest != expected_topology_digest
+            ):
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 的拓扑摘要与几何摘要不一致。",
+                )
+            validation = cad_geometry.get("geometry_validation")
+            if not isinstance(validation, dict):
+                return MeshResult(
+                    success=False,
+                    error_message="CADArtifact 缺少几何校验结果。",
+                )
+            if (
+                validation.get("status") != "passed"
+                or validation.get("execution_ready") is not True
+            ):
+                blockers = validation.get("blockers")
+                detail = (
+                    "；".join(str(item) for item in blockers) if isinstance(blockers, list) else ""
+                )
+                return MeshResult(
+                    success=False,
+                    error_message=(
+                        "CAD 几何校验未达到可执行状态。" + (f" {detail}" if detail else "")
+                    ),
+                )
         expected_hash = cad_geometry.get("source_sha256")
         if isinstance(expected_hash, str) and expected_hash:
             actual_hash = _sha256_file(source)

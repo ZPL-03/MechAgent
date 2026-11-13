@@ -27,7 +27,7 @@
 
 ### 真实 CAD 拓扑路径
 
-`GmshCADKernel` 通过 Gmsh OpenCASCADE 导入 STEP、IGES 和 BREP，计算源文件 SHA-256、包围盒、体积、表面积、实体/面/边计数、封闭性、按三维实体划分的零件摘要、当前摘要内可复现的拓扑实体和六个包围盒方向的区域候选。零件摘要包含三维实体 ID、包围盒、体积、边界面 ID 和边 ID；区域候选同时记录候选面所属的零件 ID。`GeometryAgent` 将摘要转换为 `GeometryCandidate`，再由自然语言补全材料、载荷和边界。案例提升会核对区域拓扑 ID 是否存在于同一摘要，面区域使用二维实体，`all_edges` 使用一维实体，并把零件归属写入 `RegionSpec.part_ids`；不满足条件的区域保持 `unknown`。
+`GmshCADKernel` 通过 Gmsh OpenCASCADE 导入 STEP、IGES 和 BREP，计算源文件 SHA-256、包围盒、体积、表面积、实体/面/边计数、封闭性、按三维实体划分的零件摘要、当前摘要内可复现的拓扑实体和六个包围盒方向的区域候选。导入结果同时生成 `CADArtifact`、`GeometryValidation` 和 `RegionBinding`；校验结果明确记录包围盒、实体水密性、拓扑关系、零件归属、源完整性和区域引用状态。零件摘要包含三维实体 ID、包围盒、体积、边界面 ID 和边 ID；区域候选同时记录候选面所属的零件 ID。`GeometryAgent` 将摘要转换为 `GeometryCandidate`，再由自然语言补全材料、载荷和边界。案例提升会核对区域拓扑 ID 是否存在于同一摘要，面区域使用二维实体，`all_edges` 使用一维实体，并把零件归属写入 `RegionSpec.part_ids`；不满足条件的区域保持 `unknown`。`execution_ready=false` 的几何只用于检查或人工确认，直接网格会明确失败。
 
 `gmsh-cad-inp` 从受控 CAD 源重新导入三维实体，生成一阶 C3D4 四面体网格，并把案例投影中的 `metadata.case_regions` 与 CAD 候选区域映射为节点集合。它检查源文件哈希、拓扑摘要、区域拓扑 ID、面/边维度、必需区域和 Gmsh `minSICN` 质量；缺少受控源、拓扑漂移、区域未映射或质量低于阈值时失败，不回退为包围盒网格。多个实体可生成带零件归属和 `unconnected_parts` 标记的检查网格；求解器在缺少连接或接触契约时拒绝该模型。
 
@@ -79,16 +79,16 @@
 
 ## 建议的数据契约
 
-下列对象是后续扩展方向，当前仓库已有部分字段，但尚未形成完整的独立版本化契约：
+下列对象构成当前 CAD 导入和区域映射的版本化契约；几何修复报告和网格收敛仍需独立扩展：
 
 | 对象 | 必须记录的事实 | 进入下一阶段的条件 |
 | --- | --- | --- |
-| `CADArtifact` | 原始/处理后路径、格式、单位、坐标系、源 SHA-256、几何版本、CAD 内核和版本、生成脚本或参数来源、修复报告 | 文件可读、来源可追踪、版本唯一 |
-| `GeometryValidation` | solid/face/edge 数、封闭性、自由边、自相交、体积/面积/包围盒、关键特征测量、错误和警告 | 所有必需检查通过，警告有处置结论 |
-| `RegionBinding` | 语义名、拓扑 ID、映射方法、置信度、几何版本、歧义状态、人工确认 | 每个载荷/边界区域唯一映射且版本匹配 |
+| `CADArtifact` | 源路径、格式、单位、源文件大小与 SHA-256、拓扑摘要、摘要指纹 | 文件可读、来源可追踪、摘要版本一致 |
+| `GeometryValidation` | 包围盒、实体水密性、拓扑父子关系、零件归属、源完整性、区域引用、错误和警告 | 所有当前必需检查通过且 `execution_ready=true` |
+| `RegionBinding` | 语义名、拓扑 ID、维度、零件归属、置信度和歧义原因 | 每个载荷/边界区域唯一映射且摘要版本匹配 |
 | `MeshProvenance` | 网格器和版本、CAD 摘要、单元类型、尺寸场、质量指标、区域集合、收敛状态 | 网格文件存在、质量门禁和区域门禁通过 |
 
-`MeshProvenance` 已作为版本化 core 契约由 `MeshAgent` 在成功网格后生成，记录案例标识、几何类型、网格器、种子尺寸、单元类型、网格文件 SHA-256、质量指标、质量门禁、区域名称、实体数量、零件 ID、连接语义以及可用的 CAD 源摘要和拓扑摘要；`SolverAgent` 将其随求解摘要传递。该对象不证明网格收敛、CAD 修复报告或跨网格器等价性。`CADArtifact`、`GeometryValidation` 和 `RegionBinding` 仍需独立建立完整版本化契约；现有 `CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 继续作为兼容输入和诊断扩展。
+`MeshProvenance` 已作为版本化 core 契约由 `MeshAgent` 在成功网格后生成，记录案例标识、几何类型、网格器、种子尺寸、单元类型、网格文件 SHA-256、质量指标、质量门禁、区域名称、实体数量、零件 ID、连接语义以及可用的 CAD 源摘要和拓扑摘要；`SolverAgent` 将其随求解摘要传递。该对象不证明网格收敛、CAD 修复报告或跨网格器等价性。`CADGeometrySummary`、`GeometryCandidate`、`RegionCandidate` 和 `MeshResult.metadata` 继续作为兼容输入和诊断扩展。
 
 ## 开源项目调研与采用边界
 

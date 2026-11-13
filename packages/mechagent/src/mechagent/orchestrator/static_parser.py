@@ -246,6 +246,13 @@ def parse_static_model_params_from_geometry(
         "region_candidates": [item.model_dump(mode="json") for item in candidate.region_candidates],
         "topology_entities": [item.model_dump(mode="json") for item in candidate.topology_entities],
         "parts": [item.model_dump(mode="json") for item in candidate.parts],
+        "artifact": candidate.artifact.model_dump(mode="json") if candidate.artifact else None,
+        "geometry_validation": (
+            candidate.geometry_validation.model_dump(mode="json")
+            if candidate.geometry_validation
+            else None
+        ),
+        "region_bindings": [item.model_dump(mode="json") for item in candidate.region_bindings],
     }
     metadata = {
         **params.metadata,

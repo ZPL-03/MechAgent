@@ -115,6 +115,24 @@ def test_geometry_agent_to_model_params_from_step(tmp_path: Path) -> None:
     assert params.metadata["geometry_source"] == "cad"
 
 
+def test_geometry_agent_can_reuse_analysis_result(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+    agent = GeometryAgent(MechAgentConfig(), tmp_path)
+    analysis = agent.analyze(step)
+
+    params = agent.to_model_params(
+        step,
+        "材料钢，左端固定，右端承受10MPa轴向拉伸",
+        analysis=analysis,
+    )
+
+    artifact = params.metadata["cad_geometry"]["artifact"]
+    assert isinstance(artifact, dict)
+    assert analysis.artifact is not None
+    assert artifact["source_sha256"] == analysis.artifact.source_sha256
+
+
 def test_cad_topology_regions_reach_execution_case(tmp_path: Path) -> None:
     step = tmp_path / "beam.step"
     _write_box_step(step, 1000.0, 40.0, 40.0)
@@ -284,6 +302,60 @@ def test_cad_solid_direct_mesh_preserves_region_node_sets(tmp_path: Path) -> Non
     assert "*ELEMENT, TYPE=C3D4" in mesh_text
     assert "*NSET, NSET=ROOT" in mesh_text
     assert "*NSET, NSET=END_FACE" in mesh_text
+
+
+def test_cad_mesh_rejects_geometry_validation_not_ready(tmp_path: Path) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    cad_geometry = dict(params.metadata["cad_geometry"])
+    validation = dict(cad_geometry["geometry_validation"])
+    validation["execution_ready"] = False
+    validation["blockers"] = ["测试校验阻断"]
+    cad_geometry["geometry_validation"] = validation
+    bad_params = params.model_copy(
+        update={"metadata": {**params.metadata, "cad_geometry": cad_geometry}}
+    )
+
+    output = MeshAgent(config, tmp_path / "mesh-validation-blocked").generate_with_trace(bad_params)
+
+    assert output.mesh_result.success is False
+    assert "几何校验未达到可执行状态" in (output.mesh_result.error_message or "")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source_size", 0, "源文件大小"),
+        ("topology_digest", "0" * 64, "拓扑摘要"),
+    ],
+)
+def test_cad_mesh_rejects_artifact_contract_drift(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    step = tmp_path / "solid.step"
+    _write_box_step(step, 100.0, 40.0, 30.0)
+
+    config = MechAgentConfig()
+    params = GeometryAgent(config, tmp_path).to_model_params(
+        step, "材料钢，左端固定，右端承受10MPa轴向拉伸"
+    )
+    cad_geometry = dict(params.metadata["cad_geometry"])
+    artifact = dict(cad_geometry["artifact"])
+    artifact[field] = value
+    cad_geometry["artifact"] = artifact
+    bad_params = params.model_copy(
+        update={"metadata": {**params.metadata, "cad_geometry": cad_geometry}}
+    )
+
+    output = MeshAgent(config, tmp_path / f"mesh-artifact-{field}").generate_with_trace(bad_params)
+
+    assert output.mesh_result.success is False
+    assert message in (output.mesh_result.error_message or "")
 
 
 def test_cad_mesh_rejects_topology_digest_drift(tmp_path: Path) -> None:

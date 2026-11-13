@@ -36,6 +36,14 @@ def test_gmsh_cad_kernel_imports_step_box(tmp_path: Path) -> None:
     result = GmshCADKernel(CADConfig(work_dir=tmp_path)).import_model(step)
 
     assert result.success is True
+    assert result.summary is not None
+    assert result.artifact is not None
+    assert result.artifact.source_path == str(step.resolve())
+    assert result.artifact.source_sha256 == result.summary.source_sha256
+    assert result.validation is not None
+    assert result.validation.status == "passed"
+    assert result.validation.execution_ready is True
+    assert result.region_bindings
     summary = result.summary
     assert summary is not None
     assert summary.source_format == "step"

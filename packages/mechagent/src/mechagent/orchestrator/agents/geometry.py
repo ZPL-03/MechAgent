@@ -14,9 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mechagent.config import MechAgentConfig
 from mechagent.core.cad import (
+    CADArtifact,
     CADConfig,
     CADGeometrySummary,
     GeometryCandidate,
+    GeometryValidation,
+    RegionBinding,
     geometry_candidate_from_summary,
 )
 from mechagent.core.factory import create_cad_kernel
@@ -33,6 +36,9 @@ class GeometryAnalysis(BaseModel):
         kernel: 使用的 CAD 内核注册名。
         candidate: 成功时的几何候选。
         summary: 成功时的几何摘要。
+        artifact: 源文件及摘要指纹。
+        validation: 几何、拓扑和区域契约校验结果。
+        region_bindings: 区域语义到拓扑实体的绑定记录。
         wall_time: 处理耗时，单位为 s。
         error_message: 失败诊断信息。
 
@@ -50,6 +56,9 @@ class GeometryAnalysis(BaseModel):
     kernel: str
     candidate: Optional[GeometryCandidate] = None
     summary: Optional[CADGeometrySummary] = None
+    artifact: CADArtifact | None = None
+    validation: GeometryValidation | None = None
+    region_bindings: list[RegionBinding] = Field(default_factory=list)
     wall_time: float = Field(default=0.0, ge=0)
     error_message: Optional[str] = None
 
@@ -104,21 +113,41 @@ class GeometryAgent:
                 success=False,
                 source=source,
                 kernel=kernel_name,
+                summary=result.summary,
+                artifact=result.artifact,
+                validation=result.validation,
+                region_bindings=result.region_bindings,
                 wall_time=result.wall_time,
                 error_message=result.error_message,
             )
         candidate = geometry_candidate_from_summary(result.summary)
-        candidate = candidate.model_copy(update={"source_path": str(source.resolve())})
+        candidate = candidate.model_copy(
+            update={
+                "source_path": str(source.resolve()),
+                "artifact": result.artifact,
+                "geometry_validation": result.validation,
+                "region_bindings": result.region_bindings,
+            }
+        )
         return GeometryAnalysis(
             success=True,
             source=source,
             kernel=kernel_name,
             candidate=candidate,
             summary=result.summary,
+            artifact=result.artifact,
+            validation=result.validation,
+            region_bindings=result.region_bindings,
             wall_time=result.wall_time,
         )
 
-    def to_model_params(self, source: Path, completion: str) -> ModelParams:
+    def to_model_params(
+        self,
+        source: Path,
+        completion: str,
+        *,
+        analysis: GeometryAnalysis | None = None,
+    ) -> ModelParams:
         """从 CAD 文件与自然语言补全生成结构化参数候选。
 
         导入 CAD 形体得到几何候选，与描述材料、载荷与边界的自然语言补全合并解析为
@@ -128,6 +157,7 @@ class GeometryAgent:
         Args:
             source: CAD 文件路径。
             completion: 描述材料、载荷与边界的自然语言补全。
+            analysis: 可复用的同一源文件分析结果；省略时重新导入源文件。
 
         Returns:
             ModelParams: 结构化仿真参数候选；是否可执行由后续契约门禁决定。
@@ -136,8 +166,8 @@ class GeometryAgent:
             ValueError: 当 CAD 几何分析失败或合成请求缺少必要仿真参数时抛出。
         """
 
-        analysis = self.analyze(source)
-        if not analysis.success or analysis.candidate is None:
-            msg = analysis.error_message or "CAD 几何分析失败。"
+        resolved_analysis = analysis or self.analyze(source)
+        if not resolved_analysis.success or resolved_analysis.candidate is None:
+            msg = resolved_analysis.error_message or "CAD 几何分析失败。"
             raise ValueError(msg)
-        return parse_static_model_params_from_geometry(analysis.candidate, completion)
+        return parse_static_model_params_from_geometry(resolved_analysis.candidate, completion)

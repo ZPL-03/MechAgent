@@ -59,7 +59,7 @@ python -m mechagent.cli run "solve a steel beam length 1000mm, section 20mm x 40
 
 ## CAD 几何到求解
 
-除纯自然语言入口外，能力解析支持从 CAD 形体获取几何、由自然语言补全材料、载荷与边界，形成受限的「CAD 文件 → 参数模型」链路。`GeometryAgent` 调用 CAD 内核导入 STEP/IGES/BREP 并产出 `GeometryCandidate`（几何类型、包围盒尺寸、源文件摘要、当前摘要内可追踪的拓扑实体和区域候选）；`parse_static_model_params_from_geometry(candidate, completion)` 把这些摘要写入 `ModelParams.metadata.cad_geometry`，再按几何类型解释尺寸（梁取最长边为长度、其余两边为截面，板取最薄边为厚度，实体取长宽高），与描述材料、载荷和边界的自然语言补全合成完整请求，复用既有结构静力解析器。`SimulationCase.from_model_params()` 只按明确规则把 `root`、`tip`、`top_surface`、`bottom_surface` 和 `all_edges` 映射到唯一且置信度达标的 CAD 面/边拓扑 ID；状态为 `ambiguous`、`unresolved` 或缺少拓扑 ID 的区域保留 `unknown`，执行前拒绝。该路径重建当前受支持的参数模型，不证明任意 CAD 原始拓扑已经成为求解网格；几何类型由包围盒按薄度与细长比推断，可能与用户意图不一致，后续由特征识别与载荷语义协同细化。
+除纯自然语言入口外，能力解析支持从 CAD 形体获取几何、由自然语言补全材料、载荷与边界，形成受限的「CAD 文件 → 参数模型」链路。`GeometryAgent` 调用 CAD 内核导入 STEP/IGES/BREP 并产出 `GeometryCandidate`（几何类型、包围盒尺寸、`CADArtifact`、`GeometryValidation`、`RegionBinding`、源文件摘要、当前摘要内可追踪的拓扑实体和区域候选）；`parse_static_model_params_from_geometry(candidate, completion)` 把这些摘要写入 `ModelParams.metadata.cad_geometry`，再按几何类型解释尺寸（梁取最长边为长度、其余两边为截面，板取最薄边为厚度，实体取长宽高），与描述材料、载荷和边界的自然语言补全合成完整请求，复用既有结构静力解析器。`SimulationCase.from_model_params()` 只按明确规则把 `root`、`tip`、`top_surface`、`bottom_surface` 和 `all_edges` 映射到唯一且置信度达标的 CAD 面/边拓扑 ID；状态为 `ambiguous`、`unresolved` 或缺少拓扑 ID 的区域保留 `unknown`，执行前拒绝。该路径重建当前受支持的参数模型，不证明任意 CAD 原始拓扑已经成为求解网格；几何类型由包围盒按薄度与细长比推断，可能与用户意图不一致，后续由特征识别与载荷语义协同细化。
 
 ## LLM 接入
 

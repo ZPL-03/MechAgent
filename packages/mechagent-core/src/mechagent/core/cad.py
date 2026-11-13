@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -105,6 +108,51 @@ class CADTopologyEntity(BaseModel):
     children: list[str] = Field(default_factory=list)
 
 
+class CADArtifact(BaseModel):
+    """可追踪的 CAD 源文件及其摘要指纹。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    source_path: str = Field(min_length=1, max_length=4096)
+    source_format: str = Field(min_length=1, max_length=32)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_size: int = Field(ge=0)
+    units: str = Field(default="mm", min_length=1, max_length=32)
+    topology_digest: str = Field(default="", max_length=128)
+    summary_digest: str = Field(default="", max_length=128)
+    geometry_file: str | None = Field(default=None, max_length=4096)
+
+
+class GeometryValidation(BaseModel):
+    """CAD 摘要的确定性校验结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    status: Literal["passed", "failed", "unverified"]
+    execution_ready: bool = False
+    checks: dict[str, Literal["passed", "failed", "unverified"]] = Field(default_factory=dict)
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RegionBinding(BaseModel):
+    """CAD 拓扑区域与案例语义之间的绑定记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    name: str = Field(min_length=1, max_length=128)
+    dimension: Literal[1, 2, 3] | None = None
+    topology_ids: list[str] = Field(default_factory=list, max_length=4096)
+    part_ids: list[str] = Field(default_factory=list, max_length=4096)
+    status: Literal["mapped", "ambiguous", "unresolved"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: Literal["cad_summary", "case"] = "cad_summary"
+    reason: str = Field(default="", max_length=512)
+
+
 class CADPartSummary(BaseModel):
     """一个三维实体及其边界拓扑成员的摘要。"""
 
@@ -127,6 +175,8 @@ class CADGeometrySummary(BaseModel):
         units: 几何单位，默认 ``mm``。
         bbox_min: 包围盒最小角点坐标。
         bbox_max: 包围盒最大角点坐标。
+        source_sha256: CAD 源文件 SHA-256；为空表示未提供完整性指纹。
+        topology_digest: 当前拓扑实体及父子关系的摘要指纹。
         volume: 体积，单位为 mm^3。
         surface_area: 表面积，单位为 mm^2。
         solid_count: 实体数量。
@@ -192,6 +242,9 @@ class CADImportResult(BaseModel):
     Args:
         success: 导入以及配置中启用的处理步骤是否成功。
         summary: 成功时的几何摘要。
+        artifact: 可追踪的源文件及摘要指纹；源文件不可读时为空。
+        validation: 几何、拓扑和区域契约的确定性校验结果。
+        region_bindings: 摘要中的区域候选及其拓扑绑定记录。
         geometry_file: 可选的修复或标准化后导出文件路径；当前 Gmsh 适配器不导出标准化文件，
             默认保持为空。
         wall_time: 处理耗时，单位为 s。
@@ -213,6 +266,9 @@ class CADImportResult(BaseModel):
 
     success: bool
     summary: Optional[CADGeometrySummary] = None
+    artifact: CADArtifact | None = None
+    validation: GeometryValidation | None = None
+    region_bindings: list[RegionBinding] = Field(default_factory=list)
     geometry_file: Optional[Path] = None
     wall_time: float = Field(ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -351,6 +407,19 @@ class AbstractCADKernel(ABC):
             if self.config.healing:
                 shape = self.repair(shape)
             summary = self.summarize(shape)
+            validation = validate_cad_summary(summary)
+            artifact = _cad_artifact(source, summary)
+            bindings = region_bindings_from_summary(summary)
+            if validation.status == "failed":
+                return CADImportResult(
+                    success=False,
+                    summary=summary,
+                    artifact=artifact,
+                    validation=validation,
+                    region_bindings=bindings,
+                    wall_time=time.perf_counter() - start,
+                    error_message="CAD 几何校验失败: " + "；".join(validation.blockers),
+                )
         except CADError as exc:
             return CADImportResult(
                 success=False,
@@ -360,6 +429,9 @@ class AbstractCADKernel(ABC):
         return CADImportResult(
             success=True,
             summary=summary,
+            artifact=artifact,
+            validation=validation,
+            region_bindings=bindings,
             wall_time=time.perf_counter() - start,
         )
 
@@ -401,6 +473,207 @@ class RegionCandidate(BaseModel):
     status: Literal["mapped", "ambiguous", "unresolved"] = "unresolved"
 
 
+def validate_cad_summary(summary: CADGeometrySummary) -> GeometryValidation:
+    """校验 CAD 摘要的几何、拓扑和区域契约。"""
+
+    checks: dict[str, Literal["passed", "failed", "unverified"]] = {}
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    extents = tuple(summary.bbox_max[index] - summary.bbox_min[index] for index in range(3))
+    if all(math.isfinite(value) for value in (*summary.bbox_min, *summary.bbox_max)) and all(
+        value > 0.0 for value in extents
+    ):
+        checks["bbox"] = "passed"
+    else:
+        checks["bbox"] = "failed"
+        blockers.append("包围盒必须包含三个有限的正长度方向。")
+
+    if summary.solid_count > 0 and summary.volume > 0.0 and summary.watertight:
+        checks["solid_geometry"] = "passed"
+    else:
+        checks["solid_geometry"] = "failed"
+        blockers.append("CAD 必须包含正体积且水密的三维实体。")
+
+    topology_by_id = {entity.stable_id: entity for entity in summary.topology_entities}
+    if not summary.topology_entities:
+        checks["topology"] = "unverified"
+        warnings.append("摘要未提供拓扑实体，无法验证面、边和体的父子关系。")
+    elif len(topology_by_id) != len(summary.topology_entities):
+        checks["topology"] = "failed"
+        blockers.append("拓扑实体 stable_id 必须唯一。")
+    else:
+        topology_errors: list[str] = []
+        for entity in summary.topology_entities:
+            if any(
+                not math.isfinite(value)
+                for value in (*entity.bbox_min, *entity.bbox_max, *entity.center, entity.measure)
+            ):
+                topology_errors.append(f"拓扑实体 {entity.stable_id} 含非有限几何值")
+            if any(entity.bbox_max[index] < entity.bbox_min[index] for index in range(3)):
+                topology_errors.append(f"拓扑实体 {entity.stable_id} 的包围盒范围无效")
+            if len(entity.children) != len(set(entity.children)):
+                topology_errors.append(f"拓扑实体 {entity.stable_id} 的子实体引用重复")
+            if entity.stable_id in entity.children:
+                topology_errors.append(f"拓扑实体 {entity.stable_id} 不能引用自身")
+            for child_id in entity.children:
+                child = topology_by_id.get(child_id)
+                if child is None or child.dimension != entity.dimension - 1:
+                    topology_errors.append(f"拓扑实体 {entity.stable_id} 的子实体关系无效")
+        if topology_errors:
+            checks["topology"] = "failed"
+            blockers.extend(sorted(set(topology_errors)))
+        else:
+            checks["topology"] = "passed"
+
+    if summary.solid_count != len(summary.parts):
+        checks["parts"] = "unverified"
+        warnings.append("零件摘要数量与实体数量不一致，无法确认所有实体的零件归属。")
+    elif any(
+        part.part_id not in topology_by_id or topology_by_id[part.part_id].dimension != 3
+        for part in summary.parts
+    ):
+        checks["parts"] = "failed"
+        blockers.append("零件摘要必须引用三维拓扑实体。")
+    else:
+        invalid_faces = [
+            face_id
+            for part in summary.parts
+            for face_id in part.face_ids
+            if face_id not in topology_by_id or topology_by_id[face_id].dimension != 2
+        ]
+        invalid_edges = [
+            edge_id
+            for part in summary.parts
+            for edge_id in part.edge_ids
+            if edge_id not in topology_by_id or topology_by_id[edge_id].dimension != 1
+        ]
+        if invalid_faces or invalid_edges:
+            checks["parts"] = "failed"
+            blockers.append("零件摘要引用了未知或维度不匹配的面/边拓扑实体。")
+        else:
+            checks["parts"] = "passed"
+
+    if not summary.source_sha256 or not re.fullmatch(r"[0-9a-f]{64}", summary.source_sha256):
+        checks["source_integrity"] = "unverified"
+        warnings.append("摘要没有可验证的源文件 SHA-256。")
+    else:
+        checks["source_integrity"] = "passed"
+    if not summary.topology_digest:
+        checks["topology_digest"] = "unverified"
+        warnings.append("摘要没有拓扑摘要指纹。")
+    else:
+        checks["topology_digest"] = "passed"
+
+    region_errors: list[str] = []
+    part_ids = {part.part_id for part in summary.parts}
+    for candidate in summary.region_candidates:
+        unknown = [item for item in candidate.topology_ids if item not in topology_by_id]
+        if unknown:
+            region_errors.append(f"区域 {candidate.name} 引用了未知拓扑实体")
+        if any(
+            item in topology_by_id and topology_by_id[item].dimension != 2
+            for item in candidate.topology_ids
+        ):
+            region_errors.append(f"区域 {candidate.name} 必须引用二维拓扑实体")
+        if any(item not in part_ids for item in candidate.part_ids):
+            region_errors.append(f"区域 {candidate.name} 引用了未知零件")
+        if candidate.status == "mapped" and not candidate.topology_ids:
+            region_errors.append(f"区域 {candidate.name} 标记为 mapped 但没有拓扑实体")
+    if region_errors:
+        checks["regions"] = "failed"
+        blockers.extend(sorted(set(region_errors)))
+    elif summary.region_candidates:
+        checks["regions"] = "passed"
+    else:
+        checks["regions"] = "unverified"
+        warnings.append("摘要没有区域候选，载荷和边界无法绑定到 CAD 拓扑。")
+
+    if blockers:
+        status: Literal["passed", "failed", "unverified"] = "failed"
+    elif any(value == "unverified" for value in checks.values()):
+        status = "unverified"
+    else:
+        status = "passed"
+    execution_ready = status == "passed" and not warnings
+    return GeometryValidation(
+        status=status,
+        execution_ready=execution_ready,
+        checks=checks,
+        blockers=sorted(set(blockers)),
+        warnings=sorted(set(warnings)),
+    )
+
+
+def region_bindings_from_summary(summary: CADGeometrySummary) -> list[RegionBinding]:
+    """将摘要中的区域候选转换为可序列化的绑定记录。"""
+
+    topology_by_id = {entity.stable_id: entity for entity in summary.topology_entities}
+    bindings: list[RegionBinding] = []
+    for candidate in summary.region_candidates:
+        dimensions = {
+            topology_by_id[item].dimension
+            for item in candidate.topology_ids
+            if item in topology_by_id
+        }
+        dimension = next(iter(dimensions)) if len(dimensions) == 1 else None
+        reason = ""
+        if candidate.status == "ambiguous":
+            reason = "候选面存在等距拓扑实体。"
+        elif candidate.status == "unresolved":
+            reason = "没有可确认的拓扑面。"
+        bindings.append(
+            RegionBinding(
+                name=candidate.name,
+                dimension=dimension,
+                topology_ids=list(candidate.topology_ids),
+                part_ids=list(candidate.part_ids),
+                status=candidate.status,
+                confidence=candidate.confidence,
+                reason=reason,
+            )
+        )
+    return bindings
+
+
+def _cad_artifact(source: Path, summary: CADGeometrySummary) -> CADArtifact | None:
+    """从现有源文件和摘要生成 CADArtifact；源文件不可读时不伪造指纹。"""
+
+    try:
+        source_path = source.resolve()
+        if not source_path.is_file():
+            return None
+        source_hash = _sha256_file(source_path)
+        source_size = source_path.stat().st_size
+    except OSError:
+        return None
+    summary_payload = summary.model_dump(mode="json")
+    summary_json = json.dumps(
+        summary_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    summary_digest = hashlib.sha256(summary_json).hexdigest()
+    return CADArtifact(
+        source_path=str(source_path),
+        source_format=summary.source_format,
+        source_sha256=source_hash,
+        source_size=source_size,
+        units=summary.units,
+        topology_digest=summary.topology_digest,
+        summary_digest=summary_digest,
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 CADGeometrySummary.model_rebuild()
 
 
@@ -417,6 +690,9 @@ class GeometryCandidate(BaseModel):
         bbox_max: 包围盒最大角点。
         region_candidates: 边界/载荷区域候选列表。
         parts: 按三维实体划分的零件摘要。
+        artifact: 源文件和摘要指纹。
+        geometry_validation: 几何、拓扑和区域契约校验结果。
+        region_bindings: 区域语义到拓扑实体的绑定记录。
         missing_fields: 几何无法确定、需补充的字段。
 
     Returns:
@@ -457,6 +733,9 @@ class GeometryCandidate(BaseModel):
     healing_applied: bool = False
     topology_entities: list[CADTopologyEntity] = Field(default_factory=list)
     parts: list[CADPartSummary] = Field(default_factory=list)
+    artifact: CADArtifact | None = None
+    geometry_validation: GeometryValidation | None = None
+    region_bindings: list[RegionBinding] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
 
 
@@ -506,6 +785,8 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
     )
     axes = (("x", 0, dx), ("y", 1, dy), ("z", 2, dz))
     regions: list[RegionCandidate] = list(summary.region_candidates)
+    geometry_validation = validate_cad_summary(summary)
+    bindings = region_bindings_from_summary(summary)
     if regions:
         return GeometryCandidate(
             geometry_type=_infer_geometry_type(dx, dy, dz),
@@ -520,6 +801,8 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
             healing_applied=summary.healing_applied,
             topology_entities=summary.topology_entities,
             parts=summary.parts,
+            geometry_validation=geometry_validation,
+            region_bindings=bindings,
             missing_fields=["material", "loads", "bcs"],
         )
     for axis, index, _extent in axes:
@@ -553,6 +836,8 @@ def geometry_candidate_from_summary(summary: CADGeometrySummary) -> GeometryCand
         healing_applied=summary.healing_applied,
         topology_entities=summary.topology_entities,
         parts=summary.parts,
+        geometry_validation=geometry_validation,
+        region_bindings=bindings,
         missing_fields=["material", "loads", "bcs"],
     )
 

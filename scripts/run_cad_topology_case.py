@@ -59,7 +59,12 @@ def main(argv: list[str] | None = None) -> int:
         default="材料钢，左端固定，右端承受10MPa轴向拉伸",
         help="材料、载荷和边界补全文本。",
     )
-    parser.add_argument("--seed-size", type=float, default=15.0)
+    parser.add_argument(
+        "--seed-size",
+        type=float,
+        default=None,
+        help="Gmsh 初始网格尺寸；实体块默认 15 mm，贯穿孔实体默认 8 mm。",
+    )
     parser.add_argument("--timeout", type=int, default=600)
     args = parser.parse_args(argv)
     generators = int(args.generate_box) + int(args.generate_hole_box)
@@ -67,7 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("必须指定 --cad、--generate-box 或 --generate-hole-box 之一。")
     if args.cad is not None and generators:
         parser.error("--cad 不能与生成选项同时指定。")
-    if args.seed_size <= 0:
+    seed_size = (
+        args.seed_size if args.seed_size is not None else (8.0 if args.generate_hole_box else 15.0)
+    )
+    if seed_size <= 0:
         parser.error("--seed-size 必须为正数。")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -88,18 +96,24 @@ def main(argv: list[str] | None = None) -> int:
     analysis = geometry.analyze(source)
     manifest: dict[str, object]
     if not analysis.success or analysis.candidate is None:
-        manifest = {"status": "failed", "stage": "cad_import", "error": analysis.error_message}
+        manifest = {
+            "schema_version": 1,
+            "status": "failed",
+            "stage": "cad_import",
+            "error": analysis.error_message,
+            "seed_size": seed_size,
+        }
         manifest["artifacts"] = stable_artifact_records(args.output_dir)
         _write_json(args.output_dir / "manifest.json", manifest)
-        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        _print_summary(manifest, args.output_dir / "manifest.json")
         return 1
 
     try:
-        params = geometry.to_model_params(source, args.completion)
+        params = geometry.to_model_params(source, args.completion, analysis=analysis)
         params = params.model_copy(
             update={
                 "mesh": params.mesh.model_copy(
-                    update={"element_type": ElementType.C3D4, "seed_size": args.seed_size}
+                    update={"element_type": ElementType.C3D4, "seed_size": seed_size}
                 )
             }
         )
@@ -112,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         mesh = GmshCADInpMesher(
             MeshConfig(
                 work_dir=args.output_dir / "mesh",
-                seed_size=args.seed_size,
+                seed_size=seed_size,
                 min_quality=0.3,
             )
         ).generate(mesh_params)
@@ -143,6 +157,14 @@ def main(argv: list[str] | None = None) -> int:
             "status": "passed" if passed else "failed",
             "source": str(source),
             "source_sha256": _sha256_file(source),
+            "seed_size": seed_size,
+            "artifact": analysis.artifact.model_dump(mode="json")
+            if analysis.artifact is not None
+            else None,
+            "geometry_validation": analysis.validation.model_dump(mode="json")
+            if analysis.validation is not None
+            else None,
+            "region_bindings": [item.model_dump(mode="json") for item in analysis.region_bindings],
             "candidate": analysis.candidate.model_dump(mode="json"),
             "case": case.model_dump(mode="json"),
             "mesh": {
@@ -159,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
 
     manifest["artifacts"] = stable_artifact_records(args.output_dir)
     _write_json(args.output_dir / "manifest.json", manifest)
-    print(json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
+    _print_summary(manifest, args.output_dir / "manifest.json")
     return 0 if manifest["status"] == "passed" else 1
 
 
@@ -174,10 +196,21 @@ def _checks(
     candidate = analysis.candidate  # type: ignore[attr-defined]
     regions = case.regions  # type: ignore[attr-defined]
     metadata = mesh.metadata  # type: ignore[attr-defined]
+    artifact = analysis.artifact  # type: ignore[attr-defined]
+    validation = analysis.validation  # type: ignore[attr-defined]
     fields = result.get("fields")
     checks = {
         "cad_topology_entities": bool(candidate.topology_entities),
         "cad_region_candidates": bool(candidate.region_candidates),
+        "cad_artifact": (
+            artifact is not None
+            and artifact.source_sha256 == candidate.source_sha256
+            and artifact.topology_digest == candidate.topology_digest
+        ),
+        "geometry_validation": (
+            validation is not None and validation.status == "passed" and validation.execution_ready
+        ),
+        "region_bindings": bool(analysis.region_bindings),  # type: ignore[attr-defined]
         "through_hole_topology": (
             _has_generated_through_hole(candidate) if require_through_hole else True
         ),
@@ -279,6 +312,21 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8"
     )
+
+
+def _print_summary(manifest: dict[str, object], manifest_path: Path) -> None:
+    """输出可供终端和 CI 读取的短摘要；完整清单保存在 manifest_path。"""
+
+    summary: dict[str, object] = {
+        "status": manifest.get("status"),
+        "manifest": str(manifest_path),
+    }
+    checks = manifest.get("checks")
+    if isinstance(checks, dict):
+        summary["checks"] = checks
+    if manifest.get("error"):
+        summary["error"] = manifest["error"]
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == "__main__":
