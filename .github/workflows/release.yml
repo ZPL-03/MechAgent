@@ -34,6 +34,22 @@ jobs:
           python -m pip install -e "packages/mechagent[dev,docs]"
           npm --prefix apps/mechagent-studio ci --no-audit --no-fund
           npm --prefix apps/mechagent-studio run build
+      - name: Run release quality gates
+        shell: pwsh
+        run: |
+          npm --prefix apps/mechagent-studio test
+          python scripts/check_env.py --profile portable
+          python -m ruff format --check packages tests scripts
+          python -m ruff check packages tests scripts
+          python -m mypy packages scripts tests
+          python -m pytest -m "not real_solver"
+          python scripts/build_knowledge.py
+          python scripts/index_knowledge.py
+          python -m mechagent.cli config validate
+          python -m pip check
+          python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
+          python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
+          python -m mkdocs build --strict
       - name: Build release assets
         shell: pwsh
         run: |

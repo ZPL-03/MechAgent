@@ -6,10 +6,12 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pytest import MonkeyPatch
 from scripts import (
+    audit_abaqus_license,
     build_release_manifest,
     check_release_tag,
     check_wheel_install,
@@ -37,6 +39,49 @@ def test_studio_http_smoke_verifies_independent_process_and_writes_manifest(tmp_
     assert result["server_stopped"] is True
     assert result["manifest_errors"] == []
     assert verify_manifest(Path(result["manifest"])) == []
+
+
+def test_abaqus_license_audit_writes_redacted_pass_manifest(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    raw_output = """License server status: 27800@HOST-PRIVATE
+License file(s): D:/private/licenses/abaqus.lic
+HOST-PRIVATE: license server UP (MASTER)
+ABAQUSLM: UP
+Users of abaqus: (Total of 1 license issued)
+"""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=raw_output, stderr=""),
+    )
+    output = tmp_path / "license" / "manifest.json"
+
+    report = audit_abaqus_license.audit_license(Path("abaqus.bat"), output=output)
+
+    assert report["status"] == "passed"
+    assert all(report["checks"].values())
+    saved = output.read_text(encoding="utf-8")
+    assert "HOST-PRIVATE" not in saved
+    assert "abaqus.lic" not in saved
+    assert report["stdout_sha256"]
+    assert verify_manifest(output) == []
+
+
+def test_abaqus_license_audit_preserves_timeout_failure(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    def timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(cmd="abaqus", timeout=1, output="partial")
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    output = tmp_path / "manifest.json"
+
+    report = audit_abaqus_license.audit_license(Path("abaqus.bat"), output=output, timeout=1)
+
+    assert report["status"] == "failed"
+    assert report["timed_out"] is True
+    assert output.is_file()
 
 
 def test_release_tag_matches_both_package_versions(tmp_path: Path) -> None:

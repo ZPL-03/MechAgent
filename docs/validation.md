@@ -53,6 +53,14 @@ python scripts/run_abaqus_smoke.py --abaqus D:/Abaqus2023/Commands/abaqus.bat
 
 Abaqus 2023 本机检查获得 189 个节点、80 个单元，位移 0.000476190471 mm，相对误差约 1.071×10⁻⁸，平均 S11=1 MPa。完成判定使用 STA 成功标记、锁文件释放和有效 ODB 字段；CAE 的 `job.status` 在该环境返回 `None`。这项证据不代表 Abaqus 平台适配器，也不构成不同边界模型之间的求解器对比。外层超时返回失败；启动器可能派生子进程，应核实本机作业状态后清理目录。
 
+许可证服务审计使用 Abaqus launcher 的只读 FlexNet 查询：
+
+```powershell
+python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.bat --output mechagent_output/abaqus-license-audit/manifest.json
+```
+
+清单只保存探针返回码、服务状态检查、耗时、输出长度和摘要哈希，不保存许可证服务器地址、许可证文件路径或原始诊断。本机清单 `mechagent_output/abaqus-license-audit/manifest.json` 的 `status` 为 `passed`，`process_succeeded`、`license_server_up`、`vendor_daemon_up` 和 `feature_usage_observed` 均为 `true`。该证据只覆盖本机 FlexNet 服务和 Abaqus vendor daemon，不代表集群许可证容量、跨主机高可用或许可证服务的长期可用性。
+
 ## 质量门禁
 
 输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查

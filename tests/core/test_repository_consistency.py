@@ -157,6 +157,14 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
     assert "gh attestation verify" in release_workflow
     assert "--signer-workflow" in release_workflow
     assert "--source-ref" in release_workflow
+    for release_command in (
+        "npm --prefix apps/mechagent-studio test",
+        'python -m pytest -m "not real_solver"',
+        "python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence",
+        "python scripts/audit_python_dependencies.py --runtime-only",
+        "python -m mkdocs build --strict",
+    ):
+        assert release_command in release_workflow
     for forbidden in (
         "D:/anaconda3",
         "self-hosted",
@@ -177,6 +185,7 @@ def test_validation_guide_is_the_quality_command_reference() -> None:
         "run_llm_smoke.py",
         "run_abaqus_smoke.py",
         "run_abaqus_multistep.py",
+        "audit_abaqus_license.py",
         "run_cad_topology_case.py",
         "run_backend_comparison.py",
         "compare_backends.py",
