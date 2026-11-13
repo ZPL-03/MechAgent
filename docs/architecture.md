@@ -74,7 +74,7 @@ CAD 内核内置基于 gmsh OpenCASCADE 后端的 `GmshCADKernel`（注册名 `g
 - `analysis`：分析类型和几何非线性开关。
 - `case_id`：模型能力或标准验证案例编号，例如 `STATIC-BEAM`、`STATIC-PLATE`、`STATIC-PERFORATED-PLATE`、`STATIC-SOLID`。
 - `load_case`：载荷工况编号，例如 `cantilever_tip_force`、`cantilever_uniform_line_load`、`simply_supported_pressure`、`perforated_plate_pressure`、`fixed_solid_axial_pressure`。
-- `mesh_file`：网格阶段生成并传递给求解器的 `.inp` 文件路径。
+- `mesh_file`：网格阶段生成并传递给求解器的 `.inp` 文件路径；`MeshAgent` 在 `mesh_metadata.mesh_sha256` 中记录文件摘要，`SolverAgent` 启动求解器前重新校验文件存在性和摘要一致性。
 - `metadata`：输入来源和扩展诊断信息，不作为求解控制字段。
 
 跨 API、编排和工具边界使用 `SimulationCase` 作为版本化封装。它复用同一个
