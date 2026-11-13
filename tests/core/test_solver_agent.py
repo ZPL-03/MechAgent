@@ -8,7 +8,13 @@ from typing import Any
 import pytest
 
 from mechagent.config import MechAgentConfig, SolverSettings
-from mechagent.core import AbstractSolver, SolverResult, register_solver, unregister_solver
+from mechagent.core import (
+    AbstractSolver,
+    MeshResult,
+    SolverResult,
+    register_solver,
+    unregister_solver,
+)
 from mechagent.core.models import (
     AnalysisSpec,
     AnalysisType,
@@ -24,6 +30,7 @@ from mechagent.core.models import (
     ModelParams,
 )
 from mechagent.core.validation import cantilever_tip_deflection, tc01_model_params
+from mechagent.evidence import sha256
 from mechagent.orchestrator.agents.solver import SolverAgent
 from mechagent.orchestrator.capabilities import (
     SimulationCapability,
@@ -200,6 +207,47 @@ def test_solver_agent_uses_capability_solver_over_global_default(tmp_path: Path)
     finally:
         unregister_capability("unit_solver_tool_capability")
         unregister_solver("unit-capability-solver")
+
+
+def test_solver_agent_revalidates_mesh_file_hash(tmp_path: Path) -> None:
+    register_solver("unit-integrity-solver", _EvalDummySolver)
+    register_capability(
+        SimulationCapability(
+            capability_id="unit_mesh_integrity_capability",
+            task_case_id="UNIT-MESH-INTEGRITY",
+            title="网格完整性能力",
+            analysis_type="static",
+            physics_domain="structural",
+            parser=_unit_eval_parser,
+            matcher=lambda _request: False,
+            geometry_detector=lambda _request: "beam",
+            evaluator=_unit_eval_evaluator,
+            solver_name="unit-integrity-solver",
+        )
+    )
+    mesh_file = tmp_path / "mesh.inp"
+    mesh_file.write_text("*NODE\n1, 0, 0, 0\n", encoding="utf-8")
+    mesh_sha256 = sha256(mesh_file)
+    mesh_file.write_text("*NODE\n1, 1, 0, 0\n", encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="SHA-256"):
+            SolverAgent(MechAgentConfig(), tmp_path / "solver").solve(
+                TaskItem(
+                    task_id="TASK_1",
+                    case_id="UNIT-MESH-INTEGRITY",
+                    capability_id="unit_mesh_integrity_capability",
+                    title="网格完整性能力",
+                ),
+                tc01_model_params(),
+                MeshResult(
+                    success=True,
+                    mesh_file=mesh_file,
+                    metadata={"mesh_sha256": mesh_sha256},
+                ),
+            )
+    finally:
+        unregister_capability("unit_mesh_integrity_capability")
+        unregister_solver("unit-integrity-solver")
 
 
 class _EvalDummySolver(AbstractSolver):

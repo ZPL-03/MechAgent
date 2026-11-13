@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -13,6 +12,7 @@ from mechagent.config import MechAgentConfig
 from mechagent.core.factory import create_mesher
 from mechagent.core.mesher import MeshConfig, MeshResult
 from mechagent.core.models import ElementType, ModelParams
+from mechagent.evidence import sha256
 from mechagent.orchestrator.capabilities import get_capability
 from mechagent.orchestrator.llm_advisor import AgentLLMAdvisor
 from mechagent.orchestrator.llm_payload import advisory_payload
@@ -160,7 +160,7 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
                 "error_message": f"网格结果文件不存在: {result.mesh_file}",
             }
         )
-    mesh_sha256 = _sha256_file(result.mesh_file)
+    mesh_sha256 = sha256(result.mesh_file)
     declared_sha256 = result.metadata.get("mesh_sha256")
     if declared_sha256 is not None and declared_sha256 != mesh_sha256:
         return result.model_copy(
@@ -193,14 +193,6 @@ def _apply_quality_gate(result: MeshResult, min_quality: float) -> MeshResult:
             "error_message": f"网格质量低于阈值 {min_quality:.6g}: {details}。",
         }
     )
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _mesh_strategy_context(model_params: ModelParams, task: TaskItem | None) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from mechagent.core.factory import create_solver
 from mechagent.core.mesher import MeshResult
 from mechagent.core.models import ModelParams, SimulationCase
 from mechagent.core.solver import SolverConfig
+from mechagent.evidence import sha256
 from mechagent.orchestrator.capabilities import get_capability
 from mechagent.orchestrator.evaluation import ResultEvaluationContext
 from mechagent.orchestrator.llm_advisor import AgentLLMAdvisor
@@ -68,6 +69,13 @@ class SolverAgent:
             if not mesh_result.success or mesh_result.mesh_file is None:
                 msg = mesh_result.error_message or "网格生成失败，求解阶段无法继续。"
                 raise ValueError(msg)
+            if not mesh_result.mesh_file.is_file():
+                raise ValueError(f"网格结果文件不存在: {mesh_result.mesh_file}")
+            declared_sha256 = mesh_result.metadata.get("mesh_sha256")
+            if not isinstance(declared_sha256, str) or not declared_sha256:
+                raise ValueError("网格结果缺少有效的 mesh_sha256，求解阶段无法继续。")
+            if sha256(mesh_result.mesh_file) != declared_sha256:
+                raise ValueError("网格文件 SHA-256 与结果元数据不一致，求解阶段无法继续。")
             model_params = model_params.model_copy(update={"mesh_file": mesh_result.mesh_file})
 
         if not task.capability_id:

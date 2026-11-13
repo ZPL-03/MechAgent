@@ -132,7 +132,7 @@ S3 客户端在上传、下载和恢复时校验对象内容与 SHA-256 摘要�
 案例契约；`root`、`tip`、`top_surface`、`bottom_surface` 和 `all_edges` 只有在唯一候选、
 拓扑 ID 完整且置信度达到 0.80 时才生成 `RegionSpec(kind="topology")`，其他状态保留
 `unknown` 并阻断执行。成功网格结果必须指向实际存在的网格文件，并在结果元数据中记录该文件的
-`mesh_sha256`；文件缺失或摘要不一致会阻断求解。该映射已在确定性实体和带贯穿圆孔实体上通过 `gmsh-cad-inp` 的直接
+`mesh_sha256`；MeshAgent 和 SolverAgent 均校验文件摘要，文件缺失或摘要不一致会阻断求解。该映射已在确定性实体和带贯穿圆孔实体上通过 `gmsh-cad-inp` 的直接
 STEP 网格、面到节点集合映射、C3D4 质量检查和 CalculiX 真实求解证据；装配体、复杂薄壁件、
 通用修复和质量统一模型仍未完成。`mechagent_output/mesh-convergence-tc01/manifest.json`
 记录 TC-01 在 seed size 40、20、10、5 mm 的四次 CalculiX 真实运行；终点节点/单元数为
