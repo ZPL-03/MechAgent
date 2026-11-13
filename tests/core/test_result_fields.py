@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from mechagent.core import attach_case_result_fields, attach_mapped_result_fields
+from mechagent.core import (
+    attach_case_result_fields,
+    attach_mapped_result_fields,
+    compute_case_digest,
+    compute_physical_case_digest,
+)
 from mechagent.core.exceptions import SolverError
 from mechagent.core.models import LoadStepSpec, ResultFieldSpec, SimulationCase
 from mechagent.core.validation import tc01_model_params, tc03_model_params
@@ -60,6 +65,36 @@ def test_result_fields_include_stable_mesh_digest() -> None:
 
     assert len(extracted["mesh_digest"]) == 64
     assert extracted["mesh_digest"].islower()
+
+
+def test_result_fields_include_separate_physical_case_digest() -> None:
+    case = _case()
+    extracted = attach_case_result_fields(
+        {
+            "fields": {
+                "displacement": {"location": "node", "values": {"1": [0.0, 0.0, 0.0]}},
+                "stress": {
+                    "location": "node",
+                    "values": {"1": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                },
+            }
+        },
+        case,
+    )
+
+    assert extracted["case_digest"] == compute_case_digest(case)
+    assert extracted["physical_case_digest"] == compute_physical_case_digest(case)
+
+    alternate = case.model_copy(
+        update={
+            "result_fields": [
+                field.model_copy(update={"location": "integration_point"})
+                for field in case.result_fields
+            ]
+        }
+    )
+    assert compute_case_digest(alternate) != compute_case_digest(case)
+    assert compute_physical_case_digest(alternate) == compute_physical_case_digest(case)
 
 
 def test_result_fields_reject_declared_mesh_digest_mismatch() -> None:

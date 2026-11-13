@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -27,6 +26,7 @@ from mechagent.core.compare import (  # noqa: E402
     evaluate_reaction_balance,
 )
 from mechagent.core.models import ModelParams, SimulationCase  # noqa: E402
+from mechagent.core.results import compute_case_digest, compute_physical_case_digest  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.core.validation import (  # noqa: E402
     tc01_model_params,
@@ -147,9 +147,8 @@ def _run_case(
         provenance_confidence=1.0,
     )
     case_payload = case.model_dump(mode="json")
-    case_digest = hashlib.sha256(
-        json.dumps(case_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    case_digest = compute_case_digest(case)
+    physical_case_digest = compute_physical_case_digest(case)
     case_dir = output_dir / case_id
     left_dir = case_dir / "calculix"
     right_dir = case_dir / "abaqus"
@@ -253,6 +252,7 @@ def _run_case(
     return {
         "case_id": case_id,
         "case_digest": case_digest,
+        "physical_case_digest": physical_case_digest,
         "case": case_payload,
         "calculix_result": _portable_path(output_dir, left_dir / "result.json"),
         "abaqus_result": _portable_path(output_dir, right_dir / "result.json"),

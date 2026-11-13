@@ -168,11 +168,10 @@ TC-03、TC-04 在本机 Abaqus/Standard 与 CalculiX 上完成真实运行。请
 10%，统一语义摘要相对误差阈值为 3%，绝对阈值均为 0.005。证据位于
 `mechagent_output/backend-comparison-current/manifest.json`，三个案例的请求字段、
 统一单元质心字段、统一语义字段和反力平衡均为 `passed`。结果根据节点坐标和单元连接生成 `mesh_digest`，
-仅在两侧指纹一致时允许 `element` 或 `integration_point` 场按键比较；真实跨工具案例的网格不同，
+同时记录完整 `case_digest` 和排除结果字段原生位置的 `physical_case_digest`。完整指纹不一致时，
+只有两侧物理指纹同时存在且一致才允许继续字段比较；物理指纹不一致直接失败，字段位置、单位和离散语义仍单独校验。仅在两侧网格指纹一致且字段键对应时允许 `element` 或 `integration_point` 场按键比较；真实跨工具案例的网格不同，
 原始场仍存在节点/积分点、梁截面展开和离散标签差异，`raw_fields` 对这些字段保留 `unverified` 或 `failed`；逐积分点应力、逐节点反力和原始能量场的跨工具等价性仍未验收。Abaqus 双步 TC-01
-的完整场提取清单已通过，包含两个分析步和每步两个输出帧；`scripts/run_calculix_multistep.py`
-的 FRD 清单也已通过，包含两个分析步和每步一个结果帧，逐步覆盖位移、应力、应变、体积、应变能密度、反力和能量。CalculiX
-的应力、应变和反力保持节点位置，体积、应变能密度和能量保持单元位置。统一结果层为单元映射字段记录源值数量、目标单元数量、已映射数量、覆盖率、完整性、源位置和映射方法；多分析步同时提供逐步逐帧的 `mapped_step_fields`。`compare_backend_step_fields()` 按分析步和帧复用结果级契约与字段比较规则，缺步或缺帧保持 `failed`，覆盖率不足的单元映射保持 `unverified`。比较结果为每个字段记录 `status`、`reason`、`alignment`、比较数量、映射方法和双方覆盖率。许可证策略支持进程内信号量和可选的
+的完整场提取清单已通过，包含两个分析步和每步两个输出帧；`scripts/run_calculix_multistep.py` 的 FRD 清单也已通过，包含两个分析步和每步一个结果帧，逐步覆盖位移、应力、应变、体积、应变能密度、反力和能量。CalculiX 的应力、应变和反力保持节点位置，体积、应变能密度和能量保持单元位置。统一结果层为单元映射字段记录源值数量、目标单元数量、已映射数量、覆盖率、完整性、源位置和映射方法；多分析步同时提供逐步逐帧的 `mapped_step_fields`。`compare_backend_step_fields()` 按分析步和帧复用结果级契约与字段比较规则，缺步或缺帧保持 `failed`，覆盖率不足的单元映射保持 `unverified`。当前双步证据中两侧物理指纹一致且末帧比较通过，但 Abaqus 初始帧在 CalculiX 中没有对应结果帧，完整逐帧清单 `mechagent_output/multistep-comparison-current/manifest.json` 的状态为 `failed`。比较结果为每个字段记录 `status`、`reason`、`alignment`、比较数量、映射方法和双方覆盖率。许可证策略支持进程内信号量和可选的
 共享 SQLite 租约队列，队列具有容量漂移检查、心跳续租、过期回收和超时失败；本机 FlexNet 只读
 审计清单已通过，集群许可证服务容量和跨主机高可用仍需部署验收。应力、反力、能量的原始场映射、更广泛单元族、网格和
 工程案例仍需独立的跨工具验收。

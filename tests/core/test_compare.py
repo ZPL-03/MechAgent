@@ -39,6 +39,67 @@ def test_backend_comparison_rejects_case_fingerprint_mismatch() -> None:
     assert result.differences[0]["reason"] == "case_digest_mismatch"
 
 
+def test_backend_comparison_accepts_different_full_contracts_with_same_physical_digest() -> None:
+    left = {
+        "case_digest": "a" * 64,
+        "physical_case_digest": "p" * 64,
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"1": 10.0},
+                "coverage": 1.0,
+                "complete": True,
+            }
+        },
+        "element_centroids": {"1": [0.5, 0.0, 0.0]},
+    }
+    right = {
+        "case_digest": "b" * 64,
+        "physical_case_digest": "p" * 64,
+        "mapped_fields": {
+            "stress_sxx": {
+                "location": "element_centroid",
+                "unit": "MPa",
+                "values": {"2": 10.0},
+                "coverage": 1.0,
+                "complete": True,
+            }
+        },
+        "element_centroids": {"2": [0.5, 0.0, 0.0]},
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="mapped_fields",
+    )
+
+    assert result.status == "passed"
+
+
+def test_backend_comparison_rejects_physical_case_digest_mismatch() -> None:
+    result = compare_backend_results(
+        {
+            "case_digest": "a" * 64,
+            "physical_case_digest": "p" * 64,
+            "requested_fields": {"u": {"values": {"1": 1.0}}},
+        },
+        {
+            "case_digest": "b" * 64,
+            "physical_case_digest": "q" * 64,
+            "requested_fields": {"u": {"values": {"1": 1.0}}},
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.differences[0]["reason"] == "physical_case_digest_mismatch"
+
+
 @pytest.mark.parametrize(
     ("key", "left_value", "right_value", "reason"),
     [

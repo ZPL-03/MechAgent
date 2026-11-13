@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -22,6 +21,7 @@ for source in (
 
 from mechagent.core.adapters.calculix import CalculiXAdapter  # noqa: E402
 from mechagent.core.models import SimulationCase  # noqa: E402
+from mechagent.core.results import compute_case_digest, compute_physical_case_digest  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.evidence import stable_artifact_records  # noqa: E402
 from run_abaqus_multistep import (  # noqa: E402
@@ -42,11 +42,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     case = _case_for_calculix()
-    case_digest = hashlib.sha256(
-        json.dumps(
-            case.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()
+    case_digest = compute_case_digest(case)
+    physical_case_digest = compute_physical_case_digest(case)
     adapter = CalculiXAdapter(
         SolverConfig(solver_path=args.calculix, work_dir=args.output_dir, timeout=args.timeout)
     )
@@ -62,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = _summary(
         result,
         case_digest,
+        physical_case_digest=physical_case_digest,
         case_id="TC-01-multistep-calculix",
         required_history=set(),
         minimum_frames=1,

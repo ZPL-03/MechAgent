@@ -131,6 +131,27 @@ def compare_backend_results(
     selected_tolerance = tolerance or ComparisonTolerance()
     left_digest = left.get("case_digest")
     right_digest = right.get("case_digest")
+    left_physical_digest = left.get("physical_case_digest")
+    right_physical_digest = right.get("physical_case_digest")
+    if (
+        isinstance(left_physical_digest, str)
+        and isinstance(right_physical_digest, str)
+        and left_physical_digest != right_physical_digest
+    ):
+        return BackendComparison(
+            status="failed",
+            left_backend=left_backend,
+            right_backend=right_backend,
+            field_source=field_source,
+            tolerance=selected_tolerance,
+            differences=[
+                {
+                    "reason": "physical_case_digest_mismatch",
+                    "left_physical_case_digest": left_physical_digest,
+                    "right_physical_case_digest": right_physical_digest,
+                }
+            ],
+        )
     if left_digest is not None or right_digest is not None:
         if not isinstance(left_digest, str) or not isinstance(right_digest, str):
             return BackendComparison(
@@ -147,7 +168,11 @@ def compare_backend_results(
                     }
                 ],
             )
-        if left_digest != right_digest:
+        if left_digest != right_digest and not (
+            isinstance(left_physical_digest, str)
+            and isinstance(right_physical_digest, str)
+            and left_physical_digest == right_physical_digest
+        ):
             return BackendComparison(
                 status="failed",
                 left_backend=left_backend,
@@ -159,6 +184,8 @@ def compare_backend_results(
                         "reason": "case_digest_mismatch",
                         "left_case_digest": left_digest,
                         "right_case_digest": right_digest,
+                        "left_physical_case_digest": left_physical_digest,
+                        "right_physical_case_digest": right_physical_digest,
                     }
                 ],
             )
@@ -722,6 +749,7 @@ def _step_frame_payload(
         key: result[key]
         for key in (
             "case_digest",
+            "physical_case_digest",
             "units",
             "coordinate_system",
             "mesh_digest",

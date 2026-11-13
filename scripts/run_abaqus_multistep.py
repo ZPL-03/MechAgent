@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -18,6 +17,10 @@ for source in (
 
 from mechagent.core.adapters.abaqus import AbaqusAdapter  # noqa: E402
 from mechagent.core.models import LoadStepSpec, ResultFieldSpec, SimulationCase  # noqa: E402
+from mechagent.core.results import (  # noqa: E402
+    compute_case_digest,
+    compute_physical_case_digest,
+)
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.core.validation import tc01_model_params  # noqa: E402
 from mechagent.evidence import stable_artifact_records  # noqa: E402
@@ -34,10 +37,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     case = _case()
-    case_payload = case.model_dump(mode="json")
-    case_digest = hashlib.sha256(
-        json.dumps(case_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    case_digest = compute_case_digest(case)
+    physical_case_digest = compute_physical_case_digest(case)
     adapter = AbaqusAdapter(
         SolverConfig(solver_path=args.abaqus, work_dir=args.output_dir, timeout=args.timeout)
     )
@@ -50,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _write_json(args.output_dir / "result.json", result)
-    summary = _summary(result, case_digest)
+    summary = _summary(result, case_digest, physical_case_digest=physical_case_digest)
     summary["artifacts"] = stable_artifact_records(args.output_dir)
     _write_json(args.output_dir / "manifest.json", summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -111,6 +112,7 @@ def _summary(
     result: dict[str, object],
     case_digest: str,
     *,
+    physical_case_digest: str | None = None,
     case_id: str = "TC-01-multistep",
     required_history: set[str] | None = None,
     minimum_frames: int = 2,
@@ -216,7 +218,14 @@ def _summary(
         and all(count > 0 for key, count in field_counts.items() if key in required)
         and all(_step_row_has_frames(row, minimum=minimum_frames) for row in step_rows)
     )
-    return {
+    if result.get("case_digest") not in {None, case_digest}:
+        passed = False
+    if (
+        physical_case_digest is not None
+        and result.get("physical_case_digest") != physical_case_digest
+    ):
+        passed = False
+    summary: dict[str, object] = {
         "schema_version": 1,
         "status": "passed" if passed else "failed",
         "case_id": case_id,
@@ -237,6 +246,9 @@ def _summary(
         else None,
         "odb": Path(str(result.get("odb", ""))).name if result.get("odb") else None,
     }
+    if physical_case_digest is not None:
+        summary["physical_case_digest"] = physical_case_digest
+    return summary
 
 
 def _field_counts(fields: object) -> dict[str, int]:

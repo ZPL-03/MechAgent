@@ -89,12 +89,8 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
     # The case fingerprint travels with every adapter result.  A backend
     # comparison can therefore reject results produced from different input
     # contracts before it compares numerical fields.
-    case_payload = case.model_dump(mode="json")
-    extracted["case_digest"] = hashlib.sha256(
-        json.dumps(case_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    extracted["case_digest"] = compute_case_digest(case)
+    extracted["physical_case_digest"] = compute_physical_case_digest(case)
     extracted["case_schema_version"] = case.schema_version
     extracted["case_id"] = case.case_id or case.model.case_id
     extracted["units"] = case.units.model_dump(mode="json")
@@ -258,6 +254,50 @@ def attach_case_result_fields(extracted: dict[str, Any], case: SimulationCase) -
     # ``step_results`` remains for compatibility with existing reports.
     extracted["result_steps"] = step_results
     return extracted
+
+
+def compute_case_digest(case: SimulationCase) -> str:
+    """计算完整案例契约指纹。
+
+    该指纹包含结果字段的原生位置和案例来源元数据，用于判断两个结果是否
+    由完全相同的 ``SimulationCase`` 契约生成。
+    """
+
+    return _digest_payload(case.model_dump(mode="json"))
+
+
+def compute_physical_case_digest(case: SimulationCase) -> str:
+    """计算与后端原生结果位置无关的物理案例指纹。
+
+    指纹包含几何、材料、载荷、边界、网格、分析步、求解控制、单位、坐标、
+    区域和案例 schema。``request``、``provenance`` 以及案例标识属于来源和
+    归档元数据，不参与物理身份；结果字段保留其物理量、选择器、单位和
+    必需性，但排除仅由后端输出位置决定的 ``location``。
+    """
+
+    payload = case.model_dump(mode="json")
+    payload.pop("request", None)
+    payload.pop("provenance", None)
+    payload.pop("case_id", None)
+    model = payload.get("model")
+    if isinstance(model, dict):
+        model.pop("case_id", None)
+    result_fields = payload.get("result_fields")
+    if isinstance(result_fields, list):
+        payload["result_fields"] = [
+            {key: value for key, value in field.items() if key != "location"}
+            for field in result_fields
+            if isinstance(field, dict)
+        ]
+    return _digest_payload(payload)
+
+
+def _digest_payload(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
 
 
 def attach_mapped_result_fields(extracted: dict[str, Any], case: SimulationCase) -> dict[str, Any]:

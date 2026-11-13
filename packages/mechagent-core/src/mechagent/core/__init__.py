@@ -88,7 +88,9 @@ from mechagent.core.postproc import PostProcessor
 from mechagent.core.results import (
     attach_case_result_fields,
     attach_mapped_result_fields,
+    compute_case_digest,
     compute_mesh_digest,
+    compute_physical_case_digest,
 )
 from mechagent.core.rules import (
     RuleViolation,
@@ -164,7 +166,9 @@ __all__ = [
     "evaluate_reaction_balance",
     "attach_case_result_fields",
     "attach_mapped_result_fields",
+    "compute_case_digest",
     "compute_mesh_digest",
+    "compute_physical_case_digest",
     "RuleViolation",
     "SolverArtifact",
     "SolverConfig",
