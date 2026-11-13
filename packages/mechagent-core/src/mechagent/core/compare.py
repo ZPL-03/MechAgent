@@ -57,6 +57,33 @@ class BackendComparison(BaseModel):
     differences: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class StepFrameComparison(BaseModel):
+    """单个分析步和输出帧的跨后端比较。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_key: str
+    step_id: str | None = None
+    sequence: int | None = None
+    frame_index: int | None = None
+    comparison: BackendComparison
+
+
+class BackendStepComparison(BaseModel):
+    """多步结果的逐步逐帧跨后端比较。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["passed", "failed", "unverified"]
+    left_backend: str
+    right_backend: str
+    field_source: Literal["requested_fields", "fields", "mapped_fields", "comparison_fields"]
+    steps: list[StepFrameComparison] = Field(default_factory=list)
+    missing_steps: list[str] = Field(default_factory=list)
+    missing_frames: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
 class EquilibriumReport(BaseModel):
     """外加载荷与支撑反力的合力平衡校核。"""
 
@@ -529,6 +556,185 @@ def compare_backend_results(
         tolerance=selected_tolerance,
         differences=differences,
     )
+
+
+def compare_backend_step_fields(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    *,
+    left_backend: str,
+    right_backend: str,
+    tolerance: ComparisonTolerance | None = None,
+    field_source: Literal[
+        "requested_fields", "fields", "mapped_fields", "comparison_fields"
+    ] = "mapped_fields",
+) -> BackendStepComparison:
+    """按分析步和输出帧比较两个结果的字段。
+
+    ``mapped_fields`` 从 ``mapped_step_fields`` 读取逐帧单元质心场，其他场源从
+    ``step_results`` 读取。步和帧按稳定标识配对；任一侧缺少声明的步或帧时，
+    比较状态为 ``failed``，避免只比较两侧最后一帧而掩盖不完整结果。
+    """
+
+    left_steps = _step_records(left, field_source)
+    right_steps = _step_records(right, field_source)
+    if not left_steps or not right_steps:
+        return BackendStepComparison(
+            status="unverified",
+            left_backend=left_backend,
+            right_backend=right_backend,
+            field_source=field_source,
+            reason="逐步结果缺失，不能进行逐帧比较。",
+        )
+
+    selected_tolerance = tolerance or ComparisonTolerance()
+    left_by_key = {record["key"]: record for record in left_steps}
+    right_by_key = {record["key"]: record for record in right_steps}
+    step_keys = sorted(set(left_by_key) | set(right_by_key))
+    missing_steps = sorted(set(left_by_key) ^ set(right_by_key))
+    frame_results: list[StepFrameComparison] = []
+    missing_frames: list[str] = []
+    statuses: list[str] = []
+    for step_key in step_keys:
+        left_step = left_by_key.get(step_key)
+        right_step = right_by_key.get(step_key)
+        if left_step is None or right_step is None:
+            continue
+        left_frames = {frame["key"]: frame for frame in left_step["frames"]}
+        right_frames = {frame["key"]: frame for frame in right_step["frames"]}
+        for frame_key in sorted(set(left_frames) | set(right_frames)):
+            left_frame = left_frames.get(frame_key)
+            right_frame = right_frames.get(frame_key)
+            frame_label = f"{step_key}[{frame_key}]"
+            if left_frame is None or right_frame is None:
+                missing_frames.append(frame_label)
+                continue
+            left_payload = _step_frame_payload(left, field_source, left_frame["fields"])
+            right_payload = _step_frame_payload(right, field_source, right_frame["fields"])
+            comparison = compare_backend_results(
+                left_payload,
+                right_payload,
+                left_backend=left_backend,
+                right_backend=right_backend,
+                tolerance=selected_tolerance,
+                field_source=field_source,
+            )
+            statuses.append(comparison.status)
+            frame_results.append(
+                StepFrameComparison(
+                    step_key=step_key,
+                    step_id=left_step.get("step_id") or right_step.get("step_id"),
+                    sequence=left_step.get("sequence")
+                    if left_step.get("sequence") is not None
+                    else right_step.get("sequence"),
+                    frame_index=left_frame.get("frame_index")
+                    if left_frame.get("frame_index") is not None
+                    else right_frame.get("frame_index"),
+                    comparison=comparison,
+                )
+            )
+
+    if missing_steps or missing_frames:
+        status: Literal["passed", "failed", "unverified"] = "failed"
+    elif not statuses:
+        status = "unverified"
+    elif "failed" in statuses:
+        status = "failed"
+    elif "unverified" in statuses:
+        status = "unverified"
+    else:
+        status = "passed"
+    return BackendStepComparison(
+        status=status,
+        left_backend=left_backend,
+        right_backend=right_backend,
+        field_source=field_source,
+        steps=frame_results,
+        missing_steps=missing_steps,
+        missing_frames=missing_frames,
+    )
+
+
+def _step_records(result: dict[str, Any], field_source: str) -> list[dict[str, Any]]:
+    key = "mapped_step_fields" if field_source == "mapped_fields" else "step_results"
+    raw_steps = result.get(key)
+    if not isinstance(raw_steps, list):
+        return []
+    records: list[dict[str, Any]] = []
+    for index, raw_step in enumerate(raw_steps):
+        if not isinstance(raw_step, dict):
+            continue
+        step_id = raw_step.get("step_id")
+        sequence = raw_step.get("sequence")
+        step_name = raw_step.get("step_name")
+        if isinstance(step_id, str):
+            step_key = f"id:{step_id}"
+        elif isinstance(sequence, int):
+            step_key = f"sequence:{sequence}"
+        elif isinstance(step_name, str):
+            step_key = f"name:{step_name}"
+        else:
+            step_key = f"index:{index}"
+        raw_frames = raw_step.get("frames")
+        frames: list[dict[str, Any]] = []
+        if isinstance(raw_frames, list) and raw_frames:
+            for frame_index, raw_frame in enumerate(raw_frames):
+                if not isinstance(raw_frame, dict):
+                    continue
+                frame_key_value = raw_frame.get("frame_index", frame_index)
+                frame_key = str(frame_key_value)
+                fields_key = "mapped_fields" if field_source == "mapped_fields" else "fields"
+                frame_fields = raw_frame.get(fields_key)
+                frames.append(
+                    {
+                        "key": frame_key,
+                        "frame_index": frame_key_value
+                        if isinstance(frame_key_value, int)
+                        else None,
+                        "fields": frame_fields if isinstance(frame_fields, dict) else {},
+                    }
+                )
+        else:
+            fields_key = "mapped_fields" if field_source == "mapped_fields" else "fields"
+            step_fields = raw_step.get(fields_key)
+            frames.append(
+                {
+                    "key": "final",
+                    "frame_index": None,
+                    "fields": step_fields if isinstance(step_fields, dict) else {},
+                }
+            )
+        records.append(
+            {
+                "key": step_key,
+                "step_id": step_id if isinstance(step_id, str) else None,
+                "sequence": sequence if isinstance(sequence, int) else None,
+                "frames": frames,
+            }
+        )
+    return records
+
+
+def _step_frame_payload(
+    result: dict[str, Any], field_source: str, fields: dict[str, Any]
+) -> dict[str, Any]:
+    payload = {
+        key: result[key]
+        for key in (
+            "case_digest",
+            "units",
+            "coordinate_system",
+            "mesh_digest",
+            "nodes",
+            "mesh_nodes",
+            "elements",
+            "element_centroids",
+            "fields",
+        )
+        if key in result
+    }
+    payload[field_source] = fields
+    return payload
 
 
 def _field_mapping_name(left: dict[str, Any] | None, right: dict[str, Any] | None) -> str | None:

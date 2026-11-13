@@ -5,6 +5,7 @@ import pytest
 from mechagent.core.compare import (
     ComparisonTolerance,
     compare_backend_results,
+    compare_backend_step_fields,
     derive_comparison_fields,
     evaluate_reaction_balance,
 )
@@ -600,3 +601,132 @@ def test_mapped_fields_with_incomplete_coverage_are_unverified() -> None:
     assert result.field_results["stress_sxx"].status == "unverified"
     assert result.field_results["stress_sxx"].reason == "mapping_incomplete"
     assert result.field_results["stress_sxx"].left_coverage == 0.5
+
+
+def test_multistep_mapped_fields_compare_each_frame() -> None:
+    common = {
+        "case_digest": "a" * 64,
+        "units": {"length": "mm"},
+        "coordinate_system": {"name": "global"},
+        "element_centroids": {"1": [0.5, 0.0, 0.0]},
+    }
+    left = {
+        **common,
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "sequence": 1,
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"1": 10.0},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                    {
+                        "frame_index": 1,
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"1": 20.0},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    right = {
+        **common,
+        "element_centroids": {"42": [0.5, 0.0, 0.0]},
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "sequence": 1,
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"42": 10.001},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                    {
+                        "frame_index": 1,
+                        "mapped_fields": {
+                            "stress_sxx": {
+                                "location": "element_centroid",
+                                "unit": "MPa",
+                                "values": {"42": 20.001},
+                                "coverage": 1.0,
+                                "complete": True,
+                            }
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    result = compare_backend_step_fields(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-3),
+    )
+
+    assert result.status == "passed"
+    assert len(result.steps) == 2
+    assert [item.frame_index for item in result.steps] == [0, 1]
+    assert result.steps[0].comparison.field_results["stress_sxx"].status == "passed"
+
+
+def test_multistep_comparison_rejects_missing_frame() -> None:
+    left = {
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {"frame_index": 0, "mapped_fields": {"stress_sxx": {"values": {"1": 1.0}}}},
+                    {"frame_index": 1, "mapped_fields": {"stress_sxx": {"values": {"1": 2.0}}}},
+                ],
+            }
+        ],
+        "element_centroids": {"1": [0.5, 0.0, 0.0]},
+    }
+    right = {
+        "mapped_step_fields": [
+            {
+                "step_id": "step-1",
+                "frames": [
+                    {"frame_index": 0, "mapped_fields": {"stress_sxx": {"values": {"1": 1.0}}}},
+                ],
+            }
+        ],
+        "element_centroids": {"1": [0.5, 0.0, 0.0]},
+    }
+
+    result = compare_backend_step_fields(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.missing_frames == ["id:step-1[1]"]
