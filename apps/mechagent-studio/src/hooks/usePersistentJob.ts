@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, cancelJob, createJob, fetchJob } from "../lib/api";
+import { cancelJob, createJob, fetchJob } from "../lib/api";
 import { JOB_POLL_INTERVAL_MS } from "../lib/constants";
-import { isActiveJob, jobStatusLabel, runError, sleep } from "../lib/job";
+import { isActiveJob, jobFailureDisposition, jobStatusLabel, runError, sleep } from "../lib/job";
 import type { StudioJobResponse, StudioRunResponse } from "../types";
 
 const STORAGE_KEY = "mechagent.activeJob.v1";
@@ -54,7 +54,15 @@ export function usePersistentJob(onComplete: (request: string, result: StudioRun
       callback.current(job.request, job.result ?? runError(job.error ?? jobStatusLabel(job.status)));
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : String(failure);
-      if (!value.id && failure instanceof ApiError && failure.status < 500) {
+      const disposition = jobFailureDisposition(failure, Boolean(value.id));
+      if (disposition === "missing") {
+        persist(null);
+        busy.current = false;
+        setRunning(false);
+        setDisconnected(false);
+        setActiveJob(null);
+        setError("服务器作业不存在或已清理；本地跟踪已清除。");
+      } else if (disposition === "submission") {
         persist(null);
         busy.current = false;
         setRunning(false);

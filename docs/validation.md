@@ -331,3 +331,4 @@ python scripts/clean_artifacts.py --include-runs
 `--dry-run` 会执行相同的作业数据库、求解锁、仓库边界和 Git 跟踪文件检查，只输出待删除路径。默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录、可再生成知识索引以及常见临时文件（`.pyc`、`.pyo`、`.tsbuildinfo`、`.eslintcache`、`.coverage.*`、`.upload.*.tmp`、交换文件、调试日志和系统缩略图），保留 `mechagent_output/` 与 FEM 运行文件。`--include-studio-runtime` 仅删除 `mechagent_output/.studio` 的本地 Studio 运行时数据库、作业目录和对象目录，保留正式证据目录；`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。这两个选项要求目标中没有需要保留的报告、ODB、输入、发布包或活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队、启动、运行、取消中任务时拒绝运行证据清理。
 
 `.env`、`knowledge/sources/` 和非空 `knowledge/raw/` 不属于清理目标。外部求解器和 Python 安装目录由维护者管理。
+删除阶段遇到文件系统错误时以非零状态退出，并输出失败路径、已删除目标数量及对应的 PowerShell `Remove-Item -LiteralPath` 命令。

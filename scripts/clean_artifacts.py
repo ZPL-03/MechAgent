@@ -184,8 +184,8 @@ def _remove_path(path: Path) -> None:
 
 def _powershell_remove_command(path: Path) -> str:
     literal = str(path).replace("'", "''")
-    suffix = " -Recurse" if path.is_dir() else ""
-    return f"Remove-Item -LiteralPath '{literal}'{suffix} -Force"
+    suffix = " -Force -Recurse" if path.is_dir() else " -Force"
+    return f"Remove-Item -LiteralPath '{literal}'{suffix}"
 
 
 def _tracked_paths() -> set[Path]:

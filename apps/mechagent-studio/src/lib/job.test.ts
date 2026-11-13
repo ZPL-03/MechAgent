@@ -1,10 +1,18 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { isActiveJob, jobStatusLabel } from "./job";
+import { isActiveJob, jobFailureDisposition, jobStatusLabel } from "./job";
 import { ApiError, createJob, fetchHealth, fetchJob, fetchJobs, inspectRequest } from "./api";
 import type { StudioJobResponse, StudioJobStatus } from "../types";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("durable job lifecycle", () => {
+  it("clears a persisted job only when the server confirms it is missing", () => {
+    expect(jobFailureDisposition(new ApiError("missing", 404), true)).toBe("missing");
+    expect(jobFailureDisposition(new ApiError("denied", 403), true)).toBe("disconnected");
+    expect(jobFailureDisposition(new ApiError("invalid", 400), false)).toBe("submission");
+    expect(jobFailureDisposition(new ApiError("offline", 0, "transport_error"), false)).toBe(
+      "disconnected",
+    );
+  });
   it.each(["queued", "starting", "running", "cancelling"] as StudioJobStatus[])("tracks %s", status => {
     expect(isActiveJob({ status } as StudioJobResponse)).toBe(true);
   });

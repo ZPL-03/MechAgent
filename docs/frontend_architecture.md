@@ -22,6 +22,7 @@ Studio 位于 `apps/mechagent-studio`，使用 React 19、TypeScript、Vite、Th
 `api.ts` 的 `requestJson()` 统一读取 JSON 或文本响应，并对所有非 2xx 响应抛出 `ApiError`；
 错误对象保留 HTTP 状态码、稳定错误码和原始 `detail`，参数校验数组及非 JSON 诊断不会被替换成成功数据。
 作业、证据和状态查询使用 `encodeURIComponent()` 编码作业标识；预检请求沿用 `AbortController` 的取消信号。
+恢复本地作业标识时，服务端明确返回 404 会清除失效跟踪并允许重新提交；权限拒绝和传输失败保留标识，等待重新连接或权限恢复。
 
 ## 生命周期
 

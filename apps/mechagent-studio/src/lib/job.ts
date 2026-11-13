@@ -1,5 +1,18 @@
 import type { StudioJobResponse, StudioRunResponse } from "../types";
 import { formatDuration } from "./format";
+import { ApiError } from "./api";
+
+export type JobFailureDisposition = "submission" | "missing" | "disconnected";
+
+export function jobFailureDisposition(error: unknown, hasPersistedJob: boolean): JobFailureDisposition {
+  if (hasPersistedJob && error instanceof ApiError && error.status === 404) {
+    return "missing";
+  }
+  if (!hasPersistedJob && error instanceof ApiError && error.status > 0 && error.status < 500) {
+    return "submission";
+  }
+  return "disconnected";
+}
 
 export function isActiveJob(job: StudioJobResponse) {
   return ["queued", "starting", "running", "cancelling"].includes(job.status);

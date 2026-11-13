@@ -173,7 +173,7 @@ def test_cleanup_reports_failed_target_and_deleted_count(
     output = capsys.readouterr().err
     assert f"清理失败：{calls[1]}" in output
     assert "已删除目标数量：1" in output
-    assert f"Remove-Item -LiteralPath '{calls[1]}' -Recurse -Force" in output
+    assert f"Remove-Item -LiteralPath '{calls[1]}' -Force -Recurse" in output
 
 
 def test_explicit_studio_runtime_cleanup_preserves_formal_evidence(
