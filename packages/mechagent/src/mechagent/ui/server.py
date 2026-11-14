@@ -792,6 +792,10 @@ def create_studio_app(
             path,
             media_type=str(record["media_type"]),
             filename=Path(str(record["path"])).name,
+            headers={
+                "ETag": f'"sha256:{record["sha256"]}"',
+                "X-MechAgent-Artifact-SHA256": str(record["sha256"]),
+            },
         )
 
     # v1 是稳定客户端边界；旧 /api 路径保留兼容期并通过响应头声明迁移终点。

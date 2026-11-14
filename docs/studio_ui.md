@@ -75,7 +75,7 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `POST /api/v1/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
 | `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
 | `GET /api/v1/jobs/{job_id}/artifacts` | 终态作业对象索引，返回安全相对路径、大小、媒体类型和 SHA-256 |
-| `GET /api/v1/jobs/{job_id}/artifacts/{artifact_path:path}` | 按作业权限读取对象；服务端在返回前校验并恢复内容 |
+| `GET /api/v1/jobs/{job_id}/artifacts/{artifact_path:path}` | 按作业权限读取对象；服务端在返回前校验并恢复内容，并返回 `X-MechAgent-Artifact-SHA256` 与 ETag |
 | `POST /api/v1/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
 
 主体的 `expires_at` 使用带时区的 ISO 8601 时间。创建主体或明确设置过期时间时，该时间必须晚于服务当前时间；认证查询会拒绝已过期主体。更新主体时省略 `expires_at` 保留原值，显式传入 `null` 表示永不过期。

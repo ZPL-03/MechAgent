@@ -270,9 +270,12 @@ class StudioClient:
         """下载作业对象内容；服务端会按对象摘要恢复并校验。"""
 
         normalized = artifact_path.replace("\\", "/")
-        response = self._client.get(
-            f"jobs/{self._key(job_id)}/artifacts/{quote(normalized, safe='/')}"
-        )
+        try:
+            response = self._client.get(
+                f"jobs/{self._key(job_id)}/artifacts/{quote(normalized, safe='/')}"
+            )
+        except httpx.RequestError as exc:
+            raise StudioClientError(0, "transport_error", str(exc)) from exc
         if not response.is_success:
             try:
                 payload = response.json()

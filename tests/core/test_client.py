@@ -117,6 +117,14 @@ def test_studio_client_preserves_api_errors_and_transport_failures() -> None:
     assert raised.value.code == "transport_error"
     assert raised.value.request_url is None
 
+    with (
+        StudioClient(transport=httpx.MockTransport(transport_error)) as client,
+        pytest.raises(StudioClientError) as raised,
+    ):
+        client.download_artifact("job-1", "result.json")
+    assert raised.value.code == "transport_error"
+    assert raised.value.status_code == 0
+
 
 def test_studio_client_rejects_invalid_base_urls_and_pagination_arguments() -> None:
     with pytest.raises(ValueError, match="绝对 URL"):
