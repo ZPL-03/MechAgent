@@ -132,8 +132,9 @@ def compare_backend_results(
     """比较两个适配器的声明字段或原始场，并保留缺失与误差明细。
 
     ``requested_fields`` 适合验证案例契约选择器；``fields`` 用于后端原始场的
-    交叉检查。原始场只有在位置、单位和离散映射可证明一致时才逐值比较；
-    其他场标记为 ``unverified``，统一物理语义应通过 ``comparison_fields`` 提供。
+    交叉检查。原始单元场可在两侧单元质心坐标完整且无歧义时建立坐标对应；
+    其他无法证明离散对应关系的场标记为 ``unverified``，统一物理语义应通过
+    ``comparison_fields`` 提供。
     """
 
     selected_tolerance = tolerance or ComparisonTolerance()
@@ -313,6 +314,73 @@ def compare_backend_results(
             )
             continue
         location = str(left_field.get("location", ""))
+        if location == "element" and left_field.get("location") == right_field.get("location"):
+            centroid_pairs = _coordinate_pairs(
+                left,
+                right,
+                selected_tolerance.coordinate,
+                location="element_centroid",
+            )
+            if centroid_pairs and _pairs_cover_fields(centroid_pairs, left_values, right_values):
+                aligned = _compare_aligned_values(
+                    name,
+                    left_values,
+                    right_values,
+                    centroid_pairs,
+                    selected_tolerance,
+                    alignment="element-centroid-coordinate",
+                )
+                if aligned is None:
+                    missing.append(f"{name}[coordinate]")
+                else:
+                    compared.extend(aligned[0])
+                    differences.extend(aligned[1])
+                    max_abs = max(max_abs, aligned[2])
+                    max_rel = max(max_rel, aligned[3])
+                alignments[name] = "element-centroid-coordinate"
+                field_failed = any(item.get("field") == name for item in differences)
+                field_compared = _field_compared_count(name, compared)
+                field_missing = any(item.startswith(f"{name}[") for item in missing)
+                set_field_result(
+                    name,
+                    "failed"
+                    if field_failed or field_missing
+                    else "passed"
+                    if field_compared
+                    else "unverified",
+                    alignment="element-centroid-coordinate",
+                    reason=(
+                        "value_difference"
+                        if field_failed
+                        else "field_values_missing"
+                        if field_missing
+                        else None
+                    ),
+                    compared_count=field_compared,
+                    left_field=left_field,
+                    right_field=right_field,
+                )
+                continue
+            has_centroid_metadata = bool(
+                _node_coordinates(left.get("element_centroids"))
+                or _node_coordinates(right.get("element_centroids"))
+            )
+            if has_centroid_metadata:
+                unverified.append(name)
+                alignments[name] = "unverified"
+                set_field_result(
+                    name,
+                    "unverified",
+                    alignment="unverified",
+                    reason=(
+                        "coordinate_alignment_incomplete"
+                        if centroid_pairs
+                        else "coordinate_alignment_unavailable"
+                    ),
+                    left_field=left_field,
+                    right_field=right_field,
+                )
+                continue
         if location in {"element", "integration_point"} and not _mesh_digests_match(left, right):
             if not (
                 isinstance(left_field.get("summary"), dict)
@@ -1192,7 +1260,7 @@ def _unit_vector(value: tuple[float, float, float]) -> tuple[float, float, float
 def _pairs_cover_fields(
     pairs: dict[str, str], left_values: dict[str, Any], right_values: dict[str, Any]
 ) -> bool:
-    """要求原始节点场的坐标映射覆盖两侧实际场值。"""
+    """要求坐标映射覆盖两侧实际场值。"""
 
     return set(left_values).issubset(pairs) and set(right_values).issubset(set(pairs.values()))
 
@@ -1382,6 +1450,7 @@ def _compare_aligned_values(
     right_values: dict[str, Any],
     pairs: dict[str, str],
     tolerance: ComparisonTolerance,
+    alignment: str = "node-coordinate",
 ) -> tuple[list[str], list[dict[str, Any]], float, float] | None:
     compared: list[str] = []
     differences: list[dict[str, Any]] = []
@@ -1412,7 +1481,7 @@ def _compare_aligned_values(
                         "right": right_item,
                         "absolute_error": absolute,
                         "relative_error": relative,
-                        "alignment": "node-coordinate",
+                        "alignment": alignment,
                     }
                 )
     return (compared, differences, max_abs, max_rel) if compared else None

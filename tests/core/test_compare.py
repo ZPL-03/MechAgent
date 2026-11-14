@@ -427,6 +427,110 @@ def test_backend_comparison_marks_raw_fields_at_different_locations_unverified()
     assert result.field_results["stress"].reason == "field_location_mismatch"
 
 
+def test_backend_comparison_aligns_raw_element_fields_by_centroid() -> None:
+    left = {
+        "element_centroids": {"10": [0.5, 0.0, 0.0]},
+        "fields": {
+            "stress": {
+                "location": "element",
+                "unit": "MPa",
+                "values": {"10": [100.0, 0.0, 0.0]},
+            }
+        },
+    }
+    right = {
+        "element_centroids": {"42": [0.5, 0.0, 0.0]},
+        "fields": {
+            "stress": {
+                "location": "element",
+                "unit": "MPa",
+                "values": {"42": [100.01, 0.0, 0.0]},
+            }
+        },
+    }
+
+    result = compare_backend_results(
+        left,
+        right,
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+        tolerance=ComparisonTolerance(relative=1.0e-3, absolute=1.0e-6),
+    )
+
+    assert result.status == "passed"
+    assert result.alignment == {"stress": "element-centroid-coordinate"}
+    assert result.compared_fields == ["stress[10<->42]"]
+    assert result.field_results["stress"].status == "passed"
+
+
+def test_backend_comparison_keeps_raw_element_fields_unverified_on_incomplete_centroids() -> None:
+    result = compare_backend_results(
+        {
+            "element_centroids": {"10": [0.5, 0.0, 0.0], "11": [1.5, 0.0, 0.0]},
+            "fields": {
+                "volume": {
+                    "location": "element",
+                    "unit": "mm^3",
+                    "values": {"10": 1.0, "11": 1.0},
+                }
+            },
+        },
+        {
+            "element_centroids": {"42": [0.5, 0.0, 0.0]},
+            "fields": {
+                "volume": {
+                    "location": "element",
+                    "unit": "mm^3",
+                    "values": {"42": 1.0},
+                }
+            },
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["volume"]
+    assert result.field_results["volume"].reason == "coordinate_alignment_incomplete"
+
+
+def test_backend_comparison_keeps_raw_element_fields_unverified_on_ambiguous_centroids() -> None:
+    result = compare_backend_results(
+        {
+            "element_centroids": {"10": [0.5, 0.0, 0.0]},
+            "fields": {
+                "volume": {
+                    "location": "element",
+                    "unit": "mm^3",
+                    "values": {"10": 1.0},
+                }
+            },
+        },
+        {
+            "element_centroids": {
+                "42": [0.5, 0.0, 0.0],
+                "43": [0.5, 0.0, 0.0],
+            },
+            "fields": {
+                "volume": {
+                    "location": "element",
+                    "unit": "mm^3",
+                    "values": {"42": 1.0, "43": 1.0},
+                }
+            },
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+        field_source="fields",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["volume"]
+    assert result.field_results["volume"].reason == "coordinate_alignment_unavailable"
+
+
 def test_backend_comparison_aligns_exact_integration_points_with_mesh_digest() -> None:
     mesh = {
         "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
