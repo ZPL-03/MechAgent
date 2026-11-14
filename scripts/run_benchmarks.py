@@ -74,7 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - 证据模式保留执行根因
         if evidence_dir is None:
             raise
-        manifest = write_manifest(evidence_dir, status="failed", details={"error": str(exc)})
+        manifest = write_manifest(
+            evidence_dir,
+            status="failed",
+            details={"error": str(exc)},
+            config_paths={"config": args.config},
+            tool_commands={"calculix": calculix.path},
+        )
         print(json.dumps({"status": "failed", "manifest": str(manifest)}, ensure_ascii=False))
         return 1
     rows: list[dict[str, Any]] = [
@@ -125,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "results_path": output_path.name,
             },
+            config_paths={"config": args.config},
+            tool_commands={"calculix": calculix.path},
         )
         print(
             json.dumps(

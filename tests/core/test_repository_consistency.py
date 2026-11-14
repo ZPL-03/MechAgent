@@ -150,6 +150,8 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "python -m build packages/mechagent",
         "python scripts/check_wheel_install.py",
         "python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence",
+        "python -m mechagent.cli verify-evidence --require-provenance "
+        "dist/studio-http-evidence/manifest.json",
         "python -m mkdocs build --strict",
         "python scripts/clean_artifacts.py",
     ]
@@ -167,6 +169,8 @@ def test_ci_contains_portable_gates_and_excludes_private_dependencies() -> None:
         "npm --prefix apps/mechagent-studio test",
         'python -m pytest -m "not real_solver"',
         "python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence",
+        "python -m mechagent.cli verify-evidence --require-provenance "
+        "dist/studio-http-evidence/manifest.json",
         "python scripts/audit_python_dependencies.py --runtime-only",
         "python -m mkdocs build --strict",
     ):

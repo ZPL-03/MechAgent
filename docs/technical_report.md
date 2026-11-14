@@ -35,7 +35,7 @@ Studio 稳定 HTTP 入口为 `/api/v1`，旧 `/api` 路径用于兼容已有本�
 
 `inspect` 预检只执行 Planner，返回缺项、置信度和执行阻断原因；只有 `complete=true` 且 `execution_ready=true` 才报告请求可进入执行链路。
 
-SDK、CLI 和 Studio 使用同一编排模型及公开摘要。公开响应保留任务、状态、错误、结果、产物和审计元数据，不输出原始 prompt、LLM response 或密钥。运行目录中的输入、网格、求解输出、报告和 manifest 按文件校验和保存，文件完整性与工程参考验收分别判断。
+SDK、CLI 和 Studio 使用同一编排模型及公开摘要。公开响应保留任务、状态、错误、结果、产物和审计元数据，不输出原始 prompt、LLM response 或密钥。运行目录中的输入、网格、求解输出、报告和 manifest 按文件校验和保存；运行清单的 `mechagent.evidence-provenance.v1` 绑定源提交、运行时、包版本、显式配置摘要和工具版本。文件完整性、来源一致性与工程参考验收分别判断。
 
 ## 验证证据
 

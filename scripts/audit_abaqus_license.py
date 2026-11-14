@@ -8,9 +8,20 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+for source in (
+    ROOT / "packages" / "mechagent-core" / "src",
+    ROOT / "packages" / "mechagent" / "src",
+):
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+
+from mechagent.evidence import runtime_provenance  # noqa: E402
 
 _SERVER_UP = re.compile(r"license server .*\bUP\b", re.IGNORECASE)
 _VENDOR_UP = re.compile(r"\bABAQUSLM\s*:\s*UP\b", re.IGNORECASE)
@@ -95,6 +106,9 @@ def audit_license(
         "stderr_sha256": _sha256_text(stderr),
         "checks": checks,
         "errors": errors,
+        "provenance": runtime_provenance(
+            tool_commands={"abaqus": launcher}, tool_versions={"abaqus": "unknown"}
+        ),
         "artifacts": [],
     }
     output = output.resolve()

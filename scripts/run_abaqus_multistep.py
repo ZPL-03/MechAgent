@@ -23,7 +23,7 @@ from mechagent.core.results import (  # noqa: E402
 )
 from mechagent.core.solver import SolverConfig  # noqa: E402
 from mechagent.core.validation import tc01_model_params  # noqa: E402
-from mechagent.evidence import stable_artifact_records  # noqa: E402
+from mechagent.evidence import runtime_provenance, stable_artifact_records  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,11 +47,20 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - evidence must retain the adapter failure
         failure = {"success": False, "error": str(exc)}
         _write_json(args.output_dir / "result.json", failure)
+        manifest = {
+            "schema_version": 1,
+            "status": "failed",
+            "error": str(exc),
+            "provenance": runtime_provenance(tool_commands={"abaqus": args.abaqus}),
+        }
+        manifest["artifacts"] = stable_artifact_records(args.output_dir)
+        _write_json(args.output_dir / "manifest.json", manifest)
         print(json.dumps(failure, ensure_ascii=False, indent=2))
         return 1
 
     _write_json(args.output_dir / "result.json", result)
     summary = _summary(result, case_digest, physical_case_digest=physical_case_digest)
+    summary["provenance"] = runtime_provenance(tool_commands={"abaqus": args.abaqus})
     summary["artifacts"] = stable_artifact_records(args.output_dir)
     _write_json(args.output_dir / "manifest.json", summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))

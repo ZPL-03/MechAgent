@@ -37,9 +37,16 @@ console = Console()
 
 
 @app.command("verify-evidence")
-def verify_evidence(path: Path = typer.Argument(..., exists=True, dir_okay=False)) -> None:
-    """校验证据清单中的相对路径、文件大小与 SHA-256。"""
-    errors = verify_manifest(path)
+def verify_evidence(
+    path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    require_provenance: bool = typer.Option(
+        False,
+        "--require-provenance",
+        help="要求清单绑定源提交、运行时、配置摘要和工具版本。",
+    ),
+) -> None:
+    """校验证据清单的 provenance、相对路径、文件大小与 SHA-256。"""
+    errors = verify_manifest(path, require_provenance=require_provenance)
     _echo_json({"valid": not errors, "errors": errors})
     if errors:
         raise typer.Exit(1)

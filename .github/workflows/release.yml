@@ -50,6 +50,7 @@ jobs:
           python -m pip check
           python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
           python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
+          python -m mechagent.cli verify-evidence --require-provenance dist/studio-http-evidence/manifest.json
           python -m mkdocs build --strict
       - name: Build release assets
         shell: pwsh

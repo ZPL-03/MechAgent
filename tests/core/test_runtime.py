@@ -27,6 +27,7 @@ from mechagent.config import (
 from mechagent.evidence import (
     artifact_records,
     public_value,
+    sha256,
     stable_artifact_records,
     verify_manifest,
     write_manifest,
@@ -517,6 +518,10 @@ def test_manifest_detects_changes_missing_files_and_escape(tmp_path: Path) -> No
     artifact.write_text("*NODE", encoding="utf-8")
     path = write_manifest(tmp_path, status="succeeded", details={})
     assert verify_manifest(path) == []
+    assert (
+        CliRunner().invoke(app, ["verify-evidence", "--require-provenance", str(path)]).exit_code
+        == 0
+    )
     assert CliRunner().invoke(app, ["verify-evidence", str(path)]).exit_code == 0
     artifact.write_text("*NOPE", encoding="utf-8")
     assert verify_manifest(path) == ["hash_mismatch: input.inp"]
@@ -535,6 +540,76 @@ def test_manifest_detects_unlisted_files(tmp_path: Path) -> None:
     (tmp_path / "unexpected.bin").write_bytes(b"unexpected")
 
     assert verify_manifest(path) == ["unlisted: unexpected.bin"]
+
+
+def test_manifest_binds_source_runtime_config_and_tool_provenance(tmp_path: Path) -> None:
+    config = tmp_path / "mechagent.yaml"
+    config.write_text("solver: calculix\n", encoding="utf-8")
+    artifact = tmp_path / "result.json"
+    artifact.write_text("{}", encoding="utf-8")
+
+    path = write_manifest(
+        tmp_path,
+        status="succeeded",
+        details={"source": str(config)},
+        config_paths={"config": config},
+        tool_versions={"calculix": "CalculiX 2.23"},
+    )
+
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    provenance = manifest["provenance"]
+    assert provenance["schema"] == "mechagent.evidence-provenance.v1"
+    assert provenance["source"]["git_dirty"] in (True, False, "unknown")
+    assert provenance["configs"]["config"]["path"] == "mechagent.yaml"
+    assert provenance["configs"]["config"]["sha256"]
+    assert provenance["tools"]["calculix"] == {
+        "executable": "unknown",
+        "version": "CalculiX 2.23",
+    }
+    assert manifest["details"]["source"] == "mechagent.yaml"
+    assert str(tmp_path) not in path.read_text(encoding="utf-8")
+    assert verify_manifest(path) == []
+
+
+def test_solver_version_probe_is_side_effect_free(tmp_path: Path) -> None:
+    path = write_manifest(
+        tmp_path,
+        status="succeeded",
+        details={},
+        tool_commands={"calculix": "ccx"},
+    )
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    assert manifest["provenance"]["tools"]["calculix"]["version"] == "unavailable"
+
+
+def test_verify_manifest_rejects_invalid_provenance(tmp_path: Path) -> None:
+    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
+    path = write_manifest(tmp_path, status="succeeded", details={})
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["provenance"]["configs"]["leak"] = {
+        "path": "C:/private/config.yaml",
+        "sha256": "0" * 64,
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert "invalid_provenance: configs.leak.path" in verify_manifest(path)
+
+
+def test_verify_manifest_can_require_provenance(tmp_path: Path) -> None:
+    artifact = tmp_path / "result.json"
+    artifact.write_text("{}", encoding="utf-8")
+    manifest = {
+        "schema_version": 1,
+        "status": "succeeded",
+        "details": {},
+        "artifacts": [{"path": "result.json", "size": 2, "sha256": sha256(artifact)}],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert verify_manifest(path) == []
+    assert verify_manifest(path, require_provenance=True) == ["missing_provenance"]
 
 
 def test_artifact_records_hashes_nested_files_and_excludes_manifest(tmp_path: Path) -> None:

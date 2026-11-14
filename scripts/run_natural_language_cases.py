@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             "passed_count": sum(bool(row["passed"]) for row in rows),
             "results_path": results_path.name,
         },
+        config_paths={"config": args.config},
+        tool_commands={"calculix": base_config.solver.calculix.path},
     )
     print(
         json.dumps(

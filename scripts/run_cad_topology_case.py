@@ -25,7 +25,11 @@ from mechagent.core.adapters.gmsh_cad_mesh import GmshCADInpMesher  # noqa: E402
 from mechagent.core.mesher import MeshConfig  # noqa: E402
 from mechagent.core.models import ElementType  # noqa: E402
 from mechagent.core.solver import SolverConfig  # noqa: E402
-from mechagent.evidence import stable_artifact_records  # noqa: E402
+from mechagent.evidence import (  # noqa: E402
+    public_value,
+    runtime_provenance,
+    stable_artifact_records,
+)
 from mechagent.orchestrator.agents.geometry import GeometryAgent  # noqa: E402
 
 _HOLE_CENTER = (50.0, 20.0)
@@ -102,9 +106,10 @@ def main(argv: list[str] | None = None) -> int:
             "stage": "cad_import",
             "error": analysis.error_message,
             "seed_size": seed_size,
+            "provenance": runtime_provenance(tool_commands={"calculix": args.calculix}),
         }
         manifest["artifacts"] = stable_artifact_records(args.output_dir)
-        _write_json(args.output_dir / "manifest.json", manifest)
+        _write_json(args.output_dir / "manifest.json", public_value(manifest, sanitize_paths=True))
         _print_summary(manifest, args.output_dir / "manifest.json")
         return 1
 
@@ -175,12 +180,18 @@ def main(argv: list[str] | None = None) -> int:
             },
             "solver": result,
             "checks": checks,
+            "provenance": runtime_provenance(tool_commands={"calculix": args.calculix}),
         }
     except Exception as exc:  # noqa: BLE001 - 证据清单必须保留失败原因
-        manifest = {"schema_version": 1, "status": "failed", "error": str(exc)}
+        manifest = {
+            "schema_version": 1,
+            "status": "failed",
+            "error": str(exc),
+            "provenance": runtime_provenance(tool_commands={"calculix": args.calculix}),
+        }
 
     manifest["artifacts"] = stable_artifact_records(args.output_dir)
-    _write_json(args.output_dir / "manifest.json", manifest)
+    _write_json(args.output_dir / "manifest.json", public_value(manifest, sanitize_paths=True))
     _print_summary(manifest, args.output_dir / "manifest.json")
     return 0 if manifest["status"] == "passed" else 1
 

@@ -9,6 +9,9 @@ import ntpath
 import os
 import platform
 import posixpath
+import re
+import shutil
+import subprocess
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -16,6 +19,197 @@ from typing import Any
 from uuid import uuid4
 
 from mechagent.redaction import redact_sensitive_text
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_PROVENANCE_SCHEMA = "mechagent.evidence-provenance.v1"
+
+
+def runtime_provenance(
+    *,
+    root: Path | None = None,
+    config_paths: dict[str, Path] | None = None,
+    tool_commands: dict[str, str | Path | tuple[str, ...]] | None = None,
+    tool_versions: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """构建不包含本机路径或凭据的运行 provenance。
+
+    `config_paths` 只记录文件相对仓库根目录的安全路径、大小和摘要；
+    `tool_commands` 仅使用 `--version` 读取首行版本文本，并把可执行文件
+    归一为文件名。调用方可以用 `tool_versions` 提供已由适配器确认的版本。
+
+    provenance 绑定源提交、脏状态、运行时、配置摘要和工具版本。它不证明
+    结果的物理正确性、作者身份或签名有效性。
+    """
+
+    repository = _find_repository_root(root)
+    source = {
+        "git_commit": _git_value(repository, "rev-parse", "HEAD"),
+        "git_dirty": _git_dirty(repository),
+    }
+    configs = _config_records(repository, config_paths or {})
+    tools = _tool_records(tool_commands or {}, tool_versions or {})
+    return {
+        "schema": _PROVENANCE_SCHEMA,
+        "source": source,
+        "runtime": {
+            "python": platform.python_version(),
+            "implementation": platform.python_implementation(),
+            "platform": platform.platform(),
+        },
+        "packages": _package_versions(),
+        "configs": configs,
+        "tools": tools,
+    }
+
+
+def _find_repository_root(start: Path | None) -> Path | None:
+    candidates: list[Path] = []
+    if start is not None:
+        candidates.append(start)
+    candidates.extend((Path.cwd(), Path(__file__).resolve()))
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        for directory in (resolved, *resolved.parents):
+            marker = directory / ".git"
+            if marker.is_dir() or marker.is_file():
+                return directory
+    return None
+
+
+def _git_value(root: Path | None, *arguments: str) -> str:
+    if root is None:
+        return "unknown"
+    executable = shutil.which("git")
+    if executable is None:
+        return "unknown"
+    try:
+        completed = subprocess.run(
+            [executable, "-C", str(root), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unknown"
+    value = completed.stdout.strip()
+    if arguments == ("rev-parse", "HEAD") and not _GIT_COMMIT.fullmatch(value):
+        return "unknown"
+    return value or "unknown"
+
+
+def _git_dirty(root: Path | None) -> bool | str:
+    if root is None:
+        return "unknown"
+    executable = shutil.which("git")
+    if executable is None:
+        return "unknown"
+    try:
+        completed = subprocess.run(
+            [executable, "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unknown"
+    return bool(completed.stdout.strip())
+
+
+def _package_versions() -> dict[str, str]:
+    packages: dict[str, str] = {}
+    for name in ("mechagent", "mechagent-core", "gmsh", "pydantic", "langgraph"):
+        try:
+            packages[name] = version(name)
+        except PackageNotFoundError:
+            packages[name] = "unknown"
+    return packages
+
+
+def _config_records(root: Path | None, paths: dict[str, Path]) -> dict[str, Any]:
+    records: dict[str, Any] = {}
+    for name, raw_path in sorted(paths.items()):
+        path = Path(raw_path)
+        if path.is_symlink() or not path.is_file():
+            records[name] = {"path": _safe_path(root, path), "status": "missing"}
+            continue
+        records[name] = {
+            "path": _safe_path(root, path),
+            "size": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+    return records
+
+
+def _safe_path(root: Path | None, path: Path) -> str:
+    if root is not None:
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return path.name or "unknown"
+
+
+def _tool_records(
+    commands: dict[str, str | Path | tuple[str, ...]], versions: dict[str, str]
+) -> dict[str, Any]:
+    records: dict[str, Any] = {}
+    for name in sorted(set(commands) | set(versions)):
+        command = commands.get(name)
+        if name in versions:
+            value = versions[name]
+            executable = _command_name(command)
+        elif command is not None:
+            value = _command_version(command)
+            executable = _command_name(command)
+        else:
+            value = "unknown"
+            executable = "unknown"
+        records[name] = {"executable": executable, "version": value}
+    return records
+
+
+def _command_name(command: str | Path | tuple[str, ...] | None) -> str:
+    if command is None:
+        return "unknown"
+    if isinstance(command, tuple):
+        first = command[0]
+    else:
+        raw = str(command)
+        first = raw if Path(raw).is_file() else raw.split()[0]
+    return ntpath.basename(first) or posixpath.basename(first) or "unknown"
+
+
+def _command_version(command: str | Path | tuple[str, ...]) -> str:
+    parts = list(command) if isinstance(command, tuple) else [str(command)]
+    if _command_name(command).lower() not in {
+        "git",
+        "git.exe",
+        "node",
+        "node.exe",
+        "python",
+        "python.exe",
+    }:
+        return "unavailable"
+    executable = shutil.which(parts[0]) or (
+        str(Path(parts[0])) if Path(parts[0]).is_file() else None
+    )
+    if executable is None:
+        return "unavailable"
+    try:
+        completed = subprocess.run(
+            [executable, *parts[1:], "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unavailable"
+    output = (completed.stdout or completed.stderr).strip().splitlines()
+    return redact_sensitive_text(output[0]) if output else "unknown"
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -107,11 +301,15 @@ def _is_sqlite_journal(path: Path) -> bool:
 _PUBLIC_PATH_KEYS = frozenset(
     {
         "artifact_root",
+        "abaqus",
+        "calculix",
         "config",
         "config_path",
         "database",
         "field_json",
+        "file",
         "input_file",
+        "launcher",
         "license_queue_path",
         "manifest_path",
         "mesh_file",
@@ -119,6 +317,8 @@ _PUBLIC_PATH_KEYS = frozenset(
         "output_dir",
         "python_executable",
         "report_path",
+        "source",
+        "executable",
         "solver_path",
         "source_path",
         "work_dir",
@@ -206,19 +406,28 @@ def _is_absolute_path(raw: str, normalized: str) -> bool:
     )
 
 
-def write_manifest(directory: Path, *, status: str, details: dict[str, Any]) -> Path:
+def write_manifest(
+    directory: Path,
+    *,
+    status: str,
+    details: dict[str, Any],
+    provenance: dict[str, Any] | None = None,
+    config_paths: dict[str, Path] | None = None,
+    tool_commands: dict[str, str | Path | tuple[str, ...]] | None = None,
+    tool_versions: dict[str, str] | None = None,
+) -> Path:
     root = directory.resolve()
     root.mkdir(parents=True, exist_ok=True)
     # 不跟随目录外的符号链接，也不纳入原始日志和 LLM trace 内容。
     artifacts = [
         item for item in artifact_records(root) if not str(item["path"]).endswith((".tmp", ".log"))
     ]
-    packages = {}
-    for name in ("mechagent", "mechagent-core", "gmsh", "pydantic", "langgraph"):
-        try:
-            packages[name] = version(name)
-        except PackageNotFoundError:
-            packages[name] = "unknown"
+    runtime = provenance or runtime_provenance(
+        config_paths=config_paths,
+        tool_commands=tool_commands,
+        tool_versions=tool_versions,
+    )
+    packages = runtime["packages"]
     path = root / "manifest.json"
     atomic_json(
         path,
@@ -228,20 +437,25 @@ def write_manifest(directory: Path, *, status: str, details: dict[str, Any]) -> 
             "python": platform.python_version(),
             "platform": platform.platform(),
             "packages": packages,
-            "details": public_value(details),
+            "provenance": runtime,
+            "details": public_value(details, sanitize_paths=True),
             "artifacts": artifacts,
         },
     )
     return path
 
 
-def verify_manifest(path: Path) -> list[str]:
+def verify_manifest(path: Path, *, require_provenance: bool = False) -> list[str]:
     """返回缺失、越界或哈希不匹配的证据项；无错误时返回空列表。"""
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1:
         raise ValueError("不支持的证据清单版本。")
     root = path.parent.resolve()
     errors = []
+    if "provenance" in payload:
+        errors.extend(_validate_provenance(payload["provenance"]))
+    elif require_provenance:
+        errors.append("missing_provenance")
     seen = set()
     for item in payload["artifacts"]:
         relative = item["path"]
@@ -272,3 +486,65 @@ def verify_manifest(path: Path) -> list[str]:
         if relative not in seen:
             errors.append(f"unlisted: {relative}")
     return errors
+
+
+def _validate_provenance(value: object) -> list[str]:
+    if not isinstance(value, dict) or value.get("schema") != _PROVENANCE_SCHEMA:
+        return ["invalid_provenance: schema"]
+    errors: list[str] = []
+    source = value.get("source")
+    if not isinstance(source, dict):
+        errors.append("invalid_provenance: source")
+    else:
+        commit = source.get("git_commit")
+        if commit != "unknown" and (
+            not isinstance(commit, str) or not _GIT_COMMIT.fullmatch(commit)
+        ):
+            errors.append("invalid_provenance: source.git_commit")
+        if source.get("git_dirty") not in (True, False, "unknown"):
+            errors.append("invalid_provenance: source.git_dirty")
+    runtime = value.get("runtime")
+    if not isinstance(runtime, dict) or not all(
+        isinstance(runtime.get(key), str) and runtime[key]
+        for key in ("python", "implementation", "platform")
+    ):
+        errors.append("invalid_provenance: runtime")
+    packages = value.get("packages")
+    if not isinstance(packages, dict) or any(
+        not isinstance(key, str) or not isinstance(item, str) for key, item in packages.items()
+    ):
+        errors.append("invalid_provenance: packages")
+    configs = value.get("configs")
+    if not isinstance(configs, dict):
+        errors.append("invalid_provenance: configs")
+    else:
+        for name, record in configs.items():
+            if not isinstance(name, str) or not isinstance(record, dict):
+                errors.append(f"invalid_provenance: configs.{name}")
+                continue
+            path = record.get("path")
+            if not isinstance(path, str) or _unsafe_provenance_path(path):
+                errors.append(f"invalid_provenance: configs.{name}.path")
+            digest = record.get("sha256")
+            if digest is not None and (
+                not isinstance(digest, str) or not _SHA256.fullmatch(digest)
+            ):
+                errors.append(f"invalid_provenance: configs.{name}.sha256")
+    tools = value.get("tools")
+    if not isinstance(tools, dict):
+        errors.append("invalid_provenance: tools")
+    else:
+        for name, record in tools.items():
+            if not isinstance(name, str) or not isinstance(record, dict):
+                errors.append(f"invalid_provenance: tools.{name}")
+                continue
+            if not isinstance(record.get("executable"), str) or not isinstance(
+                record.get("version"), str
+            ):
+                errors.append(f"invalid_provenance: tools.{name}")
+    return errors
+
+
+def _unsafe_provenance_path(value: str) -> bool:
+    normalized = value.replace("\\", "/")
+    return _is_absolute_path(value, normalized) or ".." in Path(normalized).parts or not normalized

@@ -125,7 +125,12 @@ def main(argv: list[str] | None = None) -> int:
             (args.output_dir / "convergence.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
-            write_manifest(args.output_dir, status="failed", details=report)
+            write_manifest(
+                args.output_dir,
+                status="failed",
+                details=report,
+                tool_commands={"calculix": args.calculix},
+            )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 1
 
@@ -155,7 +160,12 @@ def main(argv: list[str] | None = None) -> int:
     (args.output_dir / "convergence.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    write_manifest(args.output_dir, status=convergence.status, details=report)
+    write_manifest(
+        args.output_dir,
+        status=convergence.status,
+        details=report,
+        tool_commands={"calculix": args.calculix},
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if convergence.status == "passed" else 1
 

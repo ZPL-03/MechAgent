@@ -25,7 +25,10 @@ python scripts/run_benchmarks.py --work-dir mechagent_output/benchmarks-YYYYMMDD
 本机标准算例的当前运行结果保存在 `mechagent_output/benchmarks-current/benchmark_results.json`，求解中间产物位于
 `mechagent_output/benchmarks-current/runs/`，对应清单为 `mechagent_output/benchmarks-current/manifest.json`。Abaqus
 多步、跨工具比较和 CAD 拓扑证据分别使用各自目录下的 `manifest.json`。这些清单都使用相对路径、文件大小
-和 SHA-256；统一校验命令如下：
+和 SHA-256，并记录 `mechagent.evidence-provenance.v1` provenance。provenance 包含源提交与脏状态、
+Python 运行时、已安装包版本、显式配置文件摘要和工具版本；未知值使用 `unknown` 或 `unavailable`。
+版本探测不会启动求解器或商业工具，无法通过无副作用接口确认的版本保持 `unavailable`。
+`verify-evidence` 同时校验 provenance 结构和文件摘要。统一校验命令如下：
 
 ```powershell
 python -m mechagent.cli verify-evidence mechagent_output/benchmarks-current/manifest.json
@@ -38,7 +41,7 @@ python -m mechagent.cli verify-evidence mechagent_output/mesh-convergence-tc01/m
 python -m mechagent.cli verify-evidence mechagent_output/cad-mesh-convergence-local-size/manifest.json
 ```
 
-校验通过只证明文件完整性和清单一致性，不证明物理结果正确；物理结论仍以本节的参考误差、字段检查和适配器边界为准。
+校验通过只证明文件完整性、provenance 结构和清单一致性，不证明物理结果正确；物理结论仍以本节的参考误差、字段检查和适配器边界为准。对发布门禁使用 `python -m mechagent.cli verify-evidence --require-provenance path/to/manifest.json`，缺少 provenance 的清单直接失败。
 
 ## 自然语言与 LLM
 
@@ -349,4 +352,3 @@ python scripts/clean_artifacts.py --include-runs
 `--dry-run` 会执行相同的作业数据库、求解锁、仓库边界和 Git 跟踪文件检查，只输出待删除路径。默认清理 Python、pytest、Ruff、mypy、通用工具和 Vite 缓存、覆盖率文件、包构建目录、前端依赖、文档站点、浏览器临时输出、备份/恢复临时目录、可再生成知识索引以及常见临时文件（`.pyc`、`.pyo`、`.tsbuildinfo`、`.eslintcache`、`.coverage.*`、`.upload.*.tmp`、交换文件、调试日志和系统缩略图），保留 `mechagent_output/` 与 FEM 运行文件。`--include-studio-runtime` 仅删除 `mechagent_output/.studio` 的本地 Studio 运行时数据库、作业目录和对象目录，保留正式证据目录；`--include-runs` 同时删除运行证据和 `.frd/.dat/.sta/.msg`。这两个选项要求目标中没有需要保留的报告、ODB、输入、发布包或活动作业。脚本在任何删除前检查路径边界；Git 跟踪文件及其父目录受到保护，相关目录存在 `.lck` 或作业数据库存在排队、启动、运行、取消中任务时拒绝运行证据清理。
 
 `.env`、`knowledge/sources/` 和非空 `knowledge/raw/` 不属于清理目标。外部求解器和 Python 安装目录由维护者管理。
-删除阶段遇到文件系统错误时以非零状态退出，并输出失败路径、已删除目标数量及对应的 PowerShell `Remove-Item -LiteralPath` 命令。

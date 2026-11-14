@@ -133,7 +133,12 @@ def main(argv: list[str] | None = None) -> int:
             "solid_bounds_mm": list(_SOLID_BOUNDS) if geometry_kind == "box" else None,
         }
         _write_json(args.output_dir / "convergence.json", details)
-        write_manifest(args.output_dir, status=report.status, details=details)
+        write_manifest(
+            args.output_dir,
+            status=report.status,
+            details=details,
+            tool_commands={"calculix": args.calculix},
+        )
         _print_summary(details, args.output_dir / "manifest.json")
         return 0 if report.status == "passed" else 1
     except Exception as exc:  # noqa: BLE001 - 保留完整失败证据
@@ -149,7 +154,12 @@ def main(argv: list[str] | None = None) -> int:
             details["completed_runs"] = [item.model_dump(mode="json") for item in exc.runs]
             details["failed_seed_size"] = exc.failed_seed
         _write_json(args.output_dir / "convergence.json", details)
-        write_manifest(args.output_dir, status="failed", details=details)
+        write_manifest(
+            args.output_dir,
+            status="failed",
+            details=details,
+            tool_commands={"calculix": args.calculix},
+        )
         _print_summary(details, args.output_dir / "manifest.json")
         return 1
 

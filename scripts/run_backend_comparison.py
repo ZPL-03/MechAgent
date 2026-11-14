@@ -35,7 +35,7 @@ from mechagent.core.validation import (  # noqa: E402
     tc04_model_params,
     tc05_model_params,
 )
-from mechagent.evidence import stable_artifact_records  # noqa: E402
+from mechagent.evidence import runtime_provenance, stable_artifact_records  # noqa: E402
 
 _CASE_BUILDERS: dict[str, Callable[[], ModelParams]] = {
     "TC-01": tc01_model_params,
@@ -122,6 +122,9 @@ def main(argv: list[str] | None = None) -> int:
             "mapped_relative": args.mapped_relative,
             "mapped_absolute": args.absolute,
         },
+        "provenance": runtime_provenance(
+            tool_commands={"calculix": args.calculix, "abaqus": args.abaqus}
+        ),
     }
     manifest["artifacts"] = stable_artifact_records(args.output_dir)
     (args.output_dir / "manifest.json").write_text(
