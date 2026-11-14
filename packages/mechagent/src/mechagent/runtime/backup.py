@@ -14,6 +14,23 @@ from mechagent.runtime.artifacts import ArtifactStore, S3ArtifactStore
 BACKUP_SCHEMA_VERSION = 1
 
 
+def _artifact_references(connection: sqlite3.Connection) -> set[str]:
+    """读取旧版和当前版数据库中的全部内容寻址对象引用。"""
+
+    rows = connection.execute(
+        "SELECT DISTINCT result_hash FROM jobs WHERE result_hash IS NOT NULL"
+    ).fetchall()
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "job_artifacts" in tables:
+        rows = [*rows, *connection.execute("SELECT DISTINCT digest FROM job_artifacts").fetchall()]
+    return {str(row[0]).strip().lower() for row in rows}
+
+
 def backup_studio(
     database: Path,
     destination: Path,
@@ -43,12 +60,7 @@ def backup_studio(
         ).fetchone()
         if active is not None:
             raise RuntimeError("存在未终态 Studio 作业，备份必须在调度器停止后执行。")
-        references = {
-            str(row[0]).strip().lower()
-            for row in source.execute(
-                "SELECT DISTINCT result_hash FROM jobs WHERE result_hash IS NOT NULL"
-            ).fetchall()
-        }
+        references = _artifact_references(source)
         source.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         source.close()
@@ -252,14 +264,25 @@ def _verify_database(database: Path, objects: Path) -> list[str]:
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
             if not integrity or str(integrity[0]).lower() != "ok":
                 errors.append("jobs.sqlite3 完整性检查失败")
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
             rows = connection.execute(
                 "SELECT DISTINCT result_hash FROM jobs WHERE result_hash IS NOT NULL"
             ).fetchall()
+            artifact_rows = (
+                connection.execute("SELECT DISTINCT digest FROM job_artifacts").fetchall()
+                if "job_artifacts" in tables
+                else []
+            )
         finally:
             connection.close()
     except sqlite3.Error as exc:
         return [f"jobs.sqlite3 无法读取：{exc}"]
-    for row in rows:
+    for row in [*rows, *artifact_rows]:
         digest = str(row[0]).strip().lower()
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             errors.append("jobs.sqlite3 包含无效结果对象摘要")

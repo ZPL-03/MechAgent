@@ -289,6 +289,32 @@ def test_event_retention_and_result_integrity(store: JobStore) -> None:
         store.heartbeat(job["job_id"], job["token"])
 
 
+def test_job_artifacts_are_indexed_and_restored_by_digest(store: JobStore) -> None:
+    job = submit(store)
+    claimed = store.claim(1)
+    assert claimed
+    directory = store.directory(job["job_id"])
+    directory.mkdir(parents=True)
+    report = directory / "report.md"
+    report.write_text("# report\n", encoding="utf-8")
+    (directory / "solver.inp").write_text("*HEADING\n", encoding="utf-8")
+    write_manifest(directory, status="succeeded", details={"job_id": job["job_id"]})
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+
+    records = store.list_artifacts(job["job_id"])
+    assert {item["path"] for item in records} == {
+        "manifest.json",
+        "report.md",
+        "result.json",
+        "solver.inp",
+    }
+    report.unlink()
+    restored = store.materialize_artifact(job["job_id"], "report.md")
+    assert restored.read_text(encoding="utf-8") == "# report\n"
+    with pytest.raises((KeyError, ValueError)):
+        store.materialize_artifact(job["job_id"], "../report.md")
+
+
 def test_finish_persists_worker_exit_code(store: JobStore) -> None:
     job = submit(store)
     claimed = store.claim(1)
@@ -356,7 +382,7 @@ def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) ->
 
     store = JobStore(database)
     with store.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
         assert "organization" in {
             str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")
         }
@@ -365,6 +391,9 @@ def test_legacy_database_migrates_and_records_schema_versions(tmp_path: Path) ->
         }
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='identities'"
+        ).fetchone()
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='job_artifacts'"
         ).fetchone()
         assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
     migrated = store.get("legacy-job")

@@ -27,6 +27,8 @@ def test_artifact_store_deduplicates_and_restores_result(tmp_path: Path) -> None
     claimed = store.claim(1)
     assert claimed is not None
     assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    store.directory(job["job_id"]).mkdir(parents=True, exist_ok=True)
+    (store.directory(job["job_id"]) / "report.md").write_text("# report\n", encoding="utf-8")
     assert store.finish(
         job["job_id"],
         claimed["token"],
@@ -41,6 +43,10 @@ def test_artifact_store_deduplicates_and_restores_result(tmp_path: Path) -> None
 
     assert payload["result"] == {"success": True, "value": 3}
     assert object_path.is_file()
+    assert {item["path"] for item in store.list_artifacts(job["job_id"])} >= {
+        "report.md",
+        "result.json",
+    }
 
 
 def test_artifact_store_put_bytes_is_safe_for_same_process_concurrency(tmp_path: Path) -> None:

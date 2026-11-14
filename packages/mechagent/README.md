@@ -20,7 +20,7 @@ Studio 的同步 Python HTTP 客户端为 `StudioClient`，公开接口从 `mech
 `create_job()`、`run()` 和 `retry_job()` 在未提供幂等键时生成随机键。列表方法返回服务端分页对象，
 调用方应使用 `pagination.next_cursor` 读取后续页面。HTTP 错误转换为 `StudioClientError`，其中
 `status_code`、`code`、`detail` 和 `request_url` 保留服务端错误契约；传输失败使用
-`code="transport_error"` 和 `status_code=0`。客户端不自动重试请求，重试策略由调用方结合幂等键和服务端状态决定。
+`code="transport_error"` 和 `status_code=0`。客户端不自动重试请求，重试策略由调用方结合幂等键和服务端状态决定；对象索引通过 list_artifacts() 读取，对象内容通过 download_artifact() 按摘要校验后取得。
 
 ```python
 from mechagent import StudioClient

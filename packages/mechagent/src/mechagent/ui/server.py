@@ -717,6 +717,7 @@ def create_studio_app(
                 status="cancelled",
                 details={"job_id": job_id, "error_code": "cancelled_before_start"},
             )
+            runtime().store.index_artifacts(job_id)
         return payload(job)
 
     @app.post("/api/jobs/{job_id}/retry", status_code=202)
@@ -758,6 +759,41 @@ def create_studio_app(
             "manifest": json.loads(path.read_text(encoding="utf-8")),
         }
 
+    @app.get("/api/jobs/{job_id}/artifacts")
+    def job_artifacts(job_id: str, request: Request) -> dict[str, Any]:
+        """返回作业对象索引，不暴露本机绝对路径。"""
+
+        job = read(job_id, request)
+        if job["status"] not in TERMINAL:
+            raise HTTPException(409, "作业尚未结束。")
+        return {"artifacts": runtime().store.list_artifacts(job_id)}
+
+    @app.get("/api/jobs/{job_id}/artifacts/{artifact_path:path}")
+    def download_job_artifact(job_id: str, artifact_path: str, request: Request) -> FileResponse:
+        """在作业权限范围内恢复并返回一个对象。"""
+
+        job = read(job_id, request)
+        if job["status"] not in TERMINAL:
+            raise HTTPException(409, "作业尚未结束。")
+        try:
+            record = next(
+                item
+                for item in runtime().store.list_artifacts(job_id)
+                if item["path"] == artifact_path.replace("\\", "/")
+            )
+            path = runtime().store.materialize_artifact(job_id, artifact_path)
+        except StopIteration as exc:
+            raise HTTPException(404, "作业对象不存在。") from exc
+        except KeyError as exc:
+            raise HTTPException(404, "作业对象不存在。") from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(409, "作业对象完整性校验失败。") from exc
+        return FileResponse(
+            path,
+            media_type=str(record["media_type"]),
+            filename=Path(str(record["path"])).name,
+        )
+
     # v1 是稳定客户端边界；旧 /api 路径保留兼容期并通过响应头声明迁移终点。
     _versioned_routes = (
         ("/api/v1/health", health, ["GET"], None),
@@ -779,6 +815,13 @@ def create_studio_app(
         ("/api/v1/jobs/{job_id}/cancel", cancel_job, ["POST"], 202),
         ("/api/v1/jobs/{job_id}/retry", retry_job, ["POST"], 202),
         ("/api/v1/jobs/{job_id}/evidence", job_evidence, ["GET"], None),
+        ("/api/v1/jobs/{job_id}/artifacts", job_artifacts, ["GET"], None),
+        (
+            "/api/v1/jobs/{job_id}/artifacts/{artifact_path:path}",
+            download_job_artifact,
+            ["GET"],
+            None,
+        ),
     )
     for path, endpoint, methods, status_code in _versioned_routes:
         if status_code is None:

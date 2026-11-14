@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import math
+import mimetypes
 import secrets
 import shutil
 import sqlite3
@@ -15,17 +16,17 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from uuid import uuid4
 
-from mechagent.evidence import atomic_json, sha256, verify_manifest
+from mechagent.evidence import artifact_records, atomic_json, sha256, verify_manifest
 from mechagent.runtime.artifacts import ArtifactStore
 from mechagent.runtime.auth import Principal, normalize_identity_fields
 
 ACTIVE = ("starting", "running", "cancelling")
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
-DATABASE_SCHEMA_VERSION = 8
+DATABASE_SCHEMA_VERSION = 9
 DEFAULT_MAX_RESULT_BYTES = 100 * 1024 * 1024
 
 
@@ -105,6 +106,21 @@ def _validate_identity_expiry(value: float | None) -> float | None:
     return normalized
 
 
+def _normalize_artifact_path(value: str) -> str:
+    """将对象路径限制为非空的相对 POSIX 路径。"""
+
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if (
+        not normalized
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or "\x00" in normalized
+    ):
+        raise ValueError("对象路径必须是非空的安全相对路径。")
+    return path.as_posix()
+
+
 class JobStore:
     def __init__(
         self,
@@ -149,7 +165,7 @@ class JobStore:
 
         v1 是早期队列表结构；v2 增加迁移记录并确保提交时保存配置哈希；v3
         为作业增加主体和项目归属，v4 保存结果字节数，v5 保存 worker 资源用量，v6
-        增加主体目录，v7 为作业和审计记录增加组织归属，v8 保存 worker 退出码。
+        增加主体目录，v7 为作业和审计记录增加组织归属，v8 保存 worker 退出码，v9 保存作业对象清单。
         旧作业归入 local/default。
         迁移只做可回滚的加法操作。缺少配置文件的历史作业保留空哈希，worker
         会拒绝执行并要求显式重新提交，避免把未经确认的旧输入静默求解。
@@ -239,6 +255,20 @@ class JobStore:
         connection.execute("CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at)")
         connection.execute("CREATE INDEX IF NOT EXISTS events_job ON events(job_id, sequence)")
         connection.execute(
+            """CREATE TABLE IF NOT EXISTS job_artifacts (
+                job_id TEXT NOT NULL REFERENCES jobs(job_id),
+                path TEXT NOT NULL,
+                digest TEXT NOT NULL,
+                size INTEGER NOT NULL CHECK(size >= 0),
+                media_type TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(job_id, path)
+            )"""
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS job_artifacts_digest ON job_artifacts(digest)"
+        )
+        connection.execute(
             """CREATE TABLE IF NOT EXISTS audit_events (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at REAL NOT NULL,
@@ -310,6 +340,10 @@ class JobStore:
         if 8 not in known:
             connection.execute(
                 "INSERT INTO schema_migrations(version,applied_at) VALUES(8,?)", (now,)
+            )
+        if 9 not in known:
+            connection.execute(
+                "INSERT INTO schema_migrations(version,applied_at) VALUES(9,?)", (now,)
             )
         connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
 
@@ -940,11 +974,118 @@ class JobStore:
             rows = connection.execute(
                 "SELECT result_hash FROM jobs WHERE result_hash IS NOT NULL"
             ).fetchall()
-            referenced = {str(row[0]) for row in rows}
+            artifact_rows = connection.execute("SELECT digest FROM job_artifacts").fetchall()
+            referenced = {str(row[0]) for row in [*rows, *artifact_rows]}
             prune = getattr(self.artifacts, "prune_unreferenced", None)
             if not callable(prune):
                 raise TypeError("对象存储后端不支持结果对象保留清理。")
             return list(prune(referenced, older_than=older_than, apply=apply))
+
+    def _index_job_artifacts(self, connection: sqlite3.Connection, job_id: str) -> None:
+        """将作业目录中的可发布文件写入内容寻址存储并登记清单。"""
+
+        directory = self.directory(job_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        records = artifact_records(directory)
+        manifest = directory / "manifest.json"
+        if manifest.is_file():
+            records.append(
+                {
+                    "path": "manifest.json",
+                    "size": manifest.stat().st_size,
+                    "sha256": sha256(manifest),
+                }
+            )
+        records = [item for item in records if not str(item["path"]).endswith((".tmp", ".log"))]
+        connection.execute("DELETE FROM job_artifacts WHERE job_id=?", (job_id,))
+        created_at = time.time()
+        for item in records:
+            relative = _normalize_artifact_path(str(item["path"]))
+            path = directory.joinpath(*relative.split("/"))
+            if path.is_symlink() or not path.is_file():
+                continue
+            digest = self.artifacts.put_file(path)
+            expected = str(item["sha256"])
+            if digest != expected or path.stat().st_size != int(item["size"]):
+                raise ValueError(f"作业对象摘要不一致：{relative}")
+            media_type = mimetypes.guess_type(relative)[0] or "application/octet-stream"
+            connection.execute(
+                """INSERT INTO job_artifacts
+                (job_id,path,digest,size,media_type,created_at)
+                VALUES (?,?,?,?,?,?)""",
+                (job_id, relative, digest, int(item["size"]), media_type, created_at),
+            )
+
+    def list_artifacts(self, job_id: str) -> list[dict[str, Any]]:
+        """返回作业对象的安全相对路径、摘要、大小和媒体类型。"""
+
+        job = self.get(job_id)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT path,digest,size,media_type,created_at FROM job_artifacts "
+                "WHERE job_id=? ORDER BY path",
+                (job_id,),
+            ).fetchall()
+        if not rows and job.get("result_hash"):
+            # 迁移前的历史作业只有 result_hash；保留兼容读取，不伪造其他对象。
+            return [
+                {
+                    "path": "result.json",
+                    "sha256": str(job["result_hash"]),
+                    "size": int(job.get("result_bytes") or 0),
+                    "media_type": "application/json",
+                    "created_at": iso_time(float(job.get("finished_at") or job["created_at"])),
+                }
+            ]
+        return [
+            {
+                "path": str(row["path"]),
+                "sha256": str(row["digest"]),
+                "size": int(row["size"]),
+                "media_type": str(row["media_type"]),
+                "created_at": iso_time(float(row["created_at"])),
+            }
+            for row in rows
+        ]
+
+    def index_artifacts(self, job_id: str) -> None:
+        """为已结束作业刷新对象索引。"""
+
+        with self.transaction() as connection:
+            row = connection.execute("SELECT status FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if str(row["status"]) not in TERMINAL:
+                raise ValueError("只有终态作业可以登记对象。")
+            self._index_job_artifacts(connection, job_id)
+
+    def materialize_artifact(self, job_id: str, relative_path: str) -> Path:
+        """校验并恢复一个作业对象到其受控工作目录。"""
+
+        normalized = _normalize_artifact_path(relative_path)
+        self.get(job_id)
+        records = {item["path"]: item for item in self.list_artifacts(job_id)}
+        record = records.get(normalized)
+        if record is None:
+            raise KeyError(relative_path)
+        digest = str(record["sha256"])
+        directory = self.directory(job_id)
+        destination = directory.joinpath(*normalized.split("/"))
+        try:
+            destination.resolve(strict=False).relative_to(directory.resolve())
+        except ValueError as exc:
+            raise ValueError("对象路径越界。") from exc
+        current = directory
+        for part in normalized.split("/"):
+            current = current / part
+            if current.is_symlink() and current != destination:
+                raise ValueError("对象路径包含符号链接。")
+        if destination.is_file() and sha256(destination) == digest:
+            return destination
+        self.artifacts.get_file(digest, destination)
+        if not destination.is_file() or sha256(destination) != digest:
+            raise ValueError("对象恢复后完整性校验失败。")
+        return destination
 
     def finish(
         self,
@@ -1023,6 +1164,7 @@ class JobStore:
                     result_hash = None
                     result_bytes = None
                     (self.directory(job_id) / "result.json").unlink(missing_ok=True)
+            self._index_job_artifacts(connection, job_id)
             connection.execute(
                 """UPDATE jobs SET status=?,finished_at=?,error=?,error_code=?,
                 result_hash=?,result_bytes=?,cpu_user_seconds=?,cpu_system_seconds=?,
@@ -1089,6 +1231,7 @@ class JobStore:
                 "cpu_system_seconds": job.get("cpu_system_seconds"),
                 "peak_rss_bytes": job.get("peak_rss_bytes"),
             },
+            "artifacts": self.list_artifacts(str(job["job_id"])),
             "result": result,
             "events": events,
         }

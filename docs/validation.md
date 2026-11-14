@@ -72,7 +72,7 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查
 `SimulationCase.execution_readiness()` 对六类字段来源和区域置信度的执行阻断，检查
 `ModelParams` 与案例契约之间的兼容转换，以及未知未来 schema 的拒绝行为。运行层门禁
-检查 v1 至 v8 数据库迁移、迁移记录、旧作业读取、组织字段、worker 退出码和未来数据库版本拒绝；API 门禁检查 `/api/v1`
+检查 v1 至 v9 数据库迁移、迁移记录、旧作业读取、组织字段、worker 退出码和未来数据库版本拒绝；API 门禁检查 `/api/v1`
 路由与旧 `/api` 兼容入口的弃用响应头；指标门禁检查 `/api/v1/metrics` 的项目范围、admin
 全局范围、脱敏输出、数据库重启后的统计一致性以及结果大小和证据清单完整性计数。
 

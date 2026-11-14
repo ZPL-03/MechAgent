@@ -20,6 +20,8 @@ def test_studio_client_covers_stable_routes_and_request_contract() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.url.path.endswith("/artifacts/nested/report.md"):
+            return httpx.Response(200, content=b"# report\n", request=request)
         return _response(request, ok=True)
 
     with StudioClient(
@@ -40,6 +42,8 @@ def test_studio_client_covers_stable_routes_and_request_contract() -> None:
         client.cancel_job("job-1")
         client.retry_job("job-1", idempotency_key="retry-key")
         client.evidence("job-1")
+        client.list_artifacts("job-1")
+        assert client.download_artifact("job-1", "nested/report.md") == b"# report\n"
         client.metrics(project_id="beam", organization="engineering")
         client.list_identities()
         client.create_identity({"subject": "analyst"})

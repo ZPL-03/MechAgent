@@ -599,6 +599,12 @@ def test_studio_jobs_persist_and_expose_retry_evidence(tmp_path: Path) -> None:
         assert job["result"]["summary"]["errors"]
         assert job["events"]
         assert client.get(f"/api/jobs/{job_id}/evidence").json()["valid"]
+        artifacts = client.get(f"/api/jobs/{job_id}/artifacts").json()["artifacts"]
+        assert {item["path"] for item in artifacts} >= {"manifest.json", "result.json"}
+        downloaded = client.get(f"/api/jobs/{job_id}/artifacts/{'result.json'}")
+        assert downloaded.status_code == 200
+        assert downloaded.json()["success"] is False
+        assert client.get(f"/api/jobs/{job_id}/artifacts/../result.json").status_code == 404
         assert client.get("/api/jobs?limit=101").status_code == 422
         assert client.get("/api/jobs/unknown").status_code == 404
         assert client.get("/api/unknown").status_code == 404

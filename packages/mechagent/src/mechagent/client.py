@@ -261,6 +261,34 @@ class StudioClient:
     def evidence(self, job_id: str) -> dict[str, Any]:
         return self._request("GET", f"jobs/{self._key(job_id)}/evidence")
 
+    def list_artifacts(self, job_id: str) -> dict[str, Any]:
+        """返回作业对象索引。"""
+
+        return self._request("GET", f"jobs/{self._key(job_id)}/artifacts")
+
+    def download_artifact(self, job_id: str, artifact_path: str) -> bytes:
+        """下载作业对象内容；服务端会按对象摘要恢复并校验。"""
+
+        normalized = artifact_path.replace("\\", "/")
+        response = self._client.get(
+            f"jobs/{self._key(job_id)}/artifacts/{quote(normalized, safe='/')}"
+        )
+        if not response.is_success:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"detail": response.text}
+            if not isinstance(payload, dict):
+                payload = {"detail": payload}
+            code = payload.get("code")
+            raise StudioClientError(
+                response.status_code,
+                code if isinstance(code, str) and code else "http_error",
+                payload.get("detail", "Studio API 返回错误响应。"),
+                request_url=str(response.request.url),
+            )
+        return response.content
+
     def metrics(
         self,
         *,

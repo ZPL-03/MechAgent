@@ -74,6 +74,8 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 | `POST /api/v1/jobs/{job_id}/cancel` | 登记取消；终态请求保持终态 |
 | `POST /api/v1/jobs/{job_id}/retry` | 仅允许终态作业，返回新作业及 `parent_job_id` |
 | `GET /api/v1/jobs/{job_id}/evidence` | 终态作业的清单与文件完整性校验 |
+| `GET /api/v1/jobs/{job_id}/artifacts` | 终态作业对象索引，返回安全相对路径、大小、媒体类型和 SHA-256 |
+| `GET /api/v1/jobs/{job_id}/artifacts/{artifact_path:path}` | 按作业权限读取对象；服务端在返回前校验并恢复内容 |
 | `POST /api/v1/run` | 使用同一持久队列等待终态，返回报告、摘要与可视化；长任务建议使用异步作业接口 |
 
 主体的 `expires_at` 使用带时区的 ISO 8601 时间。创建主体或明确设置过期时间时，该时间必须晚于服务当前时间；认证查询会拒绝已过期主体。更新主体时省略 `expires_at` 保留原值，显式传入 `null` 表示永不过期。
@@ -85,7 +87,8 @@ Studio 后端位于 `packages/mechagent/src/mechagent/ui/server.py`。
 `mechagent.StudioClient` 是 `/api/v1` 的同步客户端。构造时传入带版本前缀的绝对 `base_url`；
 客户端拒绝带 query 或 fragment 的地址，并将 `api_key` 作为 `Authorization: Bearer` 请求头发送。
 `health()`、`diagnostics()`、`capabilities()`、`examples()`、`inspect()`、`create_job()`、`run()`、
-作业查询与操作、`metrics()` 和主体目录方法分别对应上表接口，返回值保留服务端 JSON 结构。
+作业查询与操作、`metrics()`、对象索引与主体目录方法分别对应上表接口，返回值保留服务端 JSON 结构。
+`download_artifact()` 返回经过服务端摘要校验的对象字节；对象路径只能是作业清单中的安全相对路径。
 
 `create_job()`、`run()` 和 `retry_job()` 在未传入 `idempotency_key` 时生成随机键；传入的键按原值发送，
 长度必须为 1–128 个非空白字符。客户端不自动重试，调用方需要在重试可安全执行时复用幂等键。
@@ -114,7 +117,8 @@ except StudioClientError as exc:
 兼容入口包括 `GET /api/health`、`GET /api/diagnostics`、`GET /api/capabilities`、
 `GET /api/examples`、`POST /api/inspect`、`POST /api/jobs`、`GET /api/jobs/{job_id}`、
 `GET /api/jobs`、`GET /api/audit`、`POST /api/jobs/{job_id}/cancel`、`POST /api/jobs/{job_id}/retry`、
-`GET /api/jobs/{job_id}/evidence` 和 `POST /api/run`。
+`GET /api/jobs/{job_id}/evidence`、`GET /api/jobs/{job_id}/artifacts`、
+`GET /api/jobs/{job_id}/artifacts/{artifact_path:path}` 和 `POST /api/run`。
 
 `POST /api/v1/jobs`、`POST /api/v1/run` 和重试接口接受 `Idempotency-Key` 请求头（1–128 字符）。同一键、请求、配置路径及重试来源返回同一作业，键冲突返回 409；键在数据库保留期间有效。队列满返回 429，调度未启动或已停止返回 503，作业不存在返回 404。事件最多保留最近 256 项；完整结果仅通过单作业查询取得，结果文件缺失或哈希不符返回 409。旧 `/api` 入口遵循相同语义。
 
