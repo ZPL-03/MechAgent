@@ -239,7 +239,7 @@ Studio API 路径隔离门禁覆盖健康检查、环境诊断、预检、worker
 
 `mechagent_output/multistep-comparison-current/manifest.json` 保存 Abaqus 与 CalculiX 双步 `mapped_fields` 的逐帧比较。两侧 `physical_case_digest` 一致，每个分析步的求解帧比较通过；Abaqus 还保留每步 `initial` 基准帧，而 CalculiX 不输出这类帧，基准帧记录在 `unmatched_frames`，不影响求解帧状态。清单状态只有在所有分析步和求解帧均通过时才为 `passed`。
 
-Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须为空目录。
+Studio 备份必须在调度器停止且没有活动作业时创建；清单覆盖数据库、作业目录和本地对象，恢复目标必须不存在。备份和恢复先在目标同级暂存目录完成完整性校验，再通过目录重命名发布；校验或对象上传失败不会留下可被误用的目标目录。
 
 真实 S3 验收使用 `scripts/check_s3_storage.py --bucket <bucket>`，可附加
 `--endpoint-url <url>`、`--require-lifecycle-id <id>` 和 `--output-dir <directory>`。

@@ -424,6 +424,46 @@ def test_studio_backup_round_trip_and_tamper_detection(tmp_path: Path) -> None:
     assert JobStore(restored_database).get(job["job_id"])["request"] == "backup"
 
 
+def test_studio_restore_requires_an_absent_destination(tmp_path: Path) -> None:
+    database = tmp_path / "jobs.sqlite3"
+    store = JobStore(database)
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    job = store.submit("restore target", False, config, max_queued=1)
+    store.cancel(job["job_id"])
+    backup = backup_studio(database, tmp_path / "backup")
+    destination = tmp_path / "restore"
+    destination.mkdir()
+
+    with pytest.raises(FileExistsError, match="必须不存在"):
+        restore_studio(backup, destination)
+
+
+def test_studio_restore_publishes_nothing_when_external_upload_fails(tmp_path: Path) -> None:
+    database = tmp_path / "studio" / "jobs.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text("{}", encoding="utf-8")
+    source_artifacts = ArtifactStore(tmp_path / "source-objects")
+    store = JobStore(database, artifact_store=source_artifacts)
+    job = store.submit("restore staging", False, config, max_queued=1)
+    claimed = store.claim(1)
+    assert claimed is not None
+    assert store.register(job["job_id"], claimed["token"], 1, 1.0)
+    assert store.finish(job["job_id"], claimed["token"], "succeeded", result={"ok": True})
+    backup = backup_studio(database, tmp_path / "backup", artifact_store=source_artifacts)
+
+    class FailingArtifactStore:
+        def put_file(self, _source: Path) -> str:
+            raise RuntimeError("target object store unavailable")
+
+    destination = tmp_path / "restore"
+    with pytest.raises(RuntimeError, match="target object store unavailable"):
+        restore_studio(backup, destination, artifact_store=FailingArtifactStore())  # type: ignore[arg-type]
+
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".restore.restore-*"))
+
+
 def test_studio_backup_stages_and_restores_referenced_external_objects(tmp_path: Path) -> None:
     database = tmp_path / "jobs.sqlite3"
     store = JobStore(database)

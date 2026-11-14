@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -109,10 +110,14 @@ def backup_studio(
                 "files": files,
             },
         )
-        shutil.copytree(temporary, destination)
+        # The staging directory is a sibling of the destination.  Publishing
+        # it with a single rename keeps an interrupted copy from looking like
+        # a usable backup.
+        os.replace(temporary, destination)
     finally:
         # 连接已显式关闭；清理失败必须暴露，不能把一次性数据库留在证据目录旁。
-        shutil.rmtree(temporary)
+        if temporary.exists():
+            shutil.rmtree(temporary)
     return destination
 
 
@@ -180,17 +185,36 @@ def restore_studio(
     *,
     artifact_store: ArtifactStore | S3ArtifactStore | None = None,
 ) -> Path:
-    """将已验证备份恢复到空的 Studio 根目录并可上传结果对象。"""
+    """将已验证备份恢复到新的 Studio 根目录并可上传结果对象。"""
 
     errors = verify_backup(backup)
     if errors:
         raise ValueError("备份校验失败：" + "；".join(errors))
     destination_root = destination_root.resolve()
-    if destination_root.is_symlink():
-        raise FileExistsError("恢复目标不能是符号链接。")
-    if destination_root.exists() and any(destination_root.iterdir()):
-        raise FileExistsError("恢复目标必须为空目录。")
-    destination_root.mkdir(parents=True, exist_ok=True)
+    if destination_root.exists():
+        raise FileExistsError("恢复目标必须不存在。")
+    destination_root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{destination_root.name}.restore-", dir=destination_root.parent)
+    )
+    try:
+        _restore_into(staging, backup, artifact_store)
+        # The destination is absent and the staging directory is on the same
+        # filesystem, so publication is a single directory rename.
+        os.replace(staging, destination_root)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return destination_root / "jobs.sqlite3"
+
+
+def _restore_into(
+    destination_root: Path,
+    backup: Path,
+    artifact_store: ArtifactStore | S3ArtifactStore | None,
+) -> None:
+    """Populate and validate a restore staging directory before publication."""
+
     for name in ("jobs.sqlite3", "jobs"):
         source = backup / name
         if source.is_dir():
@@ -224,7 +248,6 @@ def restore_studio(
                 uploaded = artifact_store.put_file(path)
                 if uploaded != digest:
                     raise ValueError(f"恢复对象上传摘要不匹配：{digest}")
-    return destination_root / "jobs.sqlite3"
 
 
 def _member_path(backup: Path, relative: str) -> tuple[Path, str | None]:
