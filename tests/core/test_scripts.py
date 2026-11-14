@@ -501,6 +501,74 @@ def test_backend_comparison_script_writes_verifiable_manifest(
     }
 
 
+def test_backend_comparison_includes_multistep_gate_in_case_status(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    calls = 0
+
+    class FakeAdapter:
+        def __init__(self, _config: object) -> None:
+            nonlocal calls
+            self.backend = "calculix" if calls == 0 else "abaqus"
+            calls += 1
+
+        def run_case(self, _case: object) -> dict[str, object]:
+            frames = [
+                {"fields": {"displacement": {"values": {"1": 0.0}}}},
+                {"fields": {"displacement": {"values": {"1": 1.0}}}},
+            ]
+            if self.backend == "abaqus":
+                frames = frames[:1]
+            step_fields = {
+                "step_id": "step-1",
+                "frames": [
+                    {
+                        "frame_index": index,
+                        "fields": frame["fields"],
+                    }
+                    for index, frame in enumerate(frames)
+                ],
+            }
+            return {
+                "success": True,
+                "fields": {"displacement": {"location": "node", "values": {"1": 0.0}}},
+                "requested_fields": {"displacement": {"location": "node", "values": {"1": 0.0}}},
+                "step_results": [step_fields],
+                "mapped_fields": {},
+                "mapped_step_fields": [
+                    {
+                        "step_id": "step-1",
+                        "frames": [
+                            {
+                                "frame_index": item["frame_index"],
+                                "mapped_fields": {},
+                            }
+                            for item in step_fields["frames"]
+                        ],
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(run_backend_comparison, "CalculiXAdapter", FakeAdapter)
+    monkeypatch.setattr(run_backend_comparison, "AbaqusAdapter", FakeAdapter)
+
+    row = run_backend_comparison._run_case(
+        "TC-01",
+        calculix="ccx",
+        abaqus="abaqus",
+        output_dir=tmp_path,
+        timeout=10,
+        tolerance=run_backend_comparison.ComparisonTolerance(relative=0.03, absolute=0.005),
+        mapped_tolerance=run_backend_comparison.ComparisonTolerance(relative=0.1, absolute=0.005),
+    )
+
+    comparison = row["comparison"]
+    assert isinstance(comparison, dict)
+    assert comparison["requested_step_fields"]["status"] == "failed"
+    assert comparison["mapped_step_fields"]["status"] == "failed"
+    assert row["status"] == "failed"
+
+
 def test_backend_comparison_paths_are_portable() -> None:
     root = Path("C:/evidence")
     assert (

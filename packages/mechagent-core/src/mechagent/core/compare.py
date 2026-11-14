@@ -378,10 +378,7 @@ def compare_backend_results(
             coordinate_pairs
             and left_field.get("location") == right_field.get("location")
             and left_field.get("location") in {"node", "element_centroid"}
-            and (
-                field_source not in {"fields", "mapped_fields"}
-                or _pairs_cover_fields(coordinate_pairs, left_values, right_values)
-            )
+            and _pairs_cover_fields(coordinate_pairs, left_values, right_values)
         ):
             aligned = _compare_aligned_values(
                 name,
@@ -453,6 +450,32 @@ def compare_backend_results(
                 alignment=line_alignment,
                 reason="value_difference" if field_failed else None,
                 compared_count=_field_compared_count(name, compared),
+                left_field=left_field,
+                right_field=right_field,
+            )
+            continue
+        if (
+            left_field.get("location") == right_field.get("location")
+            and left_field.get("location") in {"node", "element_centroid"}
+            and (
+                left.get("nodes" if left_field.get("location") == "node" else "element_centroids")
+                or right.get(
+                    "nodes" if right_field.get("location") == "node" else "element_centroids"
+                )
+            )
+        ):
+            # 坐标元数据存在但未覆盖全部场值时，不能退回后端本地标签直比。
+            unverified.append(name)
+            alignments[name] = "unverified"
+            set_field_result(
+                name,
+                "unverified",
+                alignment="unverified",
+                reason=(
+                    "coordinate_alignment_unavailable"
+                    if not coordinate_pairs
+                    else "coordinate_alignment_incomplete"
+                ),
                 left_field=left_field,
                 right_field=right_field,
             )
@@ -887,6 +910,17 @@ def _field_semantics_mismatch(left: dict[str, Any], right: dict[str, Any]) -> di
             "left_unit": left_unit,
             "right_unit": right_unit,
         }
+    for key in ("quantity", "component", "invariant", "selector"):
+        left_value = left.get(key)
+        right_value = right.get(key)
+        if left_value is None and right_value is None:
+            continue
+        if left_value != right_value:
+            return {
+                "reason": f"field_{key}_mismatch",
+                "left": left_value,
+                "right": right_value,
+            }
     return None
 
 
@@ -1305,9 +1339,14 @@ def _coordinate_pairs(
         candidates = [(label, _distance(left_point, right_nodes[label])) for label in available]
         if not candidates:
             break
-        right_label, distance = min(candidates, key=lambda item: (item[1], item[0]))
+        candidates.sort(key=lambda item: (item[1], item[0]))
+        right_label, distance = candidates[0]
         if distance > tolerance:
             continue
+        # 同一坐标在容差范围内对应多个候选节点时没有确定的物理对应关系；
+        # 返回空映射使字段保持未验证，避免选择任意后端本地标签。
+        if len(candidates) > 1 and candidates[1][1] <= tolerance:
+            return {}
         pairs[left_label] = right_label
         available.remove(right_label)
     return pairs

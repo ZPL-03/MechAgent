@@ -176,6 +176,10 @@ TC-03、TC-04 在本机 Abaqus/Standard 与 CalculiX 上完成真实运行。请
 审计清单已通过，集群许可证服务容量和跨主机高可用仍需部署验收。应力、反力、能量的原始场映射、更广泛单元族、网格和
 工程案例仍需独立的跨工具验收。
 
+当前 `mechagent_output/backend-comparison-current/manifest.json` 的 TC-01、TC-03、TC-04 清单同时记录 `requested_step_fields` 与 `mapped_step_fields`，三个案例的逐步逐帧状态均为 `passed`；该证据只覆盖每个案例的一步一个求解帧。
+
+坐标对应要求覆盖参与比较的全部节点或单元场值；缺失坐标、覆盖不足或多个候选点落入同一容差范围时不使用后端本地标签直比，结果保持 `unverified`。字段声明 `quantity`、`component`、`invariant` 或 `selector` 时，两侧声明必须一致。`run_backend_comparison.py` 对存在的 `step_results` 和 `mapped_step_fields` 执行逐步逐帧门禁，并将缺步、缺帧和字段状态纳入案例总状态。
+
 完成条件：至少三类结构静力模型完成同一案例的跨工具比较；多步案例的每个分析步和求解帧都必须具有可对应的结果语义，初始基准帧可作为单侧辅助证据保留，缺失增量或终止帧时清单保持失败或未验证；每个选定工具均有独立安装、失败路径、许可证不可用和结果字段测试。
 
 ### P5：高级结构与多物理能力

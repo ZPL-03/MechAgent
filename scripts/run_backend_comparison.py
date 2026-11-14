@@ -22,6 +22,7 @@ from mechagent.core.adapters.calculix import CalculiXAdapter  # noqa: E402
 from mechagent.core.compare import (  # noqa: E402
     ComparisonTolerance,
     compare_backend_results,
+    compare_backend_step_fields,
     derive_comparison_fields,
     evaluate_reaction_balance,
 )
@@ -234,6 +235,26 @@ def _run_case(
             tolerance=mapped_tolerance,
             field_source="mapped_fields",
         )
+        requested_step_comparison = None
+        if "step_results" in left or "step_results" in right:
+            requested_step_comparison = compare_backend_step_fields(
+                left,
+                right,
+                left_backend="calculix",
+                right_backend="abaqus",
+                tolerance=tolerance,
+                field_source="requested_fields",
+            )
+        mapped_step_comparison = None
+        if "mapped_step_fields" in left or "mapped_step_fields" in right:
+            mapped_step_comparison = compare_backend_step_fields(
+                left,
+                right,
+                left_backend="calculix",
+                right_backend="abaqus",
+                tolerance=mapped_tolerance,
+                field_source="mapped_fields",
+            )
         comparison = {
             "status": _combined_status(
                 requested_comparison.status,
@@ -241,11 +262,27 @@ def _run_case(
                 mapped_comparison.status,
                 left_equilibrium.status,
                 right_equilibrium.status,
+                *(
+                    [requested_step_comparison.status]
+                    if requested_step_comparison is not None
+                    else []
+                ),
+                *([mapped_step_comparison.status] if mapped_step_comparison is not None else []),
             ),
             "requested_fields": requested_comparison.model_dump(mode="json"),
             "raw_fields": raw_comparison.model_dump(mode="json"),
             "mapped_fields": mapped_comparison.model_dump(mode="json"),
             "comparison_fields": semantic_comparison.model_dump(mode="json"),
+            "requested_step_fields": (
+                requested_step_comparison.model_dump(mode="json")
+                if requested_step_comparison is not None
+                else None
+            ),
+            "mapped_step_fields": (
+                mapped_step_comparison.model_dump(mode="json")
+                if mapped_step_comparison is not None
+                else None
+            ),
             "equilibrium": {
                 "status": _combined_status(left_equilibrium.status, right_equilibrium.status),
                 "calculix": left_equilibrium.model_dump(mode="json"),

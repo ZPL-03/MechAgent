@@ -182,6 +182,46 @@ def test_backend_comparison_rejects_requested_field_location_mismatch() -> None:
     assert result.field_results["u"].reason == "field_location_mismatch"
 
 
+def test_backend_comparison_rejects_requested_field_component_mismatch() -> None:
+    result = compare_backend_results(
+        {
+            "requested_fields": {
+                "stress": {
+                    "location": "node",
+                    "unit": "MPa",
+                    "quantity": "stress",
+                    "component": "sxx",
+                    "values": {"1": 1.0},
+                }
+            }
+        },
+        {
+            "requested_fields": {
+                "stress": {
+                    "location": "node",
+                    "unit": "MPa",
+                    "quantity": "stress",
+                    "component": "syy",
+                    "values": {"1": 1.0},
+                }
+            }
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "failed"
+    assert result.differences == [
+        {
+            "field": "stress",
+            "reason": "field_component_mismatch",
+            "left": "sxx",
+            "right": "syy",
+        }
+    ]
+    assert result.field_results["stress"].reason == "field_component_mismatch"
+
+
 def test_backend_comparison_reports_missing_and_large_difference() -> None:
     left = {"requested_fields": {"u": {"values": {"1": 1.0}}, "s": {"values": {"1": 2.0}}}}
     right = {"requested_fields": {"u": {"values": {"1": 2.0}}}}
@@ -266,6 +306,43 @@ def test_backend_comparison_aligns_node_fields_by_coordinate() -> None:
     assert result.status == "passed"
     assert result.alignment == {"u": "node-coordinate"}
     assert all("<->" in field for field in result.compared_fields)
+
+
+def test_backend_comparison_rejects_incomplete_coordinate_coverage() -> None:
+    result = compare_backend_results(
+        {
+            "nodes": {"1": [0.0, 0.0, 0.0], "2": [1.0, 0.0, 0.0]},
+            "requested_fields": {"u": {"location": "node", "values": {"1": 1.0, "2": 2.0}}},
+        },
+        {
+            "nodes": {"10": [0.0, 0.0, 0.0]},
+            "requested_fields": {"u": {"location": "node", "values": {"10": 1.0}}},
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "unverified"
+    assert result.unverified_fields == ["u"]
+    assert result.field_results["u"].reason == "coordinate_alignment_incomplete"
+
+
+def test_backend_comparison_rejects_ambiguous_coordinate_alignment() -> None:
+    result = compare_backend_results(
+        {
+            "nodes": {"1": [0.0, 0.0, 0.0]},
+            "requested_fields": {"u": {"location": "node", "values": {"1": 1.0}}},
+        },
+        {
+            "nodes": {"10": [0.0, 0.0, 0.0], "20": [0.0, 0.0, 0.0]},
+            "requested_fields": {"u": {"location": "node", "values": {"10": 1.0, "20": 1.0}}},
+        },
+        left_backend="calculix",
+        right_backend="abaqus",
+    )
+
+    assert result.status == "unverified"
+    assert result.field_results["u"].reason == "coordinate_alignment_unavailable"
 
 
 def test_backend_comparison_reconstructs_beam_centerline_from_raw_vectors() -> None:

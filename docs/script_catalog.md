@@ -21,7 +21,7 @@
 | 求解器 | `run_abaqus_multistep.py` | 验证同一 `SimulationCase` 的 Abaqus 多步输入和 ODB 字段 |
 | 求解器 | `run_calculix_multistep.py` | 验证 CalculiX 多步输入和 FRD 位移、应力、应变、体积、反力、能量字段 |
 | 跨工具比较 | `compare_backends.py` | 读取已有 JSON 结果并比较指定字段，不执行求解 |
-| 跨工具比较 | `run_backend_comparison.py` | 在同一 `SimulationCase` 上运行选定适配器，保存结果、统一字段、语义差异、反力平衡和比较清单 |
+| 跨工具比较 | `run_backend_comparison.py` | 在同一 `SimulationCase` 上运行选定适配器，保存结果、统一字段、语义差异、反力平衡和比较清单；两侧提供逐步结果时执行 `step_results` 与 `mapped_step_fields` 的逐帧门禁 |
 | Studio | `studio_http_smoke.py` | 验证 Studio HTTP API、队列和公开摘要 |
 | 运维 | `backup_studio.py` | 备份 Studio SQLite 与对象清单 |
 | 运维 | `restore_studio.py` | 校验备份并恢复到明确目标目录 |
