@@ -69,6 +69,26 @@ python scripts/audit_abaqus_license.py --abaqus D:/Abaqus2023/Commands/abaqus.ba
 
 ## 质量门禁
 
+### Studio 浏览器质量门禁
+
+浏览器门禁使用生产构建和本地预览服务运行 Chromium。脚本通过固定的 `/api/v1` 公开响应验证界面契约，不把夹具数据作为求解证据。检查范围包括：
+
+- 初始中文语言、跳转到工作台的首个键盘焦点和英文切换；
+- 浅色、深色、跟随系统主题的循环和 `data-theme-preference` 持久化状态；
+- 预检可执行态、通过、未验证和失败结果，以及报告和失败诊断的显示；
+- 服务器作业列表读取、1440×1000 与 390×844 视口的横向溢出和单列布局。
+
+本地运行需要已安装 Chromium 或可执行的系统浏览器：
+
+```powershell
+npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+npx --prefix apps/mechagent-studio playwright install chromium
+npm --prefix apps/mechagent-studio run build
+npm --prefix apps/mechagent-studio run test:browser
+```
+
+脚本在 `dist/studio-browser-evidence/` 写入 `manifest.json`、通过状态截图、失败状态截图和窄屏截图。清单的 `api_mode` 为 `deterministic-contract-fixture`；真实服务的 TCP、认证、权限、队列和结果路径由独立 `studio_http` CI 作业及真实求解门禁验证。CI 的 `studio_browser` 作业上传该目录作为短期检查证据，`studio_http` 作业上传独立 HTTP 清单。
+
 输入契约门禁同时检查 `SimulationCase` 的版本、单位、坐标、区域和来源字段，检查
 `SimulationCase.execution_readiness()` 对六类字段来源和区域置信度的执行阻断，检查
 `ModelParams` 与案例契约之间的兼容转换，以及未知未来 schema 的拒绝行为。运行层门禁

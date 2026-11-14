@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pytest import MonkeyPatch
@@ -513,21 +514,22 @@ def test_backend_comparison_includes_multistep_gate_in_case_status(
             calls += 1
 
         def run_case(self, _case: object) -> dict[str, object]:
-            frames = [
+            frames: list[dict[str, Any]] = [
                 {"fields": {"displacement": {"values": {"1": 0.0}}}},
                 {"fields": {"displacement": {"values": {"1": 1.0}}}},
             ]
             if self.backend == "abaqus":
                 frames = frames[:1]
-            step_fields = {
+            step_frames: list[dict[str, object]] = [
+                {
+                    "frame_index": index,
+                    "fields": frame["fields"],
+                }
+                for index, frame in enumerate(frames)
+            ]
+            step_fields: dict[str, object] = {
                 "step_id": "step-1",
-                "frames": [
-                    {
-                        "frame_index": index,
-                        "fields": frame["fields"],
-                    }
-                    for index, frame in enumerate(frames)
-                ],
+                "frames": step_frames,
             }
             return {
                 "success": True,
@@ -543,7 +545,7 @@ def test_backend_comparison_includes_multistep_gate_in_case_status(
                                 "frame_index": item["frame_index"],
                                 "mapped_fields": {},
                             }
-                            for item in step_fields["frames"]
+                            for item in step_frames
                         ],
                     }
                 ],

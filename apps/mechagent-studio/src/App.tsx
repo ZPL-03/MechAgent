@@ -90,6 +90,7 @@ export function App() {
     loadRunHistory(),
   );
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [isHistoryView, setIsHistoryView] = useState(false);
   const [recentlyClearedHistory, setRecentlyClearedHistory] = useState<
     RunHistoryItem[] | null
   >(null);
@@ -246,6 +247,7 @@ export function App() {
     }
     setResult(null);
     setActiveHistoryId(null);
+    setIsHistoryView(false);
     setActiveJob(null);
     setMonitorTick(0);
     setSelectedTaskIndex(0);
@@ -257,6 +259,7 @@ export function App() {
   function recordRun(requestText: string, runResult: StudioRunResponse) {
     const item = createHistoryItem(requestText, runResult);
     setActiveHistoryId(item.id);
+    setIsHistoryView(false);
     setHistory((current) =>
       saveRunHistory([item, ...current].slice(0, MAX_HISTORY_ITEMS)),
     );
@@ -276,6 +279,7 @@ export function App() {
     setResult(item.result);
     setActiveJob(null);
     setActiveHistoryId(item.id);
+    setIsHistoryView(true);
     setSelectedTaskIndex(0);
     setSelectedVisualIndex(0);
     setSelectedRenderModeIndex(defaultRenderModeIndex(item.result));
@@ -293,6 +297,7 @@ export function App() {
     setRecentlyClearedHistory(history);
     setHistory(saveRunHistory([]));
     setActiveHistoryId(null);
+    setIsHistoryView(false);
   }
 
   function restoreHistory() {
@@ -387,6 +392,7 @@ export function App() {
             serverJobs={<ServerJobs running={running} onOpen={(job) => {
               setResult(null);
               setActiveHistoryId(null);
+              setIsHistoryView(false);
               setSelectedTaskIndex(0);
               setSelectedVisualIndex(0);
               void jobRuntime.open(job);
@@ -446,10 +452,10 @@ export function App() {
               <EmptyState
                 icon={<Boxes size={30} />}
                 title={
-                  activeHistoryItem ? t("历史结果已回看") : t("等待结果场")
+                  isHistoryView ? t("历史结果已回看") : t("等待结果场")
                 }
                 text={
-                  activeHistoryItem
+                  isHistoryView
                     ? t(
                         "当前历史仅保留摘要和报告。重跑此请求可恢复几何、网格和结果视图。",
                       )
@@ -457,9 +463,9 @@ export function App() {
                         "运行后展示由求解摘要、网格文件和位移场生成的工程视图。",
                       )
                 }
-                actionLabel={activeHistoryItem ? t("重跑此请求") : undefined}
+                actionLabel={isHistoryView ? t("重跑此请求") : undefined}
                 onAction={
-                  activeHistoryItem
+                  isHistoryView && activeHistoryItem
                     ? () => rerunHistoryItem(activeHistoryItem)
                     : undefined
                 }

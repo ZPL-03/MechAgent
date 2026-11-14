@@ -16,6 +16,7 @@ Studio 位于 `apps/mechagent-studio`，使用 React 19、TypeScript、Vite、Th
 | `ThreeViewport.tsx` | 懒加载三维渲染、场量、相机、交互与资源释放 |
 | `types.ts` | 与 Studio 公开响应对应的 TypeScript 类型 |
 | `styles.css` | 分区与组件样式、响应式规则 |
+| `e2e/studio_browser_quality.mjs` | 在生产预览服务上验证公开前端契约、状态呈现、键盘入口和多视口布局；使用固定 API 响应，不执行求解 |
 
 界面组件只消费公开摘要，不读取 Agent 内部状态或原始 prompt。报告文本与用户请求属于业务数据，不按 UI 语言替换。纯展示函数不发起网络请求；HTTP 集中在 `api.ts`。
 
@@ -37,4 +38,4 @@ npm --prefix apps/mechagent-studio ci --no-audit --no-fund
 npm --prefix apps/mechagent-studio run build
 ```
 
-构建先运行 `tsc -b`，再生成静态文件。浏览器验收覆盖中英文、明暗与系统主题、真实作业、视口切换、检查器、下载、历史与窄屏。测试不得用模拟结果代替求解验证。设计规则见[设计系统](design_system.md)，API 与用户操作见[Studio 使用指南](studio_ui.md)。
+构建先运行 `tsc -b`，再生成静态文件。`npm run test:browser` 在生产预览服务上运行 Chromium，使用固定的公开 API 响应验证中英文、明暗与系统主题、首焦点、通过/未验证/失败状态、报告、作业列表和窄屏布局；该门禁验证浏览器与前端契约，不替代真实求解或 HTTP 权限门禁。真实服务入口由 `scripts/studio_http_smoke.py` 验证。设计规则见[设计系统](design_system.md)，API 与用户操作见[Studio 使用指南](studio_ui.md)。

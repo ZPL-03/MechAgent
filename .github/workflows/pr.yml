@@ -9,6 +9,53 @@ permissions:
   contents: read
 
 jobs:
+  studio_http:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.10"
+      - name: Install local packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/mechagent-core
+          python -m pip install -e "packages/mechagent[dev]"
+      - name: Run independent Studio HTTP quality gate
+        run: |
+          python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
+          python -m mechagent.cli verify-evidence --require-provenance dist/studio-http-evidence/manifest.json
+      - name: Upload HTTP evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: mechagent-studio-http-evidence
+          path: dist/studio-http-evidence/**
+          if-no-files-found: error
+          retention-days: 14
+  studio_browser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mechagent-studio/package-lock.json
+      - name: Install Studio dependencies
+        run: npm --prefix apps/mechagent-studio ci --no-audit --no-fund
+      - name: Install Chromium
+        run: npx --prefix apps/mechagent-studio playwright install chromium
+      - name: Build Studio frontend
+        run: npm --prefix apps/mechagent-studio run build
+      - name: Run browser quality gate
+        run: npm --prefix apps/mechagent-studio run test:browser
+      - name: Upload browser evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: mechagent-studio-browser-evidence
+          path: dist/studio-browser-evidence/**
+          if-no-files-found: error
+          retention-days: 14
   portable:
     runs-on: windows-latest
     steps:
@@ -45,8 +92,6 @@ jobs:
           python scripts/index_knowledge.py
           python -m mechagent.cli config validate
           python scripts/clean_artifacts.py
-          python scripts/studio_http_smoke.py --output-dir dist/studio-http-evidence
-          python -m mechagent.cli verify-evidence --require-provenance dist/studio-http-evidence/manifest.json
           python -m pip check
           python scripts/audit_python_dependencies.py --runtime-only --timeout 30 --output dist/mechagent-python-runtime-audit.json
           python -m build packages/mechagent-core
@@ -61,7 +106,6 @@ jobs:
             dist/mechagent-sbom.spdx.json
             dist/mechagent-release-manifest.json
             dist/mechagent-python-runtime-audit.json
-            dist/studio-http-evidence/**
             packages/mechagent-core/dist/*.whl
             packages/mechagent-core/dist/*.tar.gz
             packages/mechagent/dist/*.whl

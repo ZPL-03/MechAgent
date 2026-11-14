@@ -38,6 +38,8 @@ from mechagent.core.validation import (  # noqa: E402
 )
 from mechagent.evidence import runtime_provenance, stable_artifact_records  # noqa: E402
 
+__all__ = ["ComparisonTolerance"]
+
 _CASE_BUILDERS: dict[str, Callable[[], ModelParams]] = {
     "TC-01": tc01_model_params,
     "TC-02": tc02_model_params,
